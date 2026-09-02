@@ -45,24 +45,24 @@ class NetworkGenerator:
         speed_ms = speed_limit * (1000 / 3600)
         
         # W entry to J0
-        ET.SubElement(edges_root, "edge", id="E_W_to_J0", _from="W_entry", to="J0", numLanes=str(lanes), speed=str(speed_ms))
-        ET.SubElement(edges_root, "edge", id="E_J0_to_W", _from="J0", to="W_entry", numLanes=str(lanes), speed=str(speed_ms))
+        ET.SubElement(edges_root, "edge", {"id": "E_W_to_J0", "from": "W_entry", "to": "J0", "numLanes": str(lanes), "speed": str(speed_ms)})
+        ET.SubElement(edges_root, "edge", {"id": "E_J0_to_W", "from": "J0", "to": "W_entry", "numLanes": str(lanes), "speed": str(speed_ms)})
         
         for i in range(num_junctions - 1):
-            ET.SubElement(edges_root, "edge", id=f"E_J{i}_to_J{i+1}", _from=f"J{i}", to=f"J{i+1}", numLanes=str(lanes), speed=str(speed_ms))
-            ET.SubElement(edges_root, "edge", id=f"E_J{i+1}_to_J{i}", _from=f"J{i+1}", to=f"J{i}", numLanes=str(lanes), speed=str(speed_ms))
+            ET.SubElement(edges_root, "edge", {"id": f"E_J{i}_to_J{i+1}", "from": f"J{i}", "to": f"J{i+1}", "numLanes": str(lanes), "speed": str(speed_ms)})
+            ET.SubElement(edges_root, "edge", {"id": f"E_J{i+1}_to_J{i}", "from": f"J{i+1}", "to": f"J{i}", "numLanes": str(lanes), "speed": str(speed_ms)})
             
         # Last J to E exit
         last_j = num_junctions - 1
-        ET.SubElement(edges_root, "edge", id=f"E_J{last_j}_to_E", _from=f"J{last_j}", to="E_exit", numLanes=str(lanes), speed=str(speed_ms))
-        ET.SubElement(edges_root, "edge", id=f"E_E_to_J{last_j}", _from="E_exit", to=f"J{last_j}", numLanes=str(lanes), speed=str(speed_ms))
+        ET.SubElement(edges_root, "edge", {"id": f"E_J{last_j}_to_E", "from": f"J{last_j}", "to": "E_exit", "numLanes": str(lanes), "speed": str(speed_ms)})
+        ET.SubElement(edges_root, "edge", {"id": f"E_E_to_J{last_j}", "from": "E_exit", "to": f"J{last_j}", "numLanes": str(lanes), "speed": str(speed_ms)})
         
         # Cross streets
         for i in range(num_junctions):
-            ET.SubElement(edges_root, "edge", id=f"E_N{i}_to_J{i}", _from=f"N{i}", to=f"J{i}", numLanes="1", speed=str(speed_ms))
-            ET.SubElement(edges_root, "edge", id=f"E_J{i}_to_N{i}", _from=f"J{i}", to=f"N{i}", numLanes="1", speed=str(speed_ms))
-            ET.SubElement(edges_root, "edge", id=f"E_S{i}_to_J{i}", _from=f"S{i}", to=f"J{i}", numLanes="1", speed=str(speed_ms))
-            ET.SubElement(edges_root, "edge", id=f"E_J{i}_to_S{i}", _from=f"J{i}", to=f"S{i}", numLanes="1", speed=str(speed_ms))
+            ET.SubElement(edges_root, "edge", {"id": f"E_N{i}_to_J{i}", "from": f"N{i}", "to": f"J{i}", "numLanes": "1", "speed": str(speed_ms)})
+            ET.SubElement(edges_root, "edge", {"id": f"E_J{i}_to_N{i}", "from": f"J{i}", "to": f"N{i}", "numLanes": "1", "speed": str(speed_ms)})
+            ET.SubElement(edges_root, "edge", {"id": f"E_S{i}_to_J{i}", "from": f"S{i}", "to": f"J{i}", "numLanes": "1", "speed": str(speed_ms)})
+            ET.SubElement(edges_root, "edge", {"id": f"E_J{i}_to_S{i}", "from": f"J{i}", "to": f"S{i}", "numLanes": "1", "speed": str(speed_ms)})
             
         self._write_xml(edges_root, edg_file)
         
@@ -110,12 +110,13 @@ class NetworkGenerator:
         
         vtypes = list(vehicle_mix.keys())
         vweights = list(vehicle_mix.values())
+        departs = sorted([random.uniform(0, 3600) for _ in range(num_vehicles)])
         
         for i in range(num_vehicles):
             vtype = random.choices(vtypes, weights=vweights)[0]
             route = random.choice(routes)
-            depart = str(sorted([random.uniform(0, 3600) for _ in range(num_vehicles)])[i])
-            ET.SubElement(routes_root, "vehicle", id=f"v_{i}", type=vtype, route=route, depart=depart)
+            depart = f"{departs[i]:.2f}"
+            ET.SubElement(routes_root, "vehicle", {"id": f"v_{i}", "type": vtype, "route": route, "depart": depart})
             
         self._write_xml(routes_root, rou_file)
         
