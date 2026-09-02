@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test-backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: surakshanet
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: surakshanet_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov flake8 httpx aiosqlite
+      - name: Lint
+        run: |
+          cd backend
+          flake8 app/ --max-line-length=120 --ignore=E501,W503
+      - name: Test
+        env:
+          DATABASE_URL: postgresql+asyncpg://surakshanet:test_password@localhost:5432/surakshanet_test
+          REDIS_URL: redis://localhost:6379/0
+          JWT_SECRET_KEY: test-secret-key
+        run: |
+          cd backend
+          pytest tests/ -v --cov=app --cov-report=term-missing
+
+  lint-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: |
+          cd frontend/dashboard
+          npm install
+      - name: Type check
+        run: |
+          cd frontend/dashboard
+          npx tsc --noEmit
+      - name: Build
+        run: |
+          cd frontend/dashboard
+          npm run build

@@ -1,0 +1,156 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgis/postgis:15-3.3
+    container_name: surakshanet-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-surakshanet}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-surakshanet_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-surakshanet}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - surakshanet-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-surakshanet} -d ${POSTGRES_DB:-surakshanet}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  timescaledb:
+    image: timescale/timescaledb-ha:pg15
+    container_name: surakshanet-timescaledb
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-surakshanet}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-surakshanet_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-surakshanet}
+    volumes:
+      - timescale_data:/home/postgres/pgdata/data
+    networks:
+      - surakshanet-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-surakshanet} -d ${POSTGRES_DB:-surakshanet}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: surakshanet-redis
+    volumes:
+      - redis_data:/data
+    networks:
+      - surakshanet-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: surakshanet-mosquitto
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    networks:
+      - surakshanet-network
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: surakshanet-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - MQTT_BROKER_HOST=${MQTT_BROKER_HOST}
+      - MQTT_BROKER_PORT=${MQTT_BROKER_PORT}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+    networks:
+      - surakshanet-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
+  frontend:
+    build:
+      context: ../frontend/dashboard
+      dockerfile: Dockerfile
+    container_name: surakshanet-frontend
+    networks:
+      - surakshanet-network
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: surakshanet-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - surakshanet-network
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: surakshanet-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - surakshanet-network
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: surakshanet-grafana
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - surakshanet-network
+    restart: unless-stopped
+
+networks:
+  surakshanet-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  timescale_data:
+  redis_data:
+  mosquitto_data:
+  mosquitto_log:
+  prometheus_data:
+  grafana_data:
