@@ -12,10 +12,10 @@ jobs:
       - name: Build and push Docker images
         run: |
           echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
-          docker build -t surakshanet/backend:latest ./backend
-          docker build -t surakshanet/dashboard:latest ./frontend/dashboard
-          docker push surakshanet/backend:latest
-          docker push surakshanet/dashboard:latest
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/surakshanet-backend:latest ./backend
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/surakshanet-dashboard:latest ./frontend/dashboard
+          docker push ${{ secrets.DOCKER_USERNAME }}/surakshanet-backend:latest
+          docker push ${{ secrets.DOCKER_USERNAME }}/surakshanet-dashboard:latest
       - name: Deploy to server
         uses: appleboy/ssh-action@v1
         with:
@@ -24,6 +24,8 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             cd /opt/surakshanet
+            git pull origin main
+            export DOCKER_USERNAME="${{ secrets.DOCKER_USERNAME }}"
             docker compose -f infra/docker-compose.prod.yml pull
             docker compose -f infra/docker-compose.prod.yml up -d
             docker system prune -f

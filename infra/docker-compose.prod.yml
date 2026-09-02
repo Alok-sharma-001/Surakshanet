@@ -63,6 +63,7 @@ services:
     restart: unless-stopped
 
   backend:
+    image: ${DOCKER_USERNAME:-surakshanet}/surakshanet-backend:latest
     build:
       context: ../backend
       dockerfile: Dockerfile
@@ -97,6 +98,7 @@ services:
           memory: 1G
 
   frontend:
+    image: ${DOCKER_USERNAME:-surakshanet}/surakshanet-dashboard:latest
     build:
       context: ../frontend/dashboard
       dockerfile: Dockerfile

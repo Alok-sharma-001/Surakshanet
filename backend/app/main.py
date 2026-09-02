@@ -37,6 +37,12 @@ try:
 except ImportError:
     pass
 
+try:
+    from app.api.websocket_routes import ws_router
+    app.include_router(ws_router)
+except ImportError:
+    pass
+
 @app.get("/", tags=["Health"])
 @app.get("/health", tags=["Health"])
 async def health_check() -> dict:
