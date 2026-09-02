@@ -28,6 +28,14 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 async def init_db() -> None:
-    """Initialize the database by creating all tables."""
+    """Initialize the database by creating all tables and seeding default admin."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    
+    # Seed default admin user
+    try:
+        from app.services.auth_service import seed_default_admin
+        async with async_session_maker() as session:
+            await seed_default_admin(session)
+    except Exception as e:
+        print(f"Admin seeding note: {e}")

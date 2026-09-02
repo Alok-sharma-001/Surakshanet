@@ -28,23 +28,23 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = datetime.now(timezone.utc) + timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
     return encoded_jwt
 
 def create_refresh_token(data: dict) -> str:
     settings = get_settings()
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + timedelta(days=7)
+    expire = datetime.now(timezone.utc) + timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS)
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
     return encoded_jwt
 
 def decode_token(token: str) -> dict:
     settings = get_settings()
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
         return payload
     except JWTError:
         raise HTTPException(
@@ -89,6 +89,7 @@ def require_role(*roles: str):
     return role_checker
 
 async def register_user(db: AsyncSession, user_data: UserCreate) -> User:
+    from app.models.user import UserRole
     result = await db.execute(select(User).where(User.email == user_data.email))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -96,9 +97,9 @@ async def register_user(db: AsyncSession, user_data: UserCreate) -> User:
     hashed_password = hash_password(user_data.password)
     db_user = User(
         email=user_data.email,
-        hashed_password=hashed_password,
+        password_hash=hashed_password,
         name=user_data.name,
-        role="OPERATOR"
+        role=UserRole.OPERATOR
     )
     db.add(db_user)
     await db.commit()
@@ -110,6 +111,30 @@ async def authenticate_user(db: AsyncSession, email: str, password: str) -> Opti
     user = result.scalar_one_or_none()
     if not user:
         return None
-    if not verify_password(password, user.hashed_password):
+    if not verify_password(password, user.password_hash):
         return None
     return user
+
+async def seed_default_admin(db: AsyncSession) -> None:
+    """Seed default administrator account if it does not exist."""
+    from app.models.user import UserRole
+    admin_email = "aloks92440@gmail.com"
+    result = await db.execute(select(User).where(User.email == admin_email))
+    admin_user = result.scalar_one_or_none()
+    if not admin_user:
+        hashed_password = hash_password("Alok@2005")
+        admin_user = User(
+            email=admin_email,
+            password_hash=hashed_password,
+            name="Alok Sharma",
+            role=UserRole.ADMIN,
+            is_active=True
+        )
+        db.add(admin_user)
+        await db.commit()
+    elif not verify_password("Alok@2005", admin_user.password_hash):
+        admin_user.password_hash = hash_password("Alok@2005")
+        admin_user.role = UserRole.ADMIN
+        admin_user.is_active = True
+        db.add(admin_user)
+        await db.commit()
