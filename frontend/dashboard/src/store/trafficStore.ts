@@ -19,7 +19,7 @@ interface TrafficState {
   fetchJunctions: () => Promise<void>;
 }
 
-export const useTrafficStore = create<TrafficState>((set, get) => ({
+export const useTrafficStore = create<TrafficState>((set) => ({
   junctions: [],
   junctionStates: {},
   alerts: [],

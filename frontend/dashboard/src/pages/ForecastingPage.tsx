@@ -1,6 +1,6 @@
 import React from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { Card } from '../../components/common/Card';
+import { Card } from '../components/common/Card';
 
 const mockForecastData = Array.from({ length: 24 }, (_, i) => {
   const isFuture = i > 12;

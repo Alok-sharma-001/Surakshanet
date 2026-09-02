@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Siren, ShieldAlert, CheckCircle, Activity, HeartPulse } from 'lucide-react';
-import { Card } from '../../components/common/Card';
-import { StatusBadge } from '../../components/common/StatusBadge';
+import { Card } from '../components/common/Card';
+import { StatusBadge } from '../components/common/StatusBadge';
 
 export const EmergencyPage: React.FC = () => {
   const [active, setActive] = useState(false);

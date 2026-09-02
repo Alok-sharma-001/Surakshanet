@@ -1,20 +1,18 @@
 import React, { useEffect, useState } from 'react';
-import { Navigate, Routes, Route, Outlet } from 'react-router-dom';
+import { Navigate, Routes, Route } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { useAuthStore } from './store/authStore';
 import LoginPage from './pages/LoginPage';
 import DashboardLayout from './components/Layout/DashboardLayout';
-
-// Mock components for pages
-const TrafficMapPage = () => <div className="p-4">Traffic Map</div>;
-const JunctionDetailPage = () => <div className="p-4">Junction Detail</div>;
-const SignalControlPage = () => <div className="p-4">Signal Control</div>;
-const ForecastingPage = () => <div className="p-4">Forecasting</div>;
-const RoutingPage = () => <div className="p-4">Routing</div>;
-const AlertsPage = () => <div className="p-4">Alerts</div>;
-const EmergencyPage = () => <div className="p-4">Emergency</div>;
-const AnalyticsPage = () => <div className="p-4">Analytics</div>;
-const UserManagementPage = () => <div className="p-4">User Management</div>;
+import TrafficMapPage from './pages/TrafficMapPage';
+import JunctionDetailPage from './pages/JunctionDetailPage';
+import SignalControlPage from './pages/SignalControlPage';
+import ForecastingPage from './pages/ForecastingPage';
+import RoutingPage from './pages/RoutingPage';
+import AlertsPage from './pages/AlertsPage';
+import EmergencyPage from './pages/EmergencyPage';
+import AnalyticsPage from './pages/AnalyticsPage';
+import UserManagementPage from './pages/UserManagementPage';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { isAuthenticated, loadFromStorage } = useAuthStore();

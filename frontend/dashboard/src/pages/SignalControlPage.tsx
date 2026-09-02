@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
-import { Play, Square, Settings, GitCompare } from 'lucide-react';
+import { Play, Square, Settings } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { Card } from '../../components/common/Card';
-import { StatusBadge } from '../../components/common/StatusBadge';
+import { Card } from '../components/common/Card';
 
 const mockTrainingData = Array.from({ length: 50 }, (_, i) => ({
   episode: i * 10,

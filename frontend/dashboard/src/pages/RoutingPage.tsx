@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { MapPin, Navigation, Clock, Activity } from 'lucide-react';
-import { Card } from '../../components/common/Card';
-import { StatusBadge } from '../../components/common/StatusBadge';
+import { MapPin, Navigation, Clock } from 'lucide-react';
+import { Card } from '../components/common/Card';
+import { StatusBadge } from '../components/common/StatusBadge';
 
 export const RoutingPage: React.FC = () => {
   const [calculating, setCalculating] = useState(false);

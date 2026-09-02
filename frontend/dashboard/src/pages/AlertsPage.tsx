@@ -1,7 +1,7 @@
 import React from 'react';
 import { AlertTriangle, Info, Bell, CheckCircle2 } from 'lucide-react';
-import { Card } from '../../components/common/Card';
-import { StatusBadge } from '../../components/common/StatusBadge';
+import { Card } from '../components/common/Card';
+import { StatusBadge } from '../components/common/StatusBadge';
 
 const mockAlerts = [
   { id: 1, type: 'Congestion', severity: 'CRITICAL', jct: 'City Center Junction', msg: 'Queue length exceeded 250m. Possible gridlock.', time: '2 mins ago', ack: false },

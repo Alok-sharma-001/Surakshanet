@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Play, Square, SkipForward, Activity, Car, Clock } from 'lucide-react';
-import { Card } from '../../components/common/Card';
-import { StatusBadge } from '../../components/common/StatusBadge';
+import { Card } from '../components/common/Card';
+import { StatusBadge } from '../components/common/StatusBadge';
 import { useNavigate } from 'react-router-dom';
 
 // Mocks since stores aren't defined in this exercise

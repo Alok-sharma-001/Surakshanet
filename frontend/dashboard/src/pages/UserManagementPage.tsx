@@ -1,6 +1,6 @@
 import React from 'react';
-import { Card } from '../../components/common/Card';
-import { StatusBadge } from '../../components/common/StatusBadge';
+import { Card } from '../components/common/Card';
+import { StatusBadge } from '../components/common/StatusBadge';
 import { MoreVertical, Shield } from 'lucide-react';
 
 const mockUsers = [
