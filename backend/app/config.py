@@ -1,5 +1,6 @@
 from functools import lru_cache
 from typing import List, Optional
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -8,26 +9,20 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     API_PREFIX: str = "/api/v1"
     
-    POSTGRES_USER: str = "postgres"
-    POSTGRES_PASSWORD: str = "postgres"
+    POSTGRES_USER: str = "surakshanet"
+    POSTGRES_PASSWORD: str = "surakshanet_dev"
     POSTGRES_DB: str = "surakshanet"
-    POSTGRES_HOST: str = "localhost"
+    POSTGRES_HOST: str = "postgres"
     POSTGRES_PORT: str = "5432"
     
-    _DATABASE_URL: Optional[str] = None
+    DATABASE_URL: Optional[str] = None
     
-    @property
-    def DATABASE_URL(self) -> str:
-        if self._DATABASE_URL:
-            return self._DATABASE_URL
-        return f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+    REDIS_URL: str = "redis://redis:6379/0"
     
-    REDIS_URL: str = "redis://localhost:6379/0"
-    
-    MQTT_BROKER_HOST: str = "localhost"
+    MQTT_BROKER_HOST: str = "mosquitto"
     MQTT_BROKER_PORT: int = 1883
     
-    JWT_SECRET_KEY: str = "secret"
+    JWT_SECRET_KEY: str = "your-super-secret-key-change-in-production"
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
@@ -37,7 +32,16 @@ class Settings(BaseSettings):
     SUMO_HOME: str = "/usr/share/sumo"
     SUMO_BINARY: str = "sumo"
 
-    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True, extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
+
+    @model_validator(mode="after")
+    def assemble_database_url(self) -> 'Settings':
+        if not self.DATABASE_URL:
+            self.DATABASE_URL = (
+                f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+                f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+            )
+        return self
 
 @lru_cache()
 def get_settings() -> Settings:

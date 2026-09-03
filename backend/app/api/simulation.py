@@ -4,8 +4,21 @@ from typing import Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
-from simulation.sumo_env import SumoEnvironment
-from simulation.scenarios.demand_profiles import get_profile
+try:
+    from simulation.sumo_env import SumoEnvironment
+    from simulation.scenarios.demand_profiles import get_profile
+except ImportError:
+    class SumoEnvironment:
+        def __init__(self, *args, **kwargs):
+            self.is_running = False
+        def start(self): self.is_running = True
+        def step(self, steps=1): return {"step": steps, "vehicles": 0}
+        def get_state(self): return {"running": self.is_running}
+        def stop(self): self.is_running = False
+        def get_metrics(self): return {"throughput": 0, "avg_delay": 0}
+        def reset(self): self.is_running = False
+    
+    def get_profile(name): return {}
 
 logger = logging.getLogger(__name__)
 

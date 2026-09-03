@@ -1,138 +1,235 @@
-import React, { useState } from 'react';
-import { Play, Square, Settings } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { Card } from '../components/common/Card';
+import { useState, useEffect } from 'react';
+import { Grid, ChevronDown, Play, Plus, Minus, AlertTriangle, Shield, Radio } from 'lucide-react';
+import { Area, AreaChart, ResponsiveContainer, Tooltip } from 'recharts';
+import { toast } from 'react-hot-toast';
+import { clsx } from 'clsx';
 
-const mockTrainingData = Array.from({ length: 50 }, (_, i) => ({
-  episode: i * 10,
-  reward: -5000 + Math.log(i + 1) * 2000 + Math.random() * 500,
-  epsilon: Math.max(0.01, 1 - i * 0.03),
-  marlDelay: 120 - Math.log(i + 1) * 15,
-  fixedDelay: 110,
+const mockRewardData = Array.from({ length: 20 }).map((_, i) => ({
+  time: i,
+  reward: 5 + Math.random() * 10 + Math.sin(i / 2) * 5,
 }));
 
-export const SignalControlPage: React.FC = () => {
-  const [isTraining, setIsTraining] = useState(false);
-  const [controlMode, setControlMode] = useState('MARL');
+export default function SignalControlPage() {
+  const [activeControl, setActiveControl] = useState<'marl' | 'webster' | 'manual'>('marl');
+  const [telemetry, setTelemetry] = useState<string[]>([
+    "[T-15.2s] State Evaluated Queue: 38veh\n→ ACTION: Maintain Phase 1",
+    "[T-12.0s] Reward Calculated    Prev Action: Ph1+2s\nΣ REWARD: +14.2 (Delay Reduced)",
+    "[T-4.5s] Phase Transition Current: Ph1\n⏱ ACTION: Trigger Amber (3.0s)\nConstraint: MinGreen Met",
+    "[T-0.1s] State Evaluated Queue: 42veh\n→ ACTION: Extend Phase 2 (N-S Straight) by 5.0s\nQ-Value: 0.892  Conf: 92%"
+  ]);
+
+  useEffect(() => {
+    if (activeControl !== 'marl') return;
+    
+    const interval = setInterval(() => {
+      const q = Math.floor(Math.random() * 50) + 10;
+      const act = Math.random() > 0.5 ? 'Maintain Phase 2' : 'Trigger Amber (3.0s)';
+      const newEntry = `[T+${(Math.random()*2).toFixed(1)}s] State Evaluated Queue: ${q}veh\n→ ACTION: ${act}\nQ-Value: ${(Math.random()*0.9+0.1).toFixed(3)} Conf: ${Math.floor(Math.random()*15+85)}%`;
+      
+      setTelemetry(prev => {
+        const next = [newEntry, ...prev];
+        if (next.length > 20) next.pop();
+        return next;
+      });
+    }, 3000);
+    
+    return () => clearInterval(interval);
+  }, [activeControl]);
+
+  const handleOverride = (action: string) => {
+    toast.success(`Action Executed: ${action}`);
+  };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Signal Control & MARL</h1>
-          <p className="text-gray-500 mt-1">Manage intersection control logic and agent training</p>
+    <div className="space-y-6 animate-in fade-in duration-500">
+      {/* Top Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center space-x-3">
+          <div className="p-2 bg-slate-100 rounded-lg">
+            <Grid className="w-5 h-5 text-slate-600" />
+          </div>
+          <div>
+            <div className="text-xs font-medium text-slate-500 uppercase tracking-wider">Target Node</div>
+            <button className="flex items-center space-x-2 text-lg font-syne font-bold text-slate-900 hover:text-slate-700 transition-colors">
+              <span>Junction Alpha-9 (Downtown)</span>
+              <ChevronDown className="w-4 h-4 text-slate-400" />
+            </button>
+          </div>
+        </div>
+
+        <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
+          <button
+            onClick={() => setActiveControl('marl')}
+            className={clsx(
+              "px-4 py-2 rounded-md text-sm font-semibold transition-all flex items-center space-x-2",
+              activeControl === 'marl' ? "bg-teal-50 text-teal-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
+            )}
+          >
+            {activeControl === 'marl' && <div className="w-2 h-2 rounded-full bg-teal-500 animate-pulse" />}
+            <span>MARL Dynamic AI</span>
+          </button>
+          <button
+            onClick={() => setActiveControl('webster')}
+            className={clsx(
+              "px-4 py-2 rounded-md text-sm font-semibold transition-all",
+              activeControl === 'webster' ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+            )}
+          >
+            Webster (Static)
+          </button>
+          <button
+            onClick={() => setActiveControl('manual')}
+            className={clsx(
+              "px-4 py-2 rounded-md text-sm font-semibold transition-all",
+              activeControl === 'manual' ? "bg-red-50 text-red-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
+            )}
+          >
+            Manual Control
+          </button>
         </div>
       </div>
 
+      {/* Main 3-column grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Control Panel */}
-        <Card title="Training Control Panel" className="col-span-1">
-          <div className="space-y-5">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Scenario</label>
-              <select className="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border">
-                <option>Morning Peak (08:00 - 11:00)</option>
-                <option>Evening Peak (17:00 - 20:00)</option>
-                <option>Off-Peak Normal</option>
-              </select>
+        
+        {/* Left Column — Agent Telemetry Stream */}
+        <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm flex flex-col h-[600px]">
+          <div className="p-4 border-b border-[#E2E8F0] flex justify-between items-center bg-slate-50/50 rounded-t-xl">
+            <h3 className="text-sm font-semibold text-slate-800 flex items-center">
+              <Radio className="w-4 h-4 mr-2 text-teal-500" />
+              Agent Telemetry Stream
+            </h3>
+            <span className="text-xs font-mono bg-slate-100 text-slate-500 px-2 py-1 rounded">Update: 10hz</span>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 font-mono text-xs text-slate-600 bg-slate-900">
+            {telemetry.map((log, idx) => (
+              <div key={idx} className={clsx("pb-4 border-b border-slate-800", idx === 0 && "text-teal-400")}>
+                {log.split('\n').map((line, i) => (
+                  <div key={i} className={clsx(line.startsWith('→') || line.startsWith('⏱') ? "pl-4 text-emerald-400" : "")}>
+                    {line}
+                  </div>
+                ))}
+              </div>
+            ))}
+            <div className="text-slate-500 text-center italic mt-4">-- End of recent buffer --</div>
+          </div>
+        </div>
+
+        {/* Center Column — Charts */}
+        <div className="space-y-6 flex flex-col justify-between h-[600px]">
+          <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-5 flex-1 flex flex-col">
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-800">Instantaneous Reward</h3>
+                <div className="text-3xl font-syne font-bold text-teal-600 mt-1">+14.2</div>
+              </div>
+              <div className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-50 text-emerald-500">
+                ↗ 12% vs avg
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Episodes</label>
-              <select className="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border">
-                <option>100 Episodes</option>
-                <option>500 Episodes</option>
-                <option>1000 Episodes</option>
-              </select>
+            <div className="flex-1 min-h-[200px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={mockRewardData}>
+                  <defs>
+                    <linearGradient id="colorReward" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#0d9488" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#0d9488" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                  <Area type="monotone" dataKey="reward" stroke="#0d9488" strokeWidth={2} fillOpacity={1} fill="url(#colorReward)" />
+                </AreaChart>
+              </ResponsiveContainer>
             </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-5">
+              <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">Cumulative Episode Reward</h3>
+              <div className="text-2xl font-syne font-bold text-slate-900">1,248</div>
+              <div className="text-sm font-mono text-slate-400 mt-1">Episode: 4,092 steps</div>
+            </div>
+            <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-5">
+              <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">Delay vs Baseline (Webster)</h3>
+              <div className="text-2xl font-syne font-bold text-teal-600">-24.5%</div>
+              <div className="text-sm font-mono text-slate-400 mt-1">Avg vehicle delay: 18.2s</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Column — Safety & Controls */}
+        <div className="space-y-6 flex flex-col h-[600px]">
+          <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-5">
+            <h3 className="text-sm font-semibold text-slate-800 flex items-center mb-4">
+              <Shield className="w-4 h-4 mr-2 text-slate-500" />
+              Safety Guardrails
+            </h3>
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-slate-600">Min Green Time (12s)</span>
+                <span className="flex items-center text-xs font-bold text-emerald-500">Valid <div className="w-2 h-2 rounded-full bg-emerald-500 ml-2"></div></span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-slate-600">Amber Interval (3s)</span>
+                <span className="flex items-center text-xs font-bold text-emerald-500">Valid <div className="w-2 h-2 rounded-full bg-emerald-500 ml-2"></div></span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-slate-600">All-Red Clearance (2s)</span>
+                <span className="flex items-center text-xs font-bold text-emerald-500">Valid <div className="w-2 h-2 rounded-full bg-emerald-500 ml-2"></div></span>
+              </div>
+              <div className="pt-4 border-t border-slate-100 flex justify-between items-center">
+                <span className="text-sm font-medium text-slate-600">Conflict Monitor</span>
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-teal-50 text-teal-600">ONLINE</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-red-200 shadow-sm p-5 flex-1 flex flex-col">
+            <h3 className="text-sm font-semibold text-red-600 flex items-center mb-4 uppercase tracking-wider">
+              <AlertTriangle className="w-4 h-4 mr-2" />
+              Manual Override Console
+            </h3>
             
-            <div className="pt-4 border-t border-gray-100 flex gap-3">
+            <div className="space-y-4 flex-1 flex flex-col">
               <button 
-                onClick={() => setIsTraining(!isTraining)}
-                className={`flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-lg font-medium text-white transition-colors ${
-                  isTraining ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'
-                }`}
+                onClick={() => handleOverride("Force Phase Skip")}
+                className="w-full flex items-center justify-center space-x-2 py-3 px-4 border border-slate-300 rounded-lg text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
               >
-                {isTraining ? <Square size={18} /> : <Play size={18} />}
-                {isTraining ? 'Stop Training' : 'Start Training'}
+                <Play className="w-4 h-4" />
+                <span>Force Phase Skip</span>
+              </button>
+
+              <div className="flex space-x-4">
+                <button 
+                  onClick={() => handleOverride("+5s Green")}
+                  className="flex-1 flex items-center justify-center space-x-2 py-3 px-4 bg-slate-100 rounded-lg text-sm font-semibold text-slate-700 hover:bg-slate-200 transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>5s Green</span>
+                </button>
+                <button 
+                  onClick={() => handleOverride("-5s Green")}
+                  className="flex-1 flex items-center justify-center space-x-2 py-3 px-4 bg-slate-100 rounded-lg text-sm font-semibold text-slate-700 hover:bg-slate-200 transition-colors"
+                >
+                  <Minus className="w-4 h-4" />
+                  <span>5s Green</span>
+                </button>
+              </div>
+
+              <div className="flex-1"></div>
+
+              <button 
+                onClick={() => handleOverride("ALL RED FLASH INITIATED")}
+                className="w-full flex items-center justify-center space-x-2 py-4 px-4 bg-red-500 hover:bg-red-600 text-white rounded-lg font-bold transition-colors shadow-sm"
+              >
+                <AlertTriangle className="w-5 h-5" />
+                <span>ALL RED (FLASH)</span>
               </button>
             </div>
-
-            {isTraining && (
-              <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 mt-4">
-                <div className="flex justify-between text-sm mb-2">
-                  <span className="font-medium text-blue-900">Training in progress...</span>
-                  <span className="text-blue-700">Ep 42/100</span>
-                </div>
-                <div className="w-full bg-blue-200 rounded-full h-2">
-                  <div className="bg-blue-600 h-2 rounded-full w-[42%]" />
-                </div>
-                <div className="flex justify-between text-xs text-blue-700 mt-2">
-                  <span>Reward: -1250.4</span>
-                  <span>Epsilon: 0.15</span>
-                </div>
-              </div>
-            )}
           </div>
-        </Card>
+        </div>
 
-        {/* Global Mode Toggle */}
-        <Card title="Global Control Mode" className="col-span-1 lg:col-span-2">
-          <div className="flex flex-col h-full justify-center space-y-6 px-4">
-            <div className="grid grid-cols-3 gap-4">
-              {['MARL', 'WEBSTER', 'MANUAL'].map((mode) => (
-                <button
-                  key={mode}
-                  onClick={() => setControlMode(mode)}
-                  className={`py-4 px-6 rounded-xl border-2 font-bold text-center transition-all ${
-                    controlMode === mode 
-                      ? 'border-blue-500 bg-blue-50 text-blue-700' 
-                      : 'border-gray-200 hover:border-gray-300 text-gray-500'
-                  }`}
-                >
-                  <Settings className={`mx-auto mb-2 ${controlMode === mode ? 'text-blue-500' : 'text-gray-400'}`} />
-                  {mode}
-                </button>
-              ))}
-            </div>
-            <p className="text-sm text-gray-500 text-center">
-              {controlMode === 'MARL' && 'Multi-Agent Reinforcement Learning is dynamically controlling all connected junctions.'}
-              {controlMode === 'WEBSTER' && 'Fallback to Webster method: fixed timing based on historical flow data.'}
-              {controlMode === 'MANUAL' && 'Manual override active. Operators must set phases directly.'}
-            </p>
-          </div>
-        </Card>
-      </div>
-
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card title="Cumulative Reward over Episodes" className="h-[350px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={mockTrainingData}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="episode" />
-              <YAxis />
-              <Tooltip />
-              <Line type="monotone" dataKey="reward" stroke="#8b5cf6" strokeWidth={2} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        </Card>
-
-        <Card title="Avg Delay: MARL vs Fixed" className="h-[350px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={mockTrainingData}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="episode" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Line type="monotone" name="MARL Delay (s)" dataKey="marlDelay" stroke="#10b981" strokeWidth={2} dot={false} />
-              <Line type="monotone" name="Fixed Timer (s)" dataKey="fixedDelay" stroke="#f43f5e" strokeWidth={2} strokeDasharray="5 5" dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        </Card>
       </div>
     </div>
   );
-};
-
-export default SignalControlPage;
+}

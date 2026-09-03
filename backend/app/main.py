@@ -31,20 +31,15 @@ app.add_middleware(
 app.middleware("http")(metrics_middleware)
 app.add_route("/metrics", MetricsEndpoint)
 
-try:
-    from app.api.router import api_router
-    app.include_router(api_router, prefix=settings.API_PREFIX)
-except ImportError:
-    pass
+from app.api.router import api_router
+from app.api.websocket_routes import ws_router
 
-try:
-    from app.api.websocket_routes import ws_router
-    app.include_router(ws_router)
-except ImportError:
-    pass
+app.include_router(api_router, prefix=settings.API_PREFIX)
+app.include_router(ws_router)
 
 @app.get("/", tags=["Health"])
 @app.get("/health", tags=["Health"])
+@app.get("/api/v1/health", tags=["Health"])
 async def health_check() -> dict:
     """Root health check endpoint."""
     return {

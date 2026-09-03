@@ -23,9 +23,45 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)) -> Any:
     return await register_user(db, user_data)
 
-@router.post("/login", response_model=TokenResponse)
-async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)) -> Any:
-    user = await authenticate_user(db, form_data.username, form_data.password)
+from fastapi import Request
+
+@router.post("/login")
+async def login(request: Request, db: AsyncSession = Depends(get_db)) -> Any:
+    email = None
+    password = None
+    content_type = request.headers.get("content-type", "")
+    
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+            email = body.get("email") or body.get("username")
+            password = body.get("password")
+        except Exception:
+            pass
+    elif "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
+        form = await request.form()
+        email = form.get("username") or form.get("email")
+        password = form.get("password")
+    else:
+        try:
+            body = await request.json()
+            email = body.get("email") or body.get("username")
+            password = body.get("password")
+        except Exception:
+            try:
+                form = await request.form()
+                email = form.get("username") or form.get("email")
+                password = form.get("password")
+            except Exception:
+                pass
+
+    if not email or not password:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Email/username and password are required",
+        )
+
+    user = await authenticate_user(db, str(email), str(password))
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -39,10 +75,21 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSessi
     access_token = create_access_token(data={"sub": str(user.id), "role": role_str})
     refresh_token = create_refresh_token(data={"sub": str(user.id)})
     
+    user_data = {
+        "id": str(user.id),
+        "email": user.email,
+        "name": user.name,
+        "role": role_str,
+        "is_active": user.is_active,
+        "created_at": user.created_at.isoformat() if user.created_at else None
+    }
+    
     return {
         "access_token": access_token,
+        "token": access_token,
         "refresh_token": refresh_token,
-        "token_type": "bearer"
+        "token_type": "bearer",
+        "user": user_data
     }
 
 @router.post("/refresh", response_model=TokenResponse)

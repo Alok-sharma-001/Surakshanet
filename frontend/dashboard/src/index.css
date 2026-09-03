@@ -1,34 +1,62 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
+  :root {
+    color-scheme: light;
+  }
+
   body {
-    @apply bg-gray-50 text-slate-900;
+    background-color: #FAF8F6;
+    color: #1E1B1B;
+    font-family: 'Space Grotesk', 'Inter', system-ui, -apple-system, sans-serif;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Custom clean scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #FAF8F6;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #99F6E4;
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #0D9488;
   }
 }
 
-@layer utilities {
-  .scrollbar-hide {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
+@layer components {
+  /* Navigation sidebar items */
+  .nav-item {
+    @apply flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-slate-600 hover:text-teal-600 hover:bg-teal-50/70 transition-all;
   }
-  .scrollbar-hide::-webkit-scrollbar {
-    display: none;
+
+  .nav-item-active {
+    @apply bg-teal-50 text-teal-600 font-bold shadow-sm;
   }
-}
 
-/* Custom global styles */
-.sidebar {
-  @apply bg-slate-900 text-slate-300;
-}
+  /* App card surface */
+  .app-card {
+    @apply bg-white rounded-2xl border border-surface-border shadow-sm p-6;
+  }
 
-.status-dot {
-  @apply w-2 h-2 rounded-full relative;
-}
+  /* Teal brand button */
+  .btn-orange {
+    @apply bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl px-4 py-2.5 shadow-sm transition-all;
+  }
 
-.status-dot::after {
-  content: '';
-  @apply absolute inset-0 rounded-full animate-ping opacity-75;
-  background-color: inherit;
+  /* Studio card */
+  .studio-card {
+    @apply bg-white rounded-3xl border border-studio-pink/40 shadow-studio-card;
+  }
 }

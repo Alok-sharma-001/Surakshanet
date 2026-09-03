@@ -7,26 +7,48 @@ export default {
   theme: {
     extend: {
       colors: {
-        primary: {
-          DEFAULT: '#1d4ed8',
-          50: '#eff6ff',
-          100: '#dbeafe',
-          500: '#3b82f6',
-          700: '#1d4ed8',
-          900: '#1e3a8a',
+        brand: {
+          50: '#FFF7ED',
+          100: '#FFEDD5',
+          200: '#FED7AA',
+          300: '#FDBA74',
+          400: '#FB923C',
+          500: '#F97316',
+          600: '#EA580C',
+          700: '#C2410C',
+          800: '#9A3412',
+          DEFAULT: '#EA580C',
         },
-        secondary: {
-          DEFAULT: '#475569',
+        surface: {
+          primary: '#FFFFFF',
+          secondary: '#FAF8F6',
+          card: '#FFFFFF',
+          border: '#EFE9E5',
+          muted: '#8A7A78',
         },
-        accent: {
-          DEFAULT: '#10b981',
+        studio: {
+          bg: '#F5DDD8',
+          bgLight: '#FDF0ED',
+          bgDark: '#ECCBC4',
+          coral: '#E5584D',
+          coralLight: '#F3796F',
+          coralDark: '#B9362C',
+          pink: '#F7C6BF',
+          card: '#FFFFFF',
+          black: '#0D0E11',
+          text: '#221E1E',
+          muted: '#8A7A78',
         },
-        danger: {
-          DEFAULT: '#ef4444',
-        },
-        warning: {
-          DEFAULT: '#f59e0b',
-        }
+      },
+      fontFamily: {
+        syne: ['Syne', 'sans-serif'],
+        grotesk: ['"Space Grotesk"', 'sans-serif'],
+        sans: ['"Space Grotesk"', 'Inter', 'sans-serif'],
+        mono: ['"JetBrains Mono"', 'monospace'],
+      },
+      boxShadow: {
+        'orb': '0 25px 50px -12px rgba(0, 0, 0, 0.4), inset 0 2px 4px rgba(255, 255, 255, 0.6)',
+        'studio-card': '0 20px 40px -15px rgba(234, 88, 12, 0.08), 0 0 1px rgba(0, 0, 0, 0.05)',
       }
     },
   },
