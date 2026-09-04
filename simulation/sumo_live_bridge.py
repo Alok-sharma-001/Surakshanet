@@ -105,9 +105,9 @@ class SumoLiveBridge:
         self.is_running = True
         logger.info("✅ Connected to SUMO TraCI! Live telemetry bridge running...")
 
-        # Start two-way emergency green corridor listener
-        emergency_thread = threading.Thread(target=self.listen_emergency_events, daemon=True)
-        emergency_thread.start()
+        # Start two-way dashboard command listener (Emergency Green Waves & Signal Overrides)
+        cmd_thread = threading.Thread(target=self.listen_dashboard_commands, daemon=True)
+        cmd_thread.start()
 
         try:
             while self.is_running:
@@ -239,13 +239,38 @@ class SumoLiveBridge:
         except Exception as e:
             logger.warning(f"Could not apply emergency green wave in SUMO: {e}")
 
-    def listen_emergency_events(self):
-        """Background thread listening for emergency activations from Surakshanet API/Dashboard."""
+    def handle_signal_override(self, action: str, value: int = 5):
+        """Applies manual signal override in SUMO."""
+        try:
+            tl_ids = traci.trafficlight.getIDList()
+            for tl in tl_ids:
+                if action == "FLASH_ALL_RED":
+                    curr = traci.trafficlight.getRedYellowGreenState(tl)
+                    traci.trafficlight.setRedYellowGreenState(tl, "r" * len(curr))
+                    logger.info(f"⚠️ SUMO Junction {tl} Flashing ALL RED")
+                elif action in ["PHASE_SKIP", "FORCE_PHASE_SKIP"]:
+                    p = traci.trafficlight.getPhase(tl)
+                    traci.trafficlight.setPhase(tl, (p + 1) % 4)
+                    logger.info(f"⏭ SUMO Junction {tl} Skipped to Phase {(p + 1) % 4}")
+                elif action in ["EXTEND_GREEN", "HOLD_GREEN"]:
+                    dur = traci.trafficlight.getPhaseDuration(tl)
+                    traci.trafficlight.setPhaseDuration(tl, dur + value)
+                    logger.info(f"⏱ SUMO Junction {tl} Green extended by +{value}s")
+                elif action in ["SHORTEN_GREEN", "REDUCE_GREEN"]:
+                    dur = traci.trafficlight.getPhaseDuration(tl)
+                    traci.trafficlight.setPhaseDuration(tl, max(5, dur - value))
+                    logger.info(f"⏱ SUMO Junction {tl} Green reduced by -{value}s")
+        except Exception as e:
+            logger.warning(f"Failed to apply signal override in SUMO: {e}")
+
+    def listen_dashboard_commands(self):
+        """Background thread listening for manual overrides and emergency events from the dashboard."""
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.connect((self.redis_host, self.redis_port))
-            # Redis SUBSCRIBE emergency_events command
-            s.sendall(b"*2\r\n$9\r\nSUBSCRIBE\r\n$16\r\nemergency_events\r\n")
+            # SUBSCRIBE emergency_events signal_events
+            sub_cmd = "*3\r\n$9\r\nSUBSCRIBE\r\n$16\r\nemergency_events\r\n$13\r\nsignal_events\r\n"
+            s.sendall(sub_cmd.encode("utf-8"))
             f = s.makefile("r", encoding="utf-8", errors="ignore")
             while self.is_running:
                 line = f.readline()
@@ -257,12 +282,18 @@ class SumoLiveBridge:
                     f.readline()
                     try:
                         payload = json.loads(msg)
-                        if payload.get("type") == "EMERGENCY_ACTIVATED":
+                        p_type = payload.get("type", "")
+                        if p_type == "EMERGENCY_ACTIVATED":
                             logger.info("🚨 EMERGENCY GREEN CORRIDOR RECEIVED! Pre-empting SUMO traffic lights...")
                             self.set_emergency_green_wave(True)
-                        elif payload.get("type") == "EMERGENCY_DEACTIVATED":
+                        elif p_type == "EMERGENCY_DEACTIVATED":
                             logger.info("✅ EMERGENCY CLEARED. Restoring SUMO traffic lights to standard cycle.")
                             self.set_emergency_green_wave(False)
+                        elif p_type == "SIGNAL_OVERRIDE":
+                            action = payload.get("action", "")
+                            val = payload.get("value", 5)
+                            logger.info(f"🎛 DASHBOARD SIGNAL OVERRIDE: {action} (val={val})")
+                            self.handle_signal_override(action, val)
                     except Exception:
                         pass
         except Exception:
