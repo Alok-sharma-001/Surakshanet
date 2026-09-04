@@ -110,8 +110,10 @@ services:
     container_name: surakshanet-nginx
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
     networks:
       - surakshanet-network
     depends_on:
