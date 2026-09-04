@@ -68,7 +68,7 @@ class SumoLiveBridge:
         self,
         config_path: str,
         gui: bool = True,
-        step_delay_ms: int = 80,
+        step_delay_ms: int = 100,
         redis_host: str = "127.0.0.1",
         redis_port: int = 6379,
         mqtt_host: str = "127.0.0.1",
@@ -88,6 +88,34 @@ class SumoLiveBridge:
         self.emergency_mode = False
         self.active_ambulance_id = None
         self.command_queue = queue.Queue()
+        self._redis_sock = None
+
+    def publish_redis(self, channel: str, message: str) -> bool:
+        """Publishes a message to Redis using a persistent, low-latency TCP connection."""
+        if self._redis_sock is None:
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(2.0)
+                s.connect((self.redis_host, self.redis_port))
+                self._redis_sock = s
+            except Exception:
+                self._redis_sock = None
+                return False
+
+        try:
+            msg_bytes = message.encode("utf-8")
+            cmd = f"*3\r\n$7\r\nPUBLISH\r\n${len(channel)}\r\n{channel}\r\n${len(msg_bytes)}\r\n".encode("utf-8") + msg_bytes + b"\r\n"
+            self._redis_sock.sendall(cmd)
+            self._redis_sock.recv(64)
+            return True
+        except Exception:
+            try:
+                if self._redis_sock:
+                    self._redis_sock.close()
+            except Exception:
+                pass
+            self._redis_sock = None
+            return False
 
     def start(self):
         """Launches SUMO and begins the live TraCI streaming loop."""
@@ -229,7 +257,7 @@ class SumoLiveBridge:
 
                 # 4. Stream to Redis channel `traffic_updates`
                 payload_str = json.dumps(telemetry)
-                publish_redis_raw("traffic_updates", payload_str, host=self.redis_host, port=self.redis_port)
+                self.publish_redis("traffic_updates", payload_str)
 
                 # Periodic signal optimization event to signal_events
                 if self.step_count % 15 == 0 and junctions_stats:
@@ -241,7 +269,7 @@ class SumoLiveBridge:
                         "speed": top_j["speed"],
                         "timestamp": time.time()
                     }
-                    publish_redis_raw("signal_events", json.dumps(event_payload), host=self.redis_host, port=self.redis_port)
+                    self.publish_redis("signal_events", json.dumps(event_payload))
 
                 if self.step_count % 5 == 0:
                     logger.info(

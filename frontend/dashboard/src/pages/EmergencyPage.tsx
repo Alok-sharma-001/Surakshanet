@@ -102,8 +102,10 @@ export default function EmergencyPage() {
   const handleToggleCorridor = async () => {
     if (!isActivated) {
       // Activate
-      const corridorIds = junctions.map(j => j.id);
+      const corridorIds = ["J0", "J1", "J2", "J3"];
       let eventId = "emergency-active";
+      let success = false;
+
       try {
         const res = await api.emergency.activate({
           priority: "CRITICAL",
@@ -112,9 +114,7 @@ export default function EmergencyPage() {
           corridor: corridorIds
         });
         eventId = res.data.event_id || res.data.id || eventId;
-        setActiveEventId(eventId);
-        setIsActivated(true);
-        toast.success("Green Wave Corridor Activated! SUMO signals pre-empted to Green.");
+        success = true;
       } catch (err: any) {
         console.warn("Axios activate failed, attempting direct fetch:", err);
         try {
@@ -123,31 +123,37 @@ export default function EmergencyPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ priority: "CRITICAL", vehicle_type: selectedType, corridor: corridorIds })
           });
-          const data = await resp.json();
-          eventId = data.event_id || eventId;
+          if (resp.ok) {
+            const data = await resp.json();
+            eventId = data.event_id || eventId;
+            success = true;
+          }
         } catch (fErr) {
           console.error("Direct fetch failed:", fErr);
         }
+      }
+
+      if (success) {
         setActiveEventId(eventId);
         setIsActivated(true);
         toast.success("Green Wave Corridor Activated! SUMO signals pre-empted to Green.");
+      } else {
+        toast.error("Could not connect to backend server. Make sure containers are running.");
       }
     } else {
       // Deactivate
+      const eid = activeEventId || "latest";
       try {
-        const eid = activeEventId || "latest";
         await api.emergency.deactivate(eid);
-        toast.success("Green Wave Corridor Deactivated. Signals restored to normal cycle.");
       } catch (err) {
         try {
-          await fetch(`/api/v1/emergency/deactivate/${activeEventId || 'latest'}`, { method: 'POST' });
+          await fetch(`/api/v1/emergency/deactivate/${eid}`, { method: 'POST' });
         } catch {}
-        toast.success("Signals restored to normal cycle.");
-      } finally {
-        setIsActivated(false);
-        setActiveEventId(null);
-        setJunctions(DEFAULT_ROUTE_JUNCTIONS);
       }
+      setIsActivated(false);
+      setActiveEventId(null);
+      setJunctions(DEFAULT_ROUTE_JUNCTIONS);
+      toast.success("Green Wave Corridor Deactivated. Signals restored to normal cycle.");
     }
   };
 

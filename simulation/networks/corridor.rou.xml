@@ -19,22 +19,22 @@
     <route id="r_S3N3" edges="E_S3_to_J3 E_J3_to_N3"/>
 
     <!-- High-frequency continuous traffic flows for lively realistic simulation -->
-    <flow id="f_we_cars" type="car" route="r_WE" begin="0" end="3600" probability="0.35"/>
-    <flow id="f_we_autos" type="auto_rickshaw" route="r_WE" begin="0" end="3600" probability="0.25"/>
-    <flow id="f_we_bikes" type="motorcycle" route="r_WE" begin="0" end="3600" probability="0.30"/>
-    <flow id="f_we_buses" type="bus" route="r_WE" begin="0" end="3600" probability="0.08"/>
+    <flow id="f_we_cars" type="car" route="r_WE" begin="0" end="86400" probability="0.35"/>
+    <flow id="f_we_autos" type="auto_rickshaw" route="r_WE" begin="0" end="86400" probability="0.25"/>
+    <flow id="f_we_bikes" type="motorcycle" route="r_WE" begin="0" end="86400" probability="0.30"/>
+    <flow id="f_we_buses" type="bus" route="r_WE" begin="0" end="86400" probability="0.08"/>
 
-    <flow id="f_ew_cars" type="car" route="r_EW" begin="0" end="3600" probability="0.35"/>
-    <flow id="f_ew_autos" type="auto_rickshaw" route="r_EW" begin="0" end="3600" probability="0.25"/>
-    <flow id="f_ew_bikes" type="motorcycle" route="r_EW" begin="0" end="3600" probability="0.30"/>
-    <flow id="f_ew_trucks" type="truck" route="r_EW" begin="0" end="3600" probability="0.08"/>
+    <flow id="f_ew_cars" type="car" route="r_EW" begin="0" end="86400" probability="0.35"/>
+    <flow id="f_ew_autos" type="auto_rickshaw" route="r_EW" begin="0" end="86400" probability="0.25"/>
+    <flow id="f_ew_bikes" type="motorcycle" route="r_EW" begin="0" end="86400" probability="0.30"/>
+    <flow id="f_ew_trucks" type="truck" route="r_EW" begin="0" end="86400" probability="0.08"/>
 
-    <flow id="f_n0s0" type="car" route="r_N0S0" begin="0" end="3600" probability="0.20"/>
-    <flow id="f_s0n0" type="auto_rickshaw" route="r_S0N0" begin="0" end="3600" probability="0.20"/>
-    <flow id="f_n1s1" type="car" route="r_N1S1" begin="0" end="3600" probability="0.20"/>
-    <flow id="f_s1n1" type="bus" route="r_S1N1" begin="0" end="3600" probability="0.10"/>
-    <flow id="f_n2s2" type="motorcycle" route="r_N2S2" begin="0" end="3600" probability="0.25"/>
-    <flow id="f_s2n2" type="car" route="r_S2N2" begin="0" end="3600" probability="0.20"/>
-    <flow id="f_n3s3" type="auto_rickshaw" route="r_N3S3" begin="0" end="3600" probability="0.20"/>
-    <flow id="f_s3n3" type="car" route="r_S3N3" begin="0" end="3600" probability="0.20"/>
+    <flow id="f_n0s0" type="car" route="r_N0S0" begin="0" end="86400" probability="0.20"/>
+    <flow id="f_s0n0" type="auto_rickshaw" route="r_S0N0" begin="0" end="86400" probability="0.20"/>
+    <flow id="f_n1s1" type="car" route="r_N1S1" begin="0" end="86400" probability="0.20"/>
+    <flow id="f_s1n1" type="bus" route="r_S1N1" begin="0" end="86400" probability="0.10"/>
+    <flow id="f_n2s2" type="motorcycle" route="r_N2S2" begin="0" end="86400" probability="0.25"/>
+    <flow id="f_s2n2" type="car" route="r_S2N2" begin="0" end="86400" probability="0.20"/>
+    <flow id="f_n3s3" type="auto_rickshaw" route="r_N3S3" begin="0" end="86400" probability="0.20"/>
+    <flow id="f_s3n3" type="car" route="r_S3N3" begin="0" end="86400" probability="0.20"/>
 </routes>
