@@ -63,8 +63,8 @@ services:
   backend:
     image: ${DOCKER_USERNAME:-surakshanet}/surakshanet-backend:latest
     build:
-      context: ../backend
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: backend/Dockerfile
     container_name: surakshanet-backend
     ports:
       - "8000:8000"
@@ -92,8 +92,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1.0'
-          memory: 1G
+          cpus: '1.5'
+          memory: 2G
 
   frontend:
     image: ${DOCKER_USERNAME:-surakshanet}/surakshanet-dashboard:latest

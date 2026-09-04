@@ -1,23 +1,27 @@
+import uuid
 import pytest
 from httpx import AsyncClient
 
 @pytest.mark.asyncio
 async def test_register_success(client: AsyncClient):
+    uid = uuid.uuid4().hex[:8]
+    email = f"newuser_{uid}@example.com"
     response = await client.post("/api/v1/auth/register", json={
-        "email": "newuser@example.com",
+        "email": email,
         "password": "strongpassword123",
         "name": "New User"
     })
     assert response.status_code == 201
     data = response.json()
-    assert data["email"] == "newuser@example.com"
+    assert data["email"] == email
     assert data["name"] == "New User"
     assert "id" in data
 
 @pytest.mark.asyncio
 async def test_register_duplicate_email(client: AsyncClient):
+    uid = uuid.uuid4().hex[:8]
     payload = {
-        "email": "duplicate@example.com",
+        "email": f"duplicate_{uid}@example.com",
         "password": "strongpassword123",
         "name": "Dupe User"
     }
@@ -27,8 +31,9 @@ async def test_register_duplicate_email(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_login_success(client: AsyncClient):
+    uid = uuid.uuid4().hex[:8]
     payload = {
-        "email": "logintest@example.com",
+        "email": f"logintest_{uid}@example.com",
         "password": "testpassword"
     }
     await client.post("/api/v1/auth/register", json={
@@ -41,13 +46,14 @@ async def test_login_success(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_login_wrong_password(client: AsyncClient):
+    uid = uuid.uuid4().hex[:8]
     await client.post("/api/v1/auth/register", json={
-        "email": "wrongpass@example.com",
+        "email": f"wrongpass_{uid}@example.com",
         "password": "correctpassword",
         "name": "Wrong Pass User"
     })
     response = await client.post("/api/v1/auth/login", json={
-        "email": "wrongpass@example.com",
+        "email": f"wrongpass_{uid}@example.com",
         "password": "wrongpassword"
     })
     assert response.status_code == 401

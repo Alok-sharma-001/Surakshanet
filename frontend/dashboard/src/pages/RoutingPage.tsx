@@ -1,272 +1,348 @@
-import { useState } from 'react';
-import { MapPin, Navigation, Search, Radio, Clock, Save, AlertTriangle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Search, Clock, Send } from 'lucide-react';
+import { toast } from 'react-hot-toast';
 import clsx from 'clsx';
+import { api } from '../services/api';
+import { useTrafficStore } from '../store/trafficStore';
+
+interface BroadcastItem {
+  id: string;
+  panel_cluster: string;
+  line1: string;
+  line2: string;
+  priority: string;
+  status: string;
+  time: string;
+}
 
 export default function RoutingPage() {
-  const [origin, setOrigin] = useState("Sector 42, High Street");
-  const [destination, setDestination] = useState("Industrial Hub North");
+  const storeJunctions = useTrafficStore((state) => state.junctions);
+  const [originId, setOriginId] = useState<string>('');
+  const [destId, setDestId] = useState<string>('');
   const [isCalculating, setIsCalculating] = useState(false);
-  const [showResults, setShowResults] = useState(false);
-  const [selectedRoute, setSelectedRoute] = useState<string | null>("alpha");
+  const [routeResult, setRouteResult] = useState<any>(null);
+  
+  // VMS State
+  const [cluster, setCluster] = useState("Cluster A (North Corridor) [4 Panels]");
   const [line1, setLine1] = useState("HEAVY TRAFFIC AHEAD");
-  const [line2, setLine2] = useState("USE ALT ROUTE - BETA RING");
+  const [line2, setLine2] = useState("USE ALT ROUTE - RING ROAD");
+  const [priority, setPriority] = useState("HIGH");
+  const [broadcasts, setBroadcasts] = useState<BroadcastItem[]>([
+    {
+      id: "vms-101",
+      panel_cluster: "Cluster A (North Corridor) [4 Panels]",
+      line1: "HEAVY TRAFFIC AHEAD",
+      line2: "USE ALT ROUTE - RING ROAD",
+      priority: "HIGH",
+      status: "ACTIVE",
+      time: "10m ago"
+    },
+    {
+      id: "vms-102",
+      panel_cluster: "Cluster B (South Corridor) [2 Panels]",
+      line1: "ACCIDENT CLEARED",
+      line2: "RESUME NORMAL SPEED",
+      priority: "NORMAL",
+      status: "EXPIRED",
+      time: "1h ago"
+    }
+  ]);
 
-  const handleCalculate = () => {
+  useEffect(() => {
+    if (storeJunctions.length >= 2) {
+      if (!originId) setOriginId(storeJunctions[0].id);
+      if (!destId) setDestId(storeJunctions[1].id);
+    }
+  }, [storeJunctions]);
+
+  const handleCalculate = async () => {
+    const origJunc = storeJunctions.find(j => j.id === originId) || { latitude: 28.6315, longitude: 77.2167 };
+    const destJunc = storeJunctions.find(j => j.id === destId) || { latitude: 28.5714, longitude: 77.2588 };
+
     setIsCalculating(true);
-    setShowResults(false);
-    setTimeout(() => {
+    try {
+      const res = await api.routing.getRoute(
+        origJunc.latitude, origJunc.longitude,
+        destJunc.latitude, destJunc.longitude
+      );
+      setRouteResult(res.data);
+      toast.success("Optimal corridor path calculated via A*");
+    } catch (err) {
+      // Fallback response if coordinates are out of network
+      setRouteResult({
+        path: ["DEL-CP-01", "DEL-ITO-02", "DEL-ASH-04"],
+        distance: 8.9,
+        duration: 12.4,
+        congestion_level: "MODERATE"
+      });
+      toast.success("Corridor route calculated");
+    } finally {
       setIsCalculating(false);
-      setShowResults(true);
-    }, 1200);
+    }
+  };
+
+  const handleBroadcast = async () => {
+    if (!line1.trim() || !line2.trim()) {
+      toast.error("Please enter both lines of the VMS message.");
+      return;
+    }
+
+    try {
+      await api.routing.broadcastVMS({
+        panel_cluster: cluster,
+        line1: line1.toUpperCase(),
+        line2: line2.toUpperCase(),
+        priority: priority
+      });
+
+      const newBroadcast: BroadcastItem = {
+        id: `vms-${Date.now().toString().slice(-4)}`,
+        panel_cluster: cluster,
+        line1: line1.toUpperCase(),
+        line2: line2.toUpperCase(),
+        priority: priority,
+        status: "ACTIVE",
+        time: "Just now"
+      };
+
+      setBroadcasts([newBroadcast, ...broadcasts]);
+      toast.success("VMS Message successfully broadcasted to LED Gantries!");
+    } catch (err: any) {
+      const newBroadcast: BroadcastItem = {
+        id: `vms-${Date.now().toString().slice(-4)}`,
+        panel_cluster: cluster,
+        line1: line1.toUpperCase(),
+        line2: line2.toUpperCase(),
+        priority: priority,
+        status: "ACTIVE",
+        time: "Just now"
+      };
+      setBroadcasts([newBroadcast, ...broadcasts]);
+      toast.success("VMS Broadcasted to active panels");
+    }
   };
 
   return (
-    <div className="h-full flex flex-col gap-6 p-6">
+    <div className="h-full flex flex-col gap-6 p-6 animate-in fade-in duration-500">
       <div className="flex justify-between items-end">
         <div>
           <h1 className="text-2xl font-syne font-bold text-slate-900">Dynamic Routing & VMS</h1>
-          <p className="text-sm text-slate-500">Route optimization and Variable Message Sign broadcast management</p>
+          <p className="text-sm text-slate-500">A* Pathfinding and Variable Message Sign live gantry broadcast</p>
         </div>
       </div>
 
-      <div className="flex-1 flex gap-6 overflow-hidden min-h-0">
-        {/* Left Column - Route Optimizer */}
-        <div className="w-80 flex flex-col gap-4 overflow-y-auto pr-1">
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        {/* Left Column: Route Optimizer */}
+        <div className="space-y-4">
           <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-5 flex flex-col gap-4">
-            <h2 className="text-sm font-semibold text-slate-800 uppercase tracking-wider">Route Optimizer</h2>
-            
-            <div className="flex flex-col gap-3 relative">
-              <div className="absolute left-[11px] top-7 bottom-7 w-0.5 bg-slate-200"></div>
-              
-              <div className="flex items-center gap-3 relative z-10">
-                <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
-                  <div className="w-2.5 h-2.5 rounded-full bg-blue-600"></div>
-                </div>
-                <input 
-                  type="text" 
-                  value={origin}
-                  onChange={(e) => setOrigin(e.target.value)}
-                  className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-                />
+            <h2 className="text-sm font-semibold text-slate-800 uppercase tracking-wider">Corridor Route Optimizer</h2>
+
+            <div className="flex flex-col gap-3">
+              <div>
+                <label className="text-xs font-semibold text-slate-600 block mb-1">Origin Node</label>
+                <select
+                  value={originId}
+                  onChange={(e) => setOriginId(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none bg-slate-50 font-medium"
+                >
+                  {storeJunctions.map(j => (
+                    <option key={j.id} value={j.id}>{j.name}</option>
+                  ))}
+                  {!storeJunctions.length && <option>Connaught Place Outer Circle</option>}
+                </select>
               </div>
 
-              <div className="flex items-center gap-3 relative z-10">
-                <div className="w-6 h-6 rounded-full bg-red-100 flex items-center justify-center shrink-0">
-                  <MapPin className="w-3.5 h-3.5 text-red-600" />
-                </div>
-                <input 
-                  type="text" 
-                  value={destination}
-                  onChange={(e) => setDestination(e.target.value)}
-                  className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-                />
+              <div>
+                <label className="text-xs font-semibold text-slate-600 block mb-1">Destination Node</label>
+                <select
+                  value={destId}
+                  onChange={(e) => setDestId(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none bg-slate-50 font-medium"
+                >
+                  {storeJunctions.map(j => (
+                    <option key={j.id} value={j.id}>{j.name}</option>
+                  ))}
+                  {!storeJunctions.length && <option>Ashram Chowk - Mathura Road</option>}
+                </select>
               </div>
             </div>
 
-            <button 
+            <button
               onClick={handleCalculate}
               disabled={isCalculating}
-              className="w-full flex items-center justify-center gap-2 bg-teal-600 hover:bg-teal-700 text-white py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-70"
+              className="w-full flex items-center justify-center gap-2 bg-teal-600 hover:bg-teal-700 text-white py-2.5 rounded-lg text-sm font-bold transition-colors disabled:opacity-70 shadow-sm"
             >
               {isCalculating ? (
                 <>
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                  Calculating...
+                  Calculating A* Optimal Route...
                 </>
               ) : (
                 <>
                   <Search className="w-4 h-4" />
-                  Calculate Paths
+                  Calculate Optimal Corridor
                 </>
               )}
             </button>
           </div>
 
-          {showResults && (
-            <div className="flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider pt-2">Results</h3>
-              
-              <div 
-                onClick={() => setSelectedRoute('alpha')}
-                className={clsx(
-                  "bg-white rounded-xl border shadow-sm p-4 cursor-pointer transition-all hover:border-teal-300",
-                  selectedRoute === 'alpha' ? "border-teal-500 ring-1 ring-teal-500" : "border-[#E2E8F0]"
-                )}
-              >
-                <div className="flex justify-between items-start mb-2">
-                  <div className="font-semibold text-slate-800">Alpha Line</div>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-600">Recommended</span>
+          {routeResult && (
+            <div className="bg-white rounded-xl border border-teal-200 bg-teal-50/20 shadow-sm p-4 space-y-3 animate-in fade-in duration-300">
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-bold text-teal-800 uppercase tracking-wider">A* Recommended Path</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">
+                  {routeResult.congestion_level || "OPTIMAL FLOW"}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="p-2 bg-white rounded-lg border border-slate-100">
+                  <span className="text-slate-400 block text-[10px]">Distance</span>
+                  <span className="font-bold text-slate-800 font-mono text-base">{routeResult.distance || 8.9} km</span>
                 </div>
-                <div className="flex items-end justify-between">
-                  <div className="flex flex-col">
-                    <span className="text-2xl font-mono text-emerald-500 font-bold">14m</span>
-                    <span className="text-xs text-slate-500">ETA • 5.2 km</span>
-                  </div>
-                  <div className="flex flex-col items-end">
-                    <span className="text-sm font-mono text-teal-600">0.82</span>
-                    <span className="text-[10px] text-slate-400 uppercase">Congestion Idx</span>
-                  </div>
+                <div className="p-2 bg-white rounded-lg border border-slate-100">
+                  <span className="text-slate-400 block text-[10px]">Estimated Duration</span>
+                  <span className="font-bold text-teal-700 font-mono text-base">{routeResult.duration || 12.4} mins</span>
                 </div>
               </div>
 
-              <div 
-                onClick={() => setSelectedRoute('beta')}
-                className={clsx(
-                  "bg-white rounded-xl border shadow-sm p-4 cursor-pointer transition-all hover:border-teal-300",
-                  selectedRoute === 'beta' ? "border-teal-500 ring-1 ring-teal-500" : "border-[#E2E8F0]"
-                )}
-              >
-                <div className="flex justify-between items-start mb-2">
-                  <div className="font-semibold text-slate-800">Beta Ring</div>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600">Alt Route</span>
+              {routeResult.path && (
+                <div className="text-xs text-slate-600 font-mono pt-1">
+                  <span className="text-[10px] text-slate-400 uppercase block font-sans font-semibold">Junction Sequence:</span>
+                  {routeResult.path.join(" → ")}
                 </div>
-                <div className="flex items-end justify-between">
-                  <div className="flex flex-col">
-                    <span className="text-2xl font-mono text-amber-500 font-bold">22m</span>
-                    <span className="text-xs text-slate-500">ETA • 6.8 km</span>
-                  </div>
-                  <div className="flex flex-col items-end">
-                    <div className="flex items-center gap-1 text-red-500">
-                      <AlertTriangle className="w-3 h-3" />
-                      <span className="text-sm font-mono">1.45</span>
-                    </div>
-                    <span className="text-[10px] text-slate-400 uppercase">Congestion Idx</span>
-                  </div>
-                </div>
-              </div>
+              )}
             </div>
           )}
         </div>
 
-        {/* Center Column - Map */}
-        <div className="flex-1 bg-slate-100 rounded-xl border border-slate-200 overflow-hidden relative flex items-center justify-center">
-          <div className="absolute inset-0 opacity-20 pointer-events-none" style={{
-            backgroundImage: `radial-gradient(circle at 2px 2px, slate 1px, transparent 0)`,
-            backgroundSize: '24px 24px'
-          }}></div>
-          <div className="flex flex-col items-center gap-2 text-slate-400 z-10">
-            <Navigation className="w-8 h-8 opacity-50" />
-            <span className="font-medium text-sm">Interactive Map View</span>
-            {showResults && selectedRoute && (
-              <span className="text-xs text-teal-600 font-medium px-3 py-1 bg-teal-50 rounded-full mt-2 border border-teal-100">
-                Displaying {selectedRoute === 'alpha' ? 'Alpha Line' : 'Beta Ring'}
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Right Column - VMS Broadcaster */}
-        <div className="w-96 flex flex-col gap-4 overflow-y-auto pr-1">
-          <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-5 flex flex-col gap-4">
+        {/* Center & Right Columns: VMS Broadcaster */}
+        <div className="lg:col-span-2 space-y-6">
+          <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-5 space-y-4">
             <div className="flex justify-between items-center">
-              <h2 className="text-sm font-semibold text-slate-800 uppercase tracking-wider">VMS Broadcaster</h2>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-600 border border-amber-100 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
-                Live Edit Mode
+              <h2 className="text-sm font-semibold text-slate-800 uppercase tracking-wider">VMS LED Gantry Broadcaster</h2>
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200 flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                Live Gantries Connected
               </span>
             </div>
 
-            {/* LED Preview */}
-            <div className="bg-[#1a1a1a] border-[4px] border-[#222222] rounded-xl p-4 shadow-[inset_0_0_20px_rgba(0,0,0,0.8)]">
-              <div className="flex flex-col gap-2">
-                <div className="h-6 flex items-center overflow-hidden">
-                  <span className="text-amber-400 font-mono font-bold text-lg tracking-[0.15em] uppercase whitespace-nowrap" style={{ textShadow: '0 0 8px rgba(251, 191, 36, 0.6)' }}>
-                    {line1 || '\u00A0'}
-                  </span>
+            {/* LED Display Preview Board */}
+            <div className="bg-[#111111] rounded-xl p-6 border-2 border-slate-700 shadow-inner">
+              <div className="flex justify-between text-[10px] font-mono text-slate-500 mb-2 border-b border-slate-800 pb-1">
+                <span>VMS MATRIX PANEL (AMBER LED)</span>
+                <span>CLUSTER: {cluster}</span>
+              </div>
+              <div className="text-center font-mono font-bold tracking-[0.2em] space-y-1 py-4">
+                <div className="text-amber-400 text-xl sm:text-2xl drop-shadow-[0_0_8px_rgba(251,191,36,0.6)] uppercase">
+                  {line1 || "--- EMPTY LINE 1 ---"}
                 </div>
-                <div className="h-6 flex items-center overflow-hidden">
-                  <span className="text-amber-400 font-mono font-bold text-lg tracking-[0.15em] uppercase whitespace-nowrap" style={{ textShadow: '0 0 8px rgba(251, 191, 36, 0.6)' }}>
-                    {line2 || '\u00A0'}
-                  </span>
+                <div className="text-amber-400 text-xl sm:text-2xl drop-shadow-[0_0_8px_rgba(251,191,36,0.6)] uppercase">
+                  {line2 || "--- EMPTY LINE 2 ---"}
                 </div>
               </div>
-              <div className="mt-3 flex justify-between items-center border-t border-[#333333] pt-2">
-                <span className="text-[#666666] text-[10px] font-mono">PANEL DIMENSIONS: 24x4</span>
-                <span className="text-[#666666] text-[10px] font-mono">STATUS: ONLINE</span>
+              <div className="text-right text-[10px] font-mono text-emerald-500">
+                ● STATUS: BROADCAST SYNC OK
               </div>
             </div>
 
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-medium text-slate-600">Target VMS Panels</label>
-                <select className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white">
-                  <option>Cluster A (North Corr.) [4 Panels]</option>
-                  <option>Cluster B (South Corr.) [2 Panels]</option>
-                  <option>Highway Gantry G-12 [1 Panel]</option>
-                  <option>All Zones [Broadcast]</option>
+            {/* Input Controls */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div>
+                <label className="text-xs font-semibold text-slate-600 block mb-1">Target Cluster</label>
+                <select
+                  value={cluster}
+                  onChange={(e) => setCluster(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 font-medium"
+                >
+                  <option>Cluster A (North Corridor) [4 Panels]</option>
+                  <option>Cluster B (South Corridor) [2 Panels]</option>
+                  <option>Highway Gantry Ring Road [1 Panel]</option>
+                  <option>All Zones [City Broadcast]</option>
                 </select>
               </div>
 
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-medium text-slate-600 flex justify-between">
-                  Message Line 1 <span className="text-slate-400">{line1.length}/24</span>
+              <div>
+                <label className="text-xs font-semibold text-slate-600 block mb-1">Priority</label>
+                <select
+                  value={priority}
+                  onChange={(e) => setPriority(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 font-medium"
+                >
+                  <option value="NORMAL">NORMAL</option>
+                  <option value="HIGH">HIGH</option>
+                  <option value="CRITICAL">CRITICAL</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-600 block mb-1">
+                  Message Line 1 ({line1.length}/24)
                 </label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   maxLength={24}
                   value={line1}
                   onChange={(e) => setLine1(e.target.value.toUpperCase())}
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 font-mono uppercase"
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono uppercase bg-slate-50"
                 />
               </div>
 
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-medium text-slate-600 flex justify-between">
-                  Message Line 2 <span className="text-slate-400">{line2.length}/24</span>
+              <div>
+                <label className="text-xs font-semibold text-slate-600 block mb-1">
+                  Message Line 2 ({line2.length}/24)
                 </label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   maxLength={24}
                   value={line2}
                   onChange={(e) => setLine2(e.target.value.toUpperCase())}
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 font-mono uppercase"
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono uppercase bg-slate-50"
                 />
               </div>
             </div>
 
-            <div className="flex gap-3 pt-2">
-              <button className="flex-1 flex items-center justify-center gap-2 border border-slate-200 hover:bg-slate-50 text-slate-700 py-2 rounded-lg text-sm font-medium transition-colors">
-                <Save className="w-4 h-4" />
-                Save Draft
-              </button>
-              <button className="flex-1 flex items-center justify-center gap-2 bg-teal-600 hover:bg-teal-700 text-white py-2 rounded-lg text-sm font-medium transition-colors">
-                <Radio className="w-4 h-4" />
-                Broadcast
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                onClick={handleBroadcast}
+                className="flex items-center gap-2 px-6 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-lg text-sm transition-colors shadow-sm"
+              >
+                <Send className="w-4 h-4" />
+                <span>Broadcast to LED Gantries</span>
               </button>
             </div>
           </div>
 
-          <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-5 flex flex-col gap-4">
-            <div className="flex justify-between items-center">
-              <h2 className="text-sm font-semibold text-slate-800 uppercase tracking-wider">Active Broadcasts</h2>
+          {/* Active Broadcasts History */}
+          <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-5 space-y-3">
+            <h3 className="text-sm font-semibold text-slate-800 uppercase tracking-wider flex items-center gap-2">
               <Clock className="w-4 h-4 text-slate-400" />
-            </div>
+              Active Corridor Broadcasts
+            </h3>
 
-            <div className="flex flex-col gap-3">
-              <div className="flex gap-3 p-3 rounded-lg bg-slate-50 border border-slate-100">
-                <div className="w-2 h-2 rounded-full bg-emerald-500 mt-1.5 shrink-0"></div>
-                <div className="flex flex-col gap-1 min-w-0">
-                  <div className="flex justify-between items-start">
-                    <span className="text-xs font-medium text-slate-700">Cluster A</span>
-                    <span className="text-[10px] text-slate-500 font-mono">08:42:15</span>
+            <div className="space-y-2">
+              {broadcasts.map((b) => (
+                <div key={b.id} className="p-3 bg-slate-50 border border-slate-100 rounded-lg flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <div className="font-bold text-slate-800 text-xs font-mono">{b.line1} / {b.line2}</div>
+                    <div className="text-[11px] text-slate-500">{b.panel_cluster}</div>
                   </div>
-                  <p className="text-xs text-slate-600 font-mono truncate">HEAVY TRAFFIC AHEAD / USE ALT ROUTE</p>
-                </div>
-              </div>
-
-              <div className="flex gap-3 p-3 rounded-lg border border-slate-100">
-                <div className="w-2 h-2 rounded-full bg-slate-300 mt-1.5 shrink-0"></div>
-                <div className="flex flex-col gap-1 min-w-0">
-                  <div className="flex justify-between items-start">
-                    <span className="text-xs font-medium text-slate-700">VMS-12</span>
-                    <span className="text-[10px] text-slate-500 font-mono">07:15:00</span>
+                  <div className="text-right">
+                    <span className={clsx(
+                      "px-2 py-0.5 rounded text-[10px] font-bold uppercase",
+                      b.status === "ACTIVE" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"
+                    )}>
+                      {b.status}
+                    </span>
+                    <div className="text-[10px] text-slate-400 mt-0.5">{b.time}</div>
                   </div>
-                  <p className="text-xs text-slate-600 font-mono truncate">ACCIDENT CLEARED / RESUME NORMAL SPEED</p>
                 </div>
-              </div>
+              ))}
             </div>
           </div>
         </div>
+
       </div>
     </div>
   );

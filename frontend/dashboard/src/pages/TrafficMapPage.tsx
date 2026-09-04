@@ -3,20 +3,40 @@ import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Car, Gauge, Activity, ArrowRightLeft, AlertTriangle, Search, Zap, Siren, MoreVertical, Play, Pause, SkipBack, SkipForward, CheckCircle2 } from 'lucide-react';
 import clsx from 'clsx';
+import { useTrafficStore } from '../store/trafficStore';
 
-// Mock Junctions for Delhi
-const JUNCTIONS = [
-  { id: 'J-001', name: 'Connaught Place', lat: 28.6315, lng: 77.2167, status: 'normal', isMarl: true },
-  { id: 'J-002', name: 'India Gate', lat: 28.6129, lng: 77.2295, status: 'normal', isMarl: false },
-  { id: 'J-003', name: 'AIIMS Crossing', lat: 28.5672, lng: 77.2100, status: 'congested', isMarl: true },
-  { id: 'J-004', name: 'Dhaula Kuan', lat: 28.5918, lng: 77.1615, status: 'congested', isMarl: true },
-  { id: 'J-005', name: 'ITO Intersection', lat: 28.6295, lng: 77.2415, status: 'normal', isMarl: false },
-  { id: 'J-006', name: 'Kashmere Gate', lat: 28.6665, lng: 77.2285, status: 'normal', isMarl: true },
+// Fallback Default Junctions for Delhi
+const DEFAULT_JUNCTIONS = [
+  { id: 'DEL-CP-01', name: 'Connaught Place', lat: 28.6315, lng: 77.2167, status: 'normal', isMarl: true },
+  { id: 'DEL-ITO-02', name: 'ITO Intersection', lat: 28.6295, lng: 77.2415, status: 'normal', isMarl: false },
+  { id: 'DEL-AIIMS-03', name: 'AIIMS Crossing', lat: 28.5672, lng: 77.2100, status: 'congested', isMarl: true },
+  { id: 'DEL-DHK-05', name: 'Dhaula Kuan', lat: 28.5918, lng: 77.1615, status: 'congested', isMarl: true },
+  { id: 'DEL-ASH-04', name: 'Ashram Chowk', lat: 28.5714, lng: 77.2588, status: 'congested', isMarl: true },
+  { id: 'DEL-ISBT-07', name: 'Kashmere Gate', lat: 28.6665, lng: 77.2285, status: 'normal', isMarl: true },
 ];
 
 export default function TrafficMapPage() {
+  const storeJunctions = useTrafficStore((state) => state.junctions);
+  const [searchTerm, setSearchTerm] = useState('');
   const [time, setTime] = useState(new Date());
   const [isPlaying, setIsPlaying] = useState(true);
+
+  // Map backend database junctions when loaded, else use defaults
+  const junctions = storeJunctions && storeJunctions.length > 0
+    ? storeJunctions.map((j, idx) => ({
+        id: j.id,
+        name: j.name,
+        lat: j.latitude,
+        lng: j.longitude,
+        status: idx % 3 === 0 ? 'congested' : 'normal',
+        isMarl: idx % 2 === 0
+      }))
+    : DEFAULT_JUNCTIONS;
+
+  const filteredJunctions = junctions.filter(j =>
+    j.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    j.id.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   useEffect(() => {
     let timer: number;
@@ -48,7 +68,7 @@ export default function TrafficMapPage() {
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
           />
-          {JUNCTIONS.map((j) => (
+          {filteredJunctions.map((j) => (
             <CircleMarker
               key={j.id}
               center={[j.lat, j.lng]}
@@ -123,6 +143,8 @@ export default function TrafficMapPage() {
             <input 
               type="text" 
               placeholder="Search junctions..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
             />
             <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />

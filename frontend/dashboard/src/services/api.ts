@@ -3,6 +3,7 @@ import { useAuthStore } from '../store/authStore';
 
 const axiosInstance = axios.create({
   baseURL: '/api/v1',
+  timeout: 10000,
 });
 
 axiosInstance.interceptors.request.use((config) => {
@@ -31,48 +32,67 @@ export const api = {
     refreshToken: () => axiosInstance.post('/auth/refresh'),
   },
   junctions: {
-    getAll: () => axiosInstance.get('/junctions'),
-    getById: (id: string) => axiosInstance.get(`/junctions/${id}`),
-    create: (data: any) => axiosInstance.post('/junctions', data),
-    update: (id: string, data: any) => axiosInstance.put(`/junctions/${id}`, data),
+    getAll: () => axiosInstance.get('/traffic/junctions'),
+    getById: (id: string) => axiosInstance.get(`/traffic/junctions/${id}`),
+    create: (data: any) => axiosInstance.post('/traffic/junctions', data),
+    update: (id: string, data: any) => axiosInstance.patch(`/traffic/junctions/${id}`, data),
   },
   traffic: {
-    getReadings: (junctionId: string) => axiosInstance.get(`/traffic/readings/${junctionId}`),
-    getLatest: () => axiosInstance.get('/traffic/latest'),
+    getReadings: (junctionId: string, limit: number = 20) => axiosInstance.get(`/traffic/readings/${junctionId}?limit=${limit}`),
+    getAllReadings: (limit: number = 100) => axiosInstance.get(`/traffic/readings?limit=${limit}`),
+    createReading: (data: any) => axiosInstance.post('/traffic/readings', data),
+  },
+  signals: {
+    getPlans: () => axiosInstance.get('/signals/plans'),
+    getByJunction: (junctionId: string) => axiosInstance.get(`/signals/junctions/${junctionId}`),
+    setMode: (junctionId: string, mode: string) => axiosInstance.patch(`/signals/junctions/${junctionId}/mode`, { mode }),
+    override: (junctionId: string, action: string, value: number = 5) =>
+      axiosInstance.post(`/signals/junctions/${junctionId}/override`, { action, value }),
   },
   simulation: {
-    start: () => axiosInstance.post('/simulation/start'),
-    step: () => axiosInstance.post('/simulation/step'),
+    start: (scenario: string = 'morning_peak') => axiosInstance.post('/simulation/start', { scenario_profile: scenario }),
+    step: (steps: number = 1) => axiosInstance.post('/simulation/step', { steps }),
     stop: () => axiosInstance.post('/simulation/stop'),
     getState: () => axiosInstance.get('/simulation/state'),
     getMetrics: () => axiosInstance.get('/simulation/metrics'),
+    reset: () => axiosInstance.post('/simulation/reset'),
   },
   ml: {
-    detect: (data: any) => axiosInstance.post('/ml/detect', data),
+    detect: (formData: FormData) => axiosInstance.post('/ml/detect', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }),
     predict: (junctionId: string) => axiosInstance.get(`/ml/predict/${junctionId}`),
-    trainStart: () => axiosInstance.post('/ml/train/start'),
+    trainStart: (episodes: number = 500, scenario: string = 'morning_peak') => axiosInstance.post('/ml/train/start', { num_episodes: episodes, scenario }),
     trainStop: () => axiosInstance.post('/ml/train/stop'),
     trainStatus: () => axiosInstance.get('/ml/train/status'),
-    modelHealth: () => axiosInstance.get('/ml/health'),
+    modelHealth: () => axiosInstance.get('/ml/models/health'),
   },
   alerts: {
     getAll: () => axiosInstance.get('/alerts'),
-    acknowledge: (id: string) => axiosInstance.post(`/alerts/${id}/acknowledge`),
+    acknowledge: (id: string) => axiosInstance.patch(`/alerts/${id}/acknowledge`),
     getStats: () => axiosInstance.get('/alerts/stats'),
   },
   emergency: {
-    activate: (data: any) => axiosInstance.post('/emergency/activate', data),
-    deactivate: (id: string) => axiosInstance.post(`/emergency/${id}/deactivate`),
-    getStatus: () => axiosInstance.get('/emergency/status'),
-    getHistory: () => axiosInstance.get('/emergency/history'),
+    activate: (data: { priority: string; vehicle_type: string; route_junction_ids?: string[]; corridor?: string[] }) =>
+      axiosInstance.post('/emergency/activate', data),
+    deactivate: (id: string) => axiosInstance.post(`/emergency/deactivate/${id}`),
+    getStatus: (id?: string) => id ? axiosInstance.get(`/emergency/status/${id}`) : axiosInstance.get('/emergency/status'),
+    getHistory: (limit: number = 20) => axiosInstance.get(`/emergency/history?limit=${limit}`),
   },
   routing: {
-    getRoute: (start: [number, number], end: [number, number]) => axiosInstance.post('/routing/route', { start, end }),
-    getAlternatives: (start: [number, number], end: [number, number]) => axiosInstance.post('/routing/alternatives', { start, end }),
+    getRoute: (origin_lat: number, origin_lon: number, dest_lat: number, dest_lon: number) =>
+      axiosInstance.post('/routing/route', { origin_lat, origin_lon, dest_lat, dest_lon }),
+    getAlternatives: (origin_lat: number, origin_lon: number, dest_lat: number, dest_lon: number) =>
+      axiosInstance.post('/routing/alternatives', { origin_lat, origin_lon, dest_lat, dest_lon }),
+    getCongestion: () => axiosInstance.get('/routing/congestion'),
+    broadcastVMS: (data: { panel_cluster: string; line1: string; line2: string; priority?: string }) =>
+      axiosInstance.post('/routing/vms/broadcast', data),
+    getActiveVMS: () => axiosInstance.get('/routing/vms/active'),
+    getVMSHistory: () => axiosInstance.get('/routing/vms/history'),
   },
   users: {
     getAll: () => axiosInstance.get('/users'),
-    updateRole: (id: string, role: string) => axiosInstance.put(`/users/${id}/role`, { role }),
-    updateStatus: (id: string, is_active: boolean) => axiosInstance.put(`/users/${id}/status`, { is_active }),
+    updateRole: (id: string, role: string) => axiosInstance.patch(`/users/${id}/role?role=${role}`),
+    updateStatus: (id: string, is_active: boolean) => axiosInstance.patch(`/users/${id}/status?is_active=${is_active}`),
   }
 };

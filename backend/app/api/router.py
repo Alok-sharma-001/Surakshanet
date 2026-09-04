@@ -8,6 +8,7 @@ from app.api.simulation import router as simulation_router
 from app.api.routing import router as routing_router
 from app.api.alerts import router as alerts_router
 from app.api.emergency import router as emergency_router
+from app.api.signals import router as signals_router
 
 api_router = APIRouter()
 
@@ -19,3 +20,4 @@ api_router.include_router(simulation_router)
 api_router.include_router(routing_router)
 api_router.include_router(alerts_router)
 api_router.include_router(emergency_router)
+api_router.include_router(signals_router)

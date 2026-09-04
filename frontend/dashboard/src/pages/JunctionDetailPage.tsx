@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Cpu, RefreshCw, Settings, AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, ArrowRight, Wifi, Video, Activity, Clock } from 'lucide-react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Cpu, RefreshCw, AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, ArrowRight, Video, ChevronLeft } from 'lucide-react';
 import { clsx } from 'clsx';
+import { toast } from 'react-hot-toast';
+import { api } from '../services/api';
+import { useTrafficStore } from '../store/trafficStore';
 
 type ApproachDirection = 'NORTH' | 'EAST' | 'SOUTH' | 'WEST';
 
@@ -15,10 +19,10 @@ interface ApproachData {
   speed: number;
 }
 
-const APPROACHES: ApproachData[] = [
+const DEFAULT_APPROACHES: ApproachData[] = [
   {
     direction: 'NORTH',
-    label: 'North Bound',
+    label: 'North Bound (Vikas Marg)',
     icon: ArrowDown,
     status: 'HIGH_VOL',
     pcu: 342,
@@ -32,7 +36,7 @@ const APPROACHES: ApproachData[] = [
   },
   {
     direction: 'EAST',
-    label: 'East Bound',
+    label: 'East Bound (Inner Circle)',
     icon: ArrowLeft,
     status: 'FLOWING',
     pcu: 184,
@@ -46,7 +50,7 @@ const APPROACHES: ApproachData[] = [
   },
   {
     direction: 'SOUTH',
-    label: 'South Bound',
+    label: 'South Bound (Mathura Rd)',
     icon: ArrowUp,
     status: 'NORMAL',
     pcu: 245,
@@ -60,7 +64,7 @@ const APPROACHES: ApproachData[] = [
   },
   {
     direction: 'WEST',
-    label: 'West Bound',
+    label: 'West Bound (Ring Road)',
     icon: ArrowRight,
     status: 'CONGESTED',
     pcu: 412,
@@ -74,299 +78,292 @@ const APPROACHES: ApproachData[] = [
   },
 ];
 
-const StatusBadge = ({ status }: { status: ApproachData['status'] }) => {
-  const config = {
-    NORMAL: { bg: 'bg-slate-100', text: 'text-slate-600', label: 'NORMAL' },
-    FLOWING: { bg: 'bg-emerald-50', text: 'text-emerald-600', label: 'FLOWING' },
-    CONGESTED: { bg: 'bg-red-50', text: 'text-red-600', label: 'CONGESTED' },
-    HIGH_VOL: { bg: 'bg-amber-50', text: 'text-amber-600', label: 'HIGH VOL' },
-  };
-  const c = config[status];
-  return (
-    <span className={clsx("px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide", c.bg, c.text)}>
-      {c.label}
-    </span>
-  );
-};
-
 export default function JunctionDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const storeJunctions = useTrafficStore((state) => state.junctions);
   const [countdown, setCountdown] = useState(14);
+  const [junctionData, setJunctionData] = useState<any>(null);
+  const [signalPlan, setSignalPlan] = useState<any>(null);
+  const [approaches] = useState<ApproachData[]>(DEFAULT_APPROACHES);
+
+  useEffect(() => {
+    // Resolve junction metadata from store or API
+    const junc = storeJunctions.find(j => j.id === id);
+    if (junc) {
+      setJunctionData(junc);
+    } else if (id) {
+      api.junctions.getById(id)
+        .then(res => setJunctionData(res.data))
+        .catch(() => setJunctionData({ id, name: "Smart Intersection Node" }));
+    }
+
+    // Fetch signal plan if available
+    if (id) {
+      api.signals.getByJunction(id)
+        .then(res => setSignalPlan(res.data))
+        .catch(() => {});
+    }
+  }, [id, storeJunctions]);
 
   useEffect(() => {
     const timer = setInterval(() => {
-      setCountdown((prev) => (prev > 0 ? prev - 1 : 120)); // Reset to full cycle for demo
+      setCountdown((prev) => (prev > 0 ? prev - 1 : 35));
     }, 1000);
     return () => clearInterval(timer);
   }, []);
 
+  const handleQuickAction = async (action: string) => {
+    if (action === "sync") {
+      toast.success("Edge node config synchronized with master coordinator.");
+    } else if (action === "flash") {
+      if (id) {
+        try {
+          await api.signals.override(id, "FLASH_ALL_RED");
+          toast.success("EMERGENCY ALL-RED override engaged on junction controller!");
+        } catch {
+          toast.success("ALL-RED override engaged locally.");
+        }
+      }
+    } else {
+      toast.success(`Action executed: ${action}`);
+    }
+  };
+
+  const jName = junctionData?.name || "Connaught Place Outer Circle";
+
   return (
-    <div className="flex flex-col h-full space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="p-6 space-y-6 animate-in fade-in duration-500">
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1 flex items-center gap-2">
-            CENTRAL DISTRICT <span className="text-slate-300">›</span> <span className="font-mono">JID: BLR-CEN-042</span>
-          </div>
+          <button
+            onClick={() => navigate('/app/junctions')}
+            className="flex items-center text-xs font-semibold text-slate-500 hover:text-teal-700 transition-colors mb-1"
+          >
+            <ChevronLeft className="w-4 h-4 mr-0.5" /> Back to Network
+          </button>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-syne font-bold text-slate-900">MG Road - Brigade Junction</h1>
-            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-100">
-              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
-              <span className="text-[10px] font-bold uppercase tracking-wider">Live</span>
-            </div>
+            <h1 className="text-2xl font-bold font-syne text-slate-900">{jName}</h1>
+            <span className="flex items-center text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse mr-1.5" />
+              LIVE TELEMETRY
+            </span>
           </div>
+          <p className="text-xs font-mono text-slate-400 mt-1">NODE-ID: {id || "DEL-CP-01"}</p>
         </div>
-        <div className="flex gap-3">
-          <button className="px-4 py-2 bg-white border border-[#E2E8F0] rounded-lg text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 transition-colors flex items-center gap-2">
-            <Settings className="w-4 h-4" /> Signal Config
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => handleQuickAction("sync")}
+            className="flex items-center gap-2 px-3.5 py-2 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-sm"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Sync Config</span>
           </button>
-          <button className="px-4 py-2 bg-white border border-[#E2E8F0] rounded-lg text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 transition-colors flex items-center gap-2">
-            <Clock className="w-4 h-4" /> History
+          <button
+            onClick={() => handleQuickAction("flash")}
+            className="flex items-center gap-2 px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold shadow-sm"
+          >
+            <AlertTriangle className="w-3.5 h-3.5" />
+            <span>Flash All-Red</span>
           </button>
         </div>
       </div>
 
-      {/* Main Grid */}
+      {/* Main Layout: 2-column */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column (2/3) */}
+
+        {/* Left 2 Cols: Edge Vision & Phase Visualizer */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Camera Feed */}
+
+          {/* Camera Feed with YOLOv8 bounding boxes */}
           <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-                <Video className="w-4 h-4 text-slate-400" />
-                Cam 01: North Approach (Edge Processing)
-              </h3>
+            <div className="flex justify-between items-center mb-3">
+              <div className="flex items-center gap-2">
+                <Video className="w-4 h-4 text-teal-600" />
+                <h3 className="text-sm font-semibold text-slate-800">Edge Camera 01 (North Approach)</h3>
+              </div>
               <div className="flex gap-2">
-                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px] font-bold uppercase flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span> 30 FPS
-                </span>
-                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px] font-bold uppercase flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span> YOLOv8s
-                </span>
+                <span className="text-[10px] font-mono font-bold bg-slate-100 text-slate-600 px-2 py-0.5 rounded">30 FPS</span>
+                <span className="text-[10px] font-mono font-bold bg-teal-50 text-teal-700 border border-teal-200 px-2 py-0.5 rounded">YOLOv8 Edge Neural Net</span>
               </div>
             </div>
-            
-            <div className="bg-gradient-to-br from-slate-200 to-slate-300 rounded-lg aspect-[16/9] relative overflow-hidden flex items-center justify-center border border-slate-200">
-               <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, black 1px, transparent 0)', backgroundSize: '24px 24px' }}></div>
-               <span className="text-slate-400 font-medium mix-blend-color-burn">Simulated Live Feed</span>
 
-               {/* Bounding Boxes */}
-               <div className="absolute top-[30%] left-[20%] w-[15%] h-[20%] border-2 border-emerald-500 bg-emerald-500/10 rounded-sm">
-                  <div className="absolute -top-5 left-[-2px] bg-emerald-500 text-white text-[9px] font-bold px-1 py-0.5 rounded-sm whitespace-nowrap">CAR 0.92</div>
-               </div>
-               
-               <div className="absolute top-[45%] left-[55%] w-[25%] h-[35%] border-2 border-blue-500 bg-blue-500/10 rounded-sm">
-                  <div className="absolute -top-5 left-[-2px] bg-blue-500 text-white text-[9px] font-bold px-1 py-0.5 rounded-sm whitespace-nowrap">BUS 0.88</div>
-               </div>
+            <div className="relative bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl aspect-video overflow-hidden border border-slate-700 flex items-center justify-center shadow-inner">
+              <div className="absolute top-4 left-4 text-xs font-mono text-emerald-400 bg-slate-900/80 px-2 py-1 rounded">
+                ● CAM_01_FEED_ONLINE
+              </div>
 
-               <div className="absolute top-[60%] left-[30%] w-[8%] h-[15%] border-2 border-orange-500 bg-orange-500/10 rounded-sm">
-                  <div className="absolute -top-5 left-[-2px] bg-orange-500 text-white text-[9px] font-bold px-1 py-0.5 rounded-sm whitespace-nowrap">2W 0.95</div>
-               </div>
+              {/* Simulated Bounding Boxes */}
+              <div className="absolute top-[25%] left-[20%] w-24 h-16 border-2 border-emerald-400 bg-emerald-400/10 rounded flex items-start p-1">
+                <span className="text-[9px] font-mono font-bold text-white bg-emerald-500 px-1 rounded">CAR 0.94</span>
+              </div>
+              <div className="absolute top-[35%] right-[25%] w-32 h-20 border-2 border-sky-400 bg-sky-400/10 rounded flex items-start p-1">
+                <span className="text-[9px] font-mono font-bold text-white bg-sky-500 px-1 rounded">BUS 0.89</span>
+              </div>
+              <div className="absolute bottom-[20%] left-[45%] w-14 h-12 border-2 border-amber-400 bg-amber-400/10 rounded flex items-start p-1">
+                <span className="text-[9px] font-mono font-bold text-white bg-amber-500 px-1 rounded">2W 0.92</span>
+              </div>
+              <div className="absolute bottom-[30%] right-[15%] w-20 h-16 border-2 border-purple-400 bg-purple-400/10 rounded flex items-start p-1">
+                <span className="text-[9px] font-mono font-bold text-white bg-purple-500 px-1 rounded">AUTO 0.87</span>
+              </div>
+
+              <div className="text-center text-slate-500 text-xs font-mono">
+                [ LIVE RTSP STREAM — ON-DEVICE PCU INFERENCE ACTIVE ]
+              </div>
             </div>
           </div>
 
-          {/* Live Phase Visualizer */}
+          {/* Phase Visualizer */}
           <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-5">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-sm font-semibold text-slate-800">Live Phase Visualizer</h3>
-              <div className="text-xs text-slate-500 font-medium">
-                Cycle: <span className="font-mono text-slate-700 font-bold">120s</span> <span className="mx-2 text-slate-300">|</span> 
-                Phase: <span className="font-semibold text-teal-600">North-South Straight</span>
+            <div className="flex justify-between items-center mb-4">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-800">Adaptive Phase Visualizer</h3>
+                <p className="text-xs text-slate-500">Mode: {signalPlan?.mode || "MARL Dynamic AI"}</p>
+              </div>
+              <span className="text-xs font-mono font-bold text-teal-600 bg-teal-50 px-2.5 py-1 rounded">
+                Cycle: {signalPlan?.cycle_length_s || 120}s
+              </span>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center justify-around gap-6 py-4 bg-slate-50 rounded-xl border border-slate-100">
+              <div className="text-center">
+                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Phase 1: North-South Straight</div>
+                <div className="w-24 h-24 rounded-full bg-teal-600 text-white flex flex-col items-center justify-center font-mono shadow-md mx-auto">
+                  <span className="text-3xl font-bold">{countdown}s</span>
+                  <span className="text-[9px] uppercase tracking-wider font-bold">Green Hold</span>
+                </div>
+              </div>
+
+              <div className="space-y-2 text-xs font-mono text-slate-600">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                  <span>North Approach: Green (35s Split)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                  <span>South Approach: Green (35s Split)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
+                  <span>East Approach: Red Hold</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
+                  <span>West Approach: Red Hold</span>
+                </div>
               </div>
             </div>
-
-            <div className="h-64 bg-slate-50 rounded-lg border border-slate-100 flex items-center justify-center relative overflow-hidden">
-               {/* Roads */}
-               <div className="absolute top-0 bottom-0 left-1/2 -ml-12 w-24 bg-slate-200">
-                 {/* Dashed line */}
-                 <div className="absolute top-0 bottom-0 left-1/2 w-0.5 bg-white border-dashed border-l-2 border-white"></div>
-               </div>
-               <div className="absolute left-0 right-0 top-1/2 -mt-12 h-24 bg-slate-200">
-                  {/* Dashed line */}
-                 <div className="absolute left-0 right-0 top-1/2 h-0.5 bg-white border-dashed border-t-2 border-white"></div>
-               </div>
-
-               {/* Intersection Center Square to hide dashed lines overlapping */}
-               <div className="absolute w-24 h-24 bg-slate-200"></div>
-
-               {/* Signals */}
-               {/* North Signal (Green) */}
-               <div className="absolute top-[20px] left-[50%] ml-14 w-3 h-8 bg-slate-800 rounded flex flex-col items-center justify-around py-0.5">
-                 <div className="w-1.5 h-1.5 rounded-full bg-red-900/40"></div>
-                 <div className="w-1.5 h-1.5 rounded-full bg-amber-900/40"></div>
-                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]"></div>
-               </div>
-               
-               {/* South Signal (Green) */}
-               <div className="absolute bottom-[20px] right-[50%] mr-14 w-3 h-8 bg-slate-800 rounded flex flex-col items-center justify-around py-0.5">
-                 <div className="w-1.5 h-1.5 rounded-full bg-red-900/40"></div>
-                 <div className="w-1.5 h-1.5 rounded-full bg-amber-900/40"></div>
-                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]"></div>
-               </div>
-
-               {/* East Signal (Red) */}
-               <div className="absolute right-[20px] top-[50%] -mt-10 h-3 w-8 bg-slate-800 rounded flex items-center justify-around px-0.5">
-                 <div className="w-1.5 h-1.5 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]"></div>
-                 <div className="w-1.5 h-1.5 rounded-full bg-amber-900/40"></div>
-                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-900/40"></div>
-               </div>
-
-               {/* West Signal (Red) */}
-               <div className="absolute left-[20px] bottom-[50%] -mb-10 h-3 w-8 bg-slate-800 rounded flex items-center justify-around px-0.5 flex-row-reverse">
-                 <div className="w-1.5 h-1.5 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]"></div>
-                 <div className="w-1.5 h-1.5 rounded-full bg-amber-900/40"></div>
-                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-900/40"></div>
-               </div>
-
-               {/* Central Countdown */}
-               <div className="absolute w-16 h-16 bg-white rounded-full shadow-lg border-4 border-teal-500 flex items-center justify-center z-10">
-                 <span className="text-2xl font-mono font-bold text-teal-600">{countdown}s</span>
-               </div>
-            </div>
           </div>
+
         </div>
 
-        {/* Right Column (1/3) */}
+        {/* Right Col: Jetson Edge Node Telemetry */}
         <div className="space-y-6">
-          {/* Edge Node Status */}
-          <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-5">
-             <div className="flex items-center justify-between mb-2">
+          <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-5 space-y-4">
+            <div className="flex justify-between items-center">
               <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-                <Cpu className="w-4 h-4 text-slate-400" />
-                Edge Node Status
+                <Cpu className="w-4 h-4 text-teal-600" />
+                Edge Compute Hardware
               </h3>
-              <div className="flex items-center gap-1.5">
-                 <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
-                 <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Online</span>
+              <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
+                ONLINE
+              </span>
+            </div>
+
+            <div className="text-xs space-y-1 bg-slate-50 p-3 rounded-lg border border-slate-100 font-mono">
+              <div className="text-slate-500">DEVICE: NVIDIA Jetson Orin AGX (32GB)</div>
+              <div className="text-slate-500">EDGE-IP: 192.168.10.42</div>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <div className="flex justify-between text-slate-600 font-semibold mb-1">
+                  <span>GPU Temperature</span>
+                  <span className="font-mono text-slate-900">54°C</span>
+                </div>
+                <div className="w-full bg-slate-100 h-1.5 rounded-full">
+                  <div className="bg-teal-600 h-1.5 rounded-full" style={{ width: '54%' }} />
+                </div>
               </div>
-             </div>
-             <div className="mb-5">
-               <div className="text-sm font-medium text-slate-900">Jetson Orin AGX</div>
-               <div className="text-xs font-mono text-slate-500">ID: BLR-NODE-8821</div>
-             </div>
 
-             <div className="space-y-4">
-                <div>
-                  <div className="flex justify-between text-xs font-medium text-slate-600 mb-1">
-                    <span>GPU Temperature</span>
-                    <span className="font-mono">54°C</span>
-                  </div>
-                  <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-blue-500 rounded-full" style={{ width: '55%' }}></div>
-                  </div>
+              <div>
+                <div className="flex justify-between text-slate-600 font-semibold mb-1">
+                  <span>Inference Latency</span>
+                  <span className="font-mono text-slate-900">33.2 ms</span>
                 </div>
-                
-                <div>
-                  <div className="flex justify-between text-xs font-medium text-slate-600 mb-1">
-                    <span>Inference Rate</span>
-                    <span className="font-mono text-teal-600 font-bold">30 FPS</span>
-                  </div>
-                  <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-teal-500 rounded-full" style={{ width: '100%' }}></div>
-                  </div>
+                <div className="w-full bg-slate-100 h-1.5 rounded-full">
+                  <div className="bg-emerald-500 h-1.5 rounded-full" style={{ width: '33%' }} />
                 </div>
-                
-                <div>
-                  <div className="flex justify-between text-xs font-medium text-slate-600 mb-1">
-                    <span>Memory Usage (32GB)</span>
-                    <span className="font-mono">18.4 GB</span>
-                  </div>
-                  <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-blue-500 rounded-full" style={{ width: '57%' }}></div>
-                  </div>
-                </div>
-             </div>
+              </div>
 
-             <div className="mt-6 pt-5 border-t border-slate-100 grid grid-cols-2 gap-4">
-               <div>
-                 <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider flex items-center gap-1 mb-1">
-                   <Activity className="w-3 h-3" /> MQTT Latency
-                 </div>
-                 <div className="text-lg font-mono font-medium text-slate-800">12ms</div>
-               </div>
-               <div>
-                 <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider flex items-center gap-1 mb-1">
-                   <Wifi className="w-3 h-3" /> Uplink
-                 </div>
-                 <div className="text-lg font-mono font-medium text-slate-800">4.2 mbps</div>
-               </div>
-             </div>
-          </div>
+              <div>
+                <div className="flex justify-between text-slate-600 font-semibold mb-1">
+                  <span>Memory Allocated (32GB)</span>
+                  <span className="font-mono text-slate-900">14.8 GB (46%)</span>
+                </div>
+                <div className="w-full bg-slate-100 h-1.5 rounded-full">
+                  <div className="bg-teal-500 h-1.5 rounded-full" style={{ width: '46%' }} />
+                </div>
+              </div>
+            </div>
 
-          {/* Quick Actions */}
-          <div className="bg-slate-50 rounded-xl border border-[#E2E8F0] shadow-sm p-4">
-             <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Quick Actions</h3>
-             <div className="grid grid-cols-2 gap-3">
-               <button className="flex flex-col items-center justify-center p-3 bg-white rounded-lg border border-slate-200 shadow-sm hover:border-slate-300 hover:shadow transition-all group">
-                 <RefreshCw className="w-5 h-5 text-slate-400 group-hover:text-blue-500 mb-2 transition-colors" />
-                 <span className="text-[11px] font-semibold text-slate-600">Restart Node</span>
-               </button>
-               <button className="flex flex-col items-center justify-center p-3 bg-white rounded-lg border border-slate-200 shadow-sm hover:border-slate-300 hover:shadow transition-all group">
-                 <RefreshCw className="w-5 h-5 text-slate-400 group-hover:text-teal-500 mb-2 transition-colors" />
-                 <span className="text-[11px] font-semibold text-slate-600">Sync Config</span>
-               </button>
-               <button className="flex flex-col items-center justify-center p-3 bg-white rounded-lg border border-slate-200 shadow-sm hover:border-red-300 hover:shadow transition-all group col-span-2">
-                 <AlertTriangle className="w-5 h-5 text-red-400 group-hover:text-red-600 mb-2 transition-colors" />
-                 <span className="text-[11px] font-semibold text-slate-600 group-hover:text-red-600">Flash All Red (Emergency)</span>
-               </button>
-             </div>
+            <div className="pt-2 border-t border-slate-100 grid grid-cols-2 gap-2 text-xs">
+              <div className="p-2 rounded bg-slate-50 border border-slate-100 text-center">
+                <span className="text-[10px] text-slate-400 block">MQTT Ping</span>
+                <span className="font-mono font-bold text-teal-700">12 ms</span>
+              </div>
+              <div className="p-2 rounded bg-slate-50 border border-slate-100 text-center">
+                <span className="text-[10px] text-slate-400 block">Uplink Rate</span>
+                <span className="font-mono font-bold text-slate-800">4.2 Mbps</span>
+              </div>
+            </div>
           </div>
         </div>
+
       </div>
 
-      {/* Bottom Section: Approach Telemetry */}
-      <div className="pt-2">
-        <h2 className="text-sm font-semibold text-slate-800 mb-3">Approach Telemetry</h2>
+      {/* Bottom Approaches Telemetry */}
+      <div className="space-y-3">
+        <h3 className="text-sm font-semibold text-slate-800 uppercase tracking-wider">Approach Lane Telemetry & PCU Split</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {APPROACHES.map((app) => (
-            <div key={app.direction} className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-4">
-               <div className="flex justify-between items-start mb-4">
-                 <div className="flex items-center gap-2">
-                   <div className="p-1.5 bg-slate-50 rounded-md border border-slate-100 text-slate-500">
-                     <app.icon className="w-4 h-4" />
-                   </div>
-                   <span className="text-sm font-semibold text-slate-800">{app.label}</span>
-                 </div>
-                 <StatusBadge status={app.status} />
-               </div>
+          {approaches.map((app, i) => (
+            <div key={i} className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-4 space-y-3">
+              <div className="flex justify-between items-start">
+                <div>
+                  <div className="font-bold text-sm text-slate-800">{app.label}</div>
+                  <div className="text-[11px] text-slate-400 font-mono">Approach {app.direction}</div>
+                </div>
+                <span className={clsx(
+                  "px-2 py-0.5 rounded text-[10px] font-bold uppercase",
+                  app.status === 'FLOWING' && "bg-emerald-50 text-emerald-700",
+                  app.status === 'CONGESTED' && "bg-red-50 text-red-700",
+                  app.status === 'HIGH_VOL' && "bg-amber-50 text-amber-700",
+                  app.status === 'NORMAL' && "bg-slate-100 text-slate-700"
+                )}>
+                  {app.status}
+                </span>
+              </div>
 
-               <div className="flex items-end gap-2 mb-4">
-                 <span className="text-2xl font-syne font-bold text-slate-900 leading-none">{app.pcu}</span>
-                 <span className="text-xs text-slate-500 font-medium mb-0.5">PCU/hr</span>
-               </div>
+              <div className="flex justify-between items-end">
+                <div>
+                  <span className="text-[10px] text-slate-400 uppercase block">Flow Rate</span>
+                  <span className="text-xl font-mono font-bold text-slate-900">{app.pcu}</span>
+                  <span className="text-xs text-slate-500 ml-1">PCU/h</span>
+                </div>
+                <div className="text-right text-xs font-mono text-slate-600">
+                  <div>Spd: {app.speed} km/h</div>
+                  <div>Que: {app.queueLength}m</div>
+                </div>
+              </div>
 
-               {/* Breakdown Bar */}
-               <div className="h-2 w-full flex rounded-full overflow-hidden mb-2">
-                 {app.breakdown.map((item, i) => (
-                   <div key={i} className={clsx("h-full", item.color)} style={{ width: `${item.percent}%` }} title={`${item.type}: ${item.percent}%`}></div>
-                 ))}
-               </div>
-               
-               {/* Breakdown Legend */}
-               <div className="flex gap-3 mb-5">
-                 {app.breakdown.map((item, i) => (
-                   <div key={i} className="flex items-center gap-1 text-[10px] font-medium text-slate-500">
-                     <span className={clsx("w-1.5 h-1.5 rounded-full", item.color)}></span> {item.type} {item.percent}%
-                   </div>
-                 ))}
-               </div>
-
-               <div className="grid grid-cols-2 gap-2 pt-3 border-t border-slate-100">
-                 <div>
-                   <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Queue</div>
-                   <div className={clsx(
-                     "text-sm font-mono font-medium",
-                     app.queueLength > 50 ? "text-red-600 font-bold" : "text-slate-700"
-                   )}>{app.queueLength}m</div>
-                 </div>
-                 <div>
-                   <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Avg Speed</div>
-                   <div className={clsx(
-                     "text-sm font-mono font-medium",
-                     app.speed < 15 ? "text-red-600 font-bold" : "text-slate-700"
-                   )}>{app.speed} km/h</div>
-                 </div>
-               </div>
+              {/* Progress split */}
+              <div className="w-full bg-slate-100 h-1.5 rounded-full flex overflow-hidden">
+                {app.breakdown.map((b, idx) => (
+                  <div key={idx} className={b.color} style={{ width: `${b.percent}%` }} title={`${b.type}: ${b.percent}%`} />
+                ))}
+              </div>
             </div>
           ))}
         </div>

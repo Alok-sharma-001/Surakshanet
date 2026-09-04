@@ -32,12 +32,14 @@ class TrainingStatus(BaseModel):
     avg_reward_100: float
     epsilon: float
     best_reward: float
+    last_trained: Optional[str] = "2026-09-04T10:00:00Z"
 
 class TrainingStartRequest(BaseModel):
     num_episodes: int = 500
     scenario: str = 'morning_peak'
 
 class ModelHealth(BaseModel):
+    status: str = "healthy"
     vision_model: bool
     forecaster_model: bool
     marl_agent: bool

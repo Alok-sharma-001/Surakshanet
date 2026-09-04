@@ -147,10 +147,16 @@ class TrafficForecaster:
         if not self.is_lstm_trained or not self.is_xgb_trained:
             raise ValueError("Models are not fully trained yet.")
             
-        if len(recent_readings) < self.sequence_length:
-            raise ValueError(f"Need at least {self.sequence_length} readings for prediction.")
-            
         df = pd.DataFrame(recent_readings)
+        if 'pcu_value' not in df.columns and 'pcu' in df.columns:
+            df['pcu_value'] = df['pcu']
+
+        if len(df) < self.sequence_length:
+            pad_count = self.sequence_length - len(df)
+            first_row = df.iloc[0:1]
+            pads = pd.concat([first_row] * pad_count, ignore_index=True)
+            df = pd.concat([pads, df], ignore_index=True)
+
         recent_pcu = df['pcu_value'].values[-self.sequence_length:]
         
         features_df = engineer_features(df)

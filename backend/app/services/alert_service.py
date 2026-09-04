@@ -1,120 +1,174 @@
 import uuid
+import datetime
 from typing import List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
-from pydantic import BaseModel
-import datetime
+from sqlalchemy import select, func, desc, delete
 
-# Mocking SQLAlchemy Models since they are not fully defined in context
-class AlertModel:
-    id = "id"
-    junction_id = "junction_id"
-    type = "type"
-    severity = "severity"
-    message = "message"
-    acknowledged = "acknowledged"
-    created_at = "created_at"
-    
-class AlertResponse(BaseModel):
-    id: str
-    junction_id: str
-    type: str
-    severity: str
-    message: str
-    acknowledged: bool
-    created_at: datetime.datetime
+from app.models.alert import Alert, AlertType, AlertSeverity
+from app.schemas.alert import AlertResponse
 
 class AlertEngine:
-    """Service for evaluating conditions and generating alerts."""
-    
+    """Service for managing and evaluating real system alerts backed by PostgreSQL."""
+
     def __init__(self):
-        # Mock thresholds
         self.thresholds = {
             "congestion": {"density": 0.8, "speed": 15.0},
             "spillback": {"risk": 0.85},
             "signal_timeout": 10.0
         }
-        
-    async def evaluate_junction(self, db: AsyncSession, junction_id: str, state: Dict[str, Any]) -> List[AlertResponse]:
-        """Evaluate junction state and create alerts if necessary."""
-        new_alerts = []
-        now = datetime.datetime.utcnow()
-        
-        # 1. CONGESTION Check
-        densities = state.get("densities", [])
-        speeds = state.get("speeds", [])
-        
-        is_congested = False
-        for d, s in zip(densities, speeds):
-            if d > self.thresholds["congestion"]["density"] and s < self.thresholds["congestion"]["speed"]:
-                is_congested = True
-                break
-                
-        if is_congested:
-            new_alerts.append(self._create_alert(junction_id, "CONGESTION", "HIGH", "High congestion detected."))
-            
-        # 2. SPILLBACK Check
-        spillback_risk = state.get("spillback_risk", 0.0)
-        if spillback_risk > self.thresholds["spillback"]["risk"]:
-            new_alerts.append(self._create_alert(junction_id, "SPILLBACK", "CRITICAL", "High spillback risk detected."))
-            
-        # 3. QUEUE OVERFLOW Check
-        queue_length = state.get("queue_length", 0)
-        storage_capacity = state.get("road_storage_capacity", float('inf'))
-        if queue_length > storage_capacity:
-            new_alerts.append(self._create_alert(junction_id, "QUEUE_OVERFLOW", "HIGH", "Queue overflow detected."))
-            
-        # 4. SIGNAL FAILURE Check
-        last_update = state.get("last_update_time", time.time())
-        if time.time() - last_update > self.thresholds["signal_timeout"]:
-            new_alerts.append(self._create_alert(junction_id, "SIGNAL_FAILURE", "CRITICAL", "No state update received."))
-            
-        # Persist to DB (Mock logic for async DB insert)
-        # for a in new_alerts:
-        #    db_alert = AlertORM(**a.dict())
-        #    db.add(db_alert)
-        # await db.commit()
-        
-        return new_alerts
-        
-    def _create_alert(self, junction_id: str, type: str, severity: str, message: str) -> AlertResponse:
-        return AlertResponse(
-            id=str(uuid.uuid4()),
-            junction_id=junction_id,
-            type=type,
-            severity=severity,
-            message=message,
-            acknowledged=False,
-            created_at=datetime.datetime.utcnow()
-        )
-        
-    async def get_alerts(self, db: AsyncSession, junction_id: Optional[str] = None, alert_type: Optional[str] = None, 
-                         severity: Optional[str] = None, acknowledged: Optional[bool] = None, limit: int = 50) -> List[AlertResponse]:
-        """Query alerts with filters."""
-        # Mock DB query logic
-        # stmt = select(AlertModel)
-        # if junction_id: stmt = stmt.where(AlertModel.junction_id == junction_id)
-        # if alert_type: stmt = stmt.where(AlertModel.type == alert_type)
-        # if severity: stmt = stmt.where(AlertModel.severity == severity)
-        # if acknowledged is not None: stmt = stmt.where(AlertModel.acknowledged == acknowledged)
-        # stmt = stmt.limit(limit)
-        # result = await db.execute(stmt)
-        # return result.scalars().all()
-        return []
-        
-    async def acknowledge_alert(self, db: AsyncSession, alert_id: uuid.UUID) -> Optional[AlertResponse]:
-        """Mark alert as acknowledged."""
-        # Mock update logic
-        # stmt = update(AlertModel).where(AlertModel.id == alert_id).values(acknowledged=True)
-        # await db.execute(stmt)
-        # await db.commit()
-        return None
-        
+
+    async def get_alerts(
+        self,
+        db: AsyncSession,
+        junction_id: Optional[str] = None,
+        alert_type: Optional[str] = None,
+        severity: Optional[str] = None,
+        acknowledged: Optional[bool] = None,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[AlertResponse]:
+        """Query alerts from PostgreSQL with optional filters and pagination."""
+        if db is None:
+            return []
+
+        query = select(Alert).order_by(desc(Alert.created_at))
+
+        if junction_id:
+            try:
+                j_uuid = uuid.UUID(str(junction_id))
+                query = query.where(Alert.junction_id == j_uuid)
+            except ValueError:
+                pass
+
+        if alert_type:
+            try:
+                at_enum = AlertType[alert_type.upper()]
+                query = query.where(Alert.alert_type == at_enum)
+            except KeyError:
+                pass
+
+        if severity:
+            try:
+                sev_enum = AlertSeverity[severity.upper()]
+                query = query.where(Alert.severity == sev_enum)
+            except KeyError:
+                pass
+
+        if acknowledged is not None:
+            query = query.where(Alert.is_acknowledged == acknowledged)
+
+        query = query.offset(offset).limit(limit)
+        result = await db.execute(query)
+        alerts = result.scalars().all()
+
+        responses = []
+        for a in alerts:
+            at_val = a.alert_type.value if hasattr(a.alert_type, 'value') else str(a.alert_type)
+            sev_val = a.severity.value if hasattr(a.severity, 'value') else str(a.severity)
+            responses.append(AlertResponse(
+                id=a.id,
+                junction_id=a.junction_id,
+                alert_type=at_val,
+                severity=sev_val,
+                message=a.message,
+                is_acknowledged=a.is_acknowledged,
+                created_at=a.created_at,
+                acknowledged_at=a.acknowledged_at
+            ))
+        return responses
+
     async def get_alert_stats(self, db: AsyncSession) -> Dict[str, Any]:
-        """Return counts by type and severity."""
-        # Mock stat aggregation
-        # counts = await db.execute(select(AlertModel.type, func.count()).group_by(AlertModel.type))
+        """Return counts by type, severity, and status from PostgreSQL."""
+        if db is None:
+            return {
+                "total": 0, "active": 0, "resolved": 0,
+                "by_type": {}, "by_severity": {}
+            }
+
+        result = await db.execute(select(Alert))
+        alerts = result.scalars().all()
+
+        total = len(alerts)
+        active = sum(1 for a in alerts if not a.is_acknowledged)
+        resolved = total - active
+
+        by_type: Dict[str, int] = {}
+        by_severity: Dict[str, int] = {}
+
+        for a in alerts:
+            t = a.alert_type.value if hasattr(a.alert_type, 'value') else str(a.alert_type)
+            s = a.severity.value if hasattr(a.severity, 'value') else str(a.severity)
+            by_type[t] = by_type.get(t, 0) + 1
+            by_severity[s] = by_severity.get(s, 0) + 1
+
         return {
-            "by_type": {"CONGESTION": 0, "SPILLBACK": 0},
-            "by_severity": {"CRITICAL": 0, "HIGH": 0, "LOW": 0}
+            "total": total,
+            "active": active,
+            "resolved": resolved,
+            "by_type": by_type,
+            "by_severity": by_severity
         }
+
+    async def get_alert_by_id(self, db: AsyncSession, alert_id: uuid.UUID) -> Optional[AlertResponse]:
+        """Fetch a single alert by UUID."""
+        if db is None:
+            return None
+        result = await db.execute(select(Alert).where(Alert.id == alert_id))
+        a = result.scalar_one_or_none()
+        if not a:
+            return None
+
+        at_val = a.alert_type.value if hasattr(a.alert_type, 'value') else str(a.alert_type)
+        sev_val = a.severity.value if hasattr(a.severity, 'value') else str(a.severity)
+        return AlertResponse(
+            id=a.id,
+            junction_id=a.junction_id,
+            alert_type=at_val,
+            severity=sev_val,
+            message=a.message,
+            is_acknowledged=a.is_acknowledged,
+            created_at=a.created_at,
+            acknowledged_at=a.acknowledged_at
+        )
+
+    async def acknowledge_alert(self, db: AsyncSession, alert_id: uuid.UUID) -> Optional[AlertResponse]:
+        """Mark alert as acknowledged in the database."""
+        if db is None:
+            return None
+        result = await db.execute(select(Alert).where(Alert.id == alert_id))
+        a = result.scalar_one_or_none()
+        if not a:
+            return None
+
+        a.is_acknowledged = True
+        a.acknowledged_at = datetime.datetime.utcnow()
+        db.add(a)
+        await db.commit()
+        await db.refresh(a)
+
+        at_val = a.alert_type.value if hasattr(a.alert_type, 'value') else str(a.alert_type)
+        sev_val = a.severity.value if hasattr(a.severity, 'value') else str(a.severity)
+        return AlertResponse(
+            id=a.id,
+            junction_id=a.junction_id,
+            alert_type=at_val,
+            severity=sev_val,
+            message=a.message,
+            is_acknowledged=a.is_acknowledged,
+            created_at=a.created_at,
+            acknowledged_at=a.acknowledged_at
+        )
+
+    async def delete_alert(self, db: AsyncSession, alert_id: uuid.UUID) -> bool:
+        """Delete an alert record from the database."""
+        if db is None:
+            return False
+        result = await db.execute(select(Alert).where(Alert.id == alert_id))
+        a = result.scalar_one_or_none()
+        if not a:
+            return False
+        await db.delete(a)
+        await db.commit()
+        return True
+
+alert_service = AlertEngine()

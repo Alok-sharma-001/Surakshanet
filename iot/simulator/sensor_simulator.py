@@ -1,6 +1,7 @@
 import json
 import time
 import random
+import uuid
 import paho.mqtt.client as mqtt
 from typing import Dict, Any, List
 
@@ -9,78 +10,61 @@ class SensorSimulator:
         self.broker_host = broker_host
         self.broker_port = broker_port
         self.junctions = junctions
-        self.client = mqtt.Client()
-        self.client.connect(self.broker_host, self.broker_port, 60)
-        self.client.loop_start()
+        self.client = mqtt.Client(client_id=f"sim-{uuid.uuid4().hex[:6]}")
+        try:
+            self.client.connect(self.broker_host, self.broker_port, 60)
+            self.client.loop_start()
+            print(f"Connected to MQTT broker at {broker_host}:{broker_port}")
+        except Exception as e:
+            print(f"Failed to connect to broker: {e}")
 
-    def generate_camera_data(self, junction_id: str, approach: str) -> Dict[str, Any]:
+    def generate_telemetry(self, junction: Dict[str, Any]) -> Dict[str, Any]:
         hour = time.localtime().tm_hour
         peak = (8 <= hour <= 11) or (17 <= hour <= 20)
-        multiplier = 2.0 if peak else 1.0
-        
-        counts = {
-            "car": int(random.uniform(5, 15) * 0.25 * multiplier),
-            "motorcycle": int(random.uniform(5, 15) * 0.40 * multiplier),
-            "bus": int(random.uniform(0, 2) * 0.05 * multiplier),
-            "truck": int(random.uniform(0, 2) * 0.05 * multiplier),
-            "auto_rickshaw": int(random.uniform(2, 5) * 0.15 * multiplier),
-            "bicycle": int(random.uniform(1, 3) * 0.10 * multiplier)
-        }
-        
-        pcu = (
-            counts["car"] * 1.0 +
-            counts["motorcycle"] * 0.5 +
-            counts["bus"] * 3.0 +
-            counts["truck"] * 3.0 +
-            counts["auto_rickshaw"] * 0.75 +
-            counts["bicycle"] * 0.2
-        )
-        return {"counts": counts, "pcu": pcu}
+        multiplier = 1.8 if peak else 1.0
 
-    def generate_induction_data(self, junction_id: str, approach: str) -> Dict[str, float]:
+        cars = int(random.uniform(10, 30) * multiplier)
+        motorcycles = int(random.uniform(15, 45) * multiplier)
+        buses = int(random.uniform(1, 5) * multiplier)
+        trucks = int(random.uniform(1, 4) * multiplier)
+        autos = int(random.uniform(5, 15) * multiplier)
+
+        pcu = round(cars * 1.0 + motorcycles * 0.5 + buses * 3.0 + trucks * 3.0 + autos * 1.0, 1)
+        speed = round(max(8.0, 52.0 - (pcu * 0.4) + random.uniform(-3, 3)), 1)
+        queue = round(max(0.0, (pcu - 25) * 1.2), 1)
+
+        sensor_id = junction.get("sensor_id", str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{junction['id']}-N")))
+
         return {
-            "vehicle_count": random.uniform(10, 50),
-            "occupancy": random.uniform(0.1, 0.9)
-        }
-
-    def generate_acoustic_data(self, junction_id: str, approach: str) -> Dict[str, float]:
-        return {
-            "noise_level": random.uniform(60.0, 90.0),
-            "estimated_density": random.uniform(0.1, 0.8)
-        }
-
-    def generate_gps_probe_data(self, junction_id: str) -> Dict[str, float]:
-        return {
-            "avg_speed": random.uniform(10.0, 60.0),
-            "sample_size": random.uniform(5, 20)
-        }
-
-    def generate_telemetry(self, junction_id: str) -> Dict[str, Any]:
-        telemetry = {
-            "junction_id": junction_id,
+            "junction_id": junction["id"],
+            "junction_name": junction["name"],
+            "sensor_id": sensor_id,
             "timestamp": time.time(),
-            "north_pcu": self.generate_camera_data(junction_id, "N")["pcu"],
-            "east_pcu": self.generate_camera_data(junction_id, "E")["pcu"],
-            "south_pcu": self.generate_camera_data(junction_id, "S")["pcu"],
-            "west_pcu": self.generate_camera_data(junction_id, "W")["pcu"],
-            "avg_speed": self.generate_gps_probe_data(junction_id)["avg_speed"],
-            "queue_length": random.uniform(0.0, 100.0),
-            "phase": random.choice(["NS_green", "EW_green", "N_right", "S_right"]),
-            "vehicle_counts": self.generate_camera_data(junction_id, "N")["counts"]
+            "pcu_value": pcu,
+            "avg_speed": speed,
+            "queue_length": queue,
+            "vehicle_count": cars + motorcycles + buses + trucks + autos,
+            "vehicle_breakdown": {
+                "car": cars,
+                "motorcycle": motorcycles,
+                "bus": buses,
+                "truck": trucks,
+                "auto_rickshaw": autos
+            }
         }
-        return telemetry
 
-    def publish_telemetry(self, junction_id: str, data: Dict[str, Any]) -> None:
-        topic = f"surakshanet/junction/{junction_id}/telemetry"
+    def publish_telemetry(self, junction: Dict[str, Any], data: Dict[str, Any]) -> None:
+        topic = f"surakshanet/sensors/{data['sensor_id']}/telemetry"
         self.client.publish(topic, json.dumps(data))
-        print(f"Published to {topic}: {data}")
+        print(f"[{time.strftime('%H:%M:%S')}] Published to {topic} -> {junction['name']}: {data['pcu_value']} PCU, {data['avg_speed']} km/h")
 
     def run(self, interval_seconds: int = 5) -> None:
         try:
+            print(f"Starting IoT Sensor Simulator across {len(self.junctions)} corridors (interval: {interval_seconds}s)...")
             while True:
                 for junction in self.junctions:
-                    data = self.generate_telemetry(junction["id"])
-                    self.publish_telemetry(junction["id"], data)
+                    data = self.generate_telemetry(junction)
+                    self.publish_telemetry(junction, data)
                 time.sleep(interval_seconds)
         except KeyboardInterrupt:
             print("Simulator stopped.")
@@ -88,11 +72,17 @@ class SensorSimulator:
             self.client.disconnect()
 
 if __name__ == '__main__':
-    sample_junctions = [
-        {"id": "j1", "name": "Connaught Place", "approaches": ["N", "E", "S", "W"]},
-        {"id": "j2", "name": "India Gate", "approaches": ["N", "E", "S", "W"]},
-        {"id": "j3", "name": "Rajiv Chowk", "approaches": ["N", "E", "S", "W"]},
-        {"id": "j4", "name": "ITO", "approaches": ["N", "E", "S", "W"]}
+    city_corridors = [
+        {"id": "DEL-CP-01", "name": "Connaught Place Outer Circle"},
+        {"id": "DEL-ITO-02", "name": "ITO Crossing - Vikas Marg"},
+        {"id": "DEL-AIIMS-03", "name": "AIIMS Flyover - Ring Road"},
+        {"id": "DEL-ASH-04", "name": "Ashram Chowk - Mathura Road"},
+        {"id": "DEL-DHK-05", "name": "Dhaula Kuan Interchange"},
+        {"id": "DEL-LAJ-06", "name": "Lajpat Nagar Ring Road"},
+        {"id": "BLR-MGR-01", "name": "MG Road - Brigade Junction"},
+        {"id": "BLR-SLK-02", "name": "Silk Board Junction"},
+        {"id": "BLR-IND-03", "name": "Indiranagar 100ft Road"},
+        {"id": "BLR-KOR-04", "name": "Koramangala Sony World Signal"}
     ]
-    simulator = SensorSimulator("localhost", 1883, sample_junctions)
-    simulator.run()
+    simulator = SensorSimulator("localhost", 1883, city_corridors)
+    simulator.run(interval_seconds=5)

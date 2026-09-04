@@ -1,9 +1,15 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Header from './Header';
+import { useTrafficStore } from '../../store/trafficStore';
 
 const DashboardLayout: React.FC = () => {
+  useEffect(() => {
+    // Pre-fetch city junction topology into global store on mount
+    useTrafficStore.getState().fetchJunctions();
+  }, []);
+
   return (
     <div className="flex h-screen bg-surface-secondary overflow-hidden">
       <Sidebar />

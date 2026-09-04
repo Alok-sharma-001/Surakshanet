@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from typing import Any, List, Optional
+import uuid
 from uuid import UUID
 from datetime import datetime
 
@@ -40,7 +41,7 @@ async def get_junction(
         raise HTTPException(status_code=404, detail="Junction not found")
     return junction
 
-@router.post("/junctions", response_model=JunctionResponse)
+@router.post("/junctions", response_model=JunctionResponse, status_code=status.HTTP_201_CREATED)
 async def create_junction(
     junction_in: JunctionCreate,
     db: AsyncSession = Depends(get_db),
@@ -88,17 +89,42 @@ async def list_sensors(
     result = await db.execute(query)
     return result.scalars().all()
 
-@router.post("/sensors", response_model=SensorResponse)
+@router.post("/sensors", response_model=SensorResponse, status_code=status.HTTP_201_CREATED)
 async def create_sensor(
     sensor_in: SensorCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role("ADMIN"))
 ) -> Any:
-    sensor = TrafficSensor(**sensor_in.model_dump())
+    raw_type = (sensor_in.sensor_type or sensor_in.type or "CAMERA").upper()
+    valid_types = ["CAMERA", "INDUCTION", "ACOUSTIC", "GPS"]
+    sensor_type = raw_type if raw_type in valid_types else "CAMERA"
+    
+    raw_dir = (sensor_in.approach_direction or "N").upper()
+    valid_dirs = ["N", "E", "S", "W"]
+    approach_direction = raw_dir if raw_dir in valid_dirs else "N"
+
+    sensor = TrafficSensor(
+        junction_id=sensor_in.junction_id,
+        sensor_type=sensor_type,
+        approach_direction=approach_direction,
+        is_active=True
+    )
     db.add(sensor)
     await db.commit()
     await db.refresh(sensor)
-    return sensor
+    
+    st_val = sensor.sensor_type.value if hasattr(sensor.sensor_type, 'value') else str(sensor.sensor_type)
+    ad_val = sensor.approach_direction.value if hasattr(sensor.approach_direction, 'value') else str(sensor.approach_direction)
+    return SensorResponse(
+        id=sensor.id,
+        junction_id=sensor.junction_id,
+        sensor_type=st_val,
+        approach_direction=ad_val,
+        is_active=sensor.is_active,
+        created_at=sensor.created_at,
+        type=st_val.lower(),
+        name=sensor_in.name or f"{st_val} Sensor"
+    )
 
 @router.get("/readings", response_model=List[TrafficReadingResponse])
 async def list_readings(
@@ -139,13 +165,37 @@ async def get_latest_readings(
     result = await db.execute(query)
     return result.scalars().all()
 
-@router.post("/readings", response_model=TrafficReadingResponse)
+@router.post("/readings", response_model=TrafficReadingResponse, status_code=status.HTTP_201_CREATED)
 async def create_reading(
     reading_in: TrafficReadingCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user) 
 ) -> Any:
-    reading = TrafficReading(**reading_in.model_dump())
+    j_id = reading_in.junction_id
+    if not j_id:
+        res = await db.execute(select(TrafficSensor).where(TrafficSensor.id == reading_in.sensor_id))
+        sensor = res.scalar_one_or_none()
+        if sensor:
+            j_id = sensor.junction_id
+        else:
+            j_id = uuid.uuid4()
+
+    speed = reading_in.avg_speed if reading_in.avg_speed is not None else reading_in.average_speed
+    pcu = reading_in.pcu_value if reading_in.pcu_value is not None else (reading_in.vehicle_count * 1.0)
+    ts = reading_in.timestamp if reading_in.timestamp is not None else datetime.utcnow()
+    if ts.tzinfo is not None:
+        ts = ts.replace(tzinfo=None)
+
+    reading = TrafficReading(
+        sensor_id=reading_in.sensor_id,
+        junction_id=j_id,
+        vehicle_count=reading_in.vehicle_count,
+        pcu_value=pcu,
+        avg_speed=speed,
+        queue_length=reading_in.queue_length or 0.0,
+        vehicle_breakdown=reading_in.vehicle_breakdown or {},
+        timestamp=ts
+    )
     db.add(reading)
     await db.commit()
     await db.refresh(reading)

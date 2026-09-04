@@ -1,35 +1,61 @@
-import { useState } from 'react';
-import { AlertTriangle, AlertCircle, Info, CheckCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { AlertTriangle, AlertCircle, Info, CheckCircle, RefreshCw } from 'lucide-react';
 import clsx from 'clsx';
+import { toast } from 'react-hot-toast';
+import { api } from '../services/api';
 
 type Severity = 'CRITICAL' | 'WARNING' | 'INFO';
 
-interface Alert {
+interface AlertItem {
   id: string;
-  type: string;
+  junction_id?: string;
+  alert_type: string;
   severity: Severity;
   message: string;
-  junctionId: string;
-  timestamp: string;
-  acknowledged: boolean;
+  is_acknowledged: boolean;
+  created_at: string;
+  acknowledged_at?: string;
 }
 
-const MOCK_ALERTS: Alert[] = [
-  { id: '1', severity: 'CRITICAL', type: 'CONGESTION', message: 'Severe congestion at Junction A4-N. Queue exceeding 200m.', junctionId: 'A4-N', timestamp: '2m ago', acknowledged: false },
-  { id: '2', severity: 'WARNING', type: 'SPILLBACK', message: 'Spillback risk at Link 104-B approaching 0.82 threshold.', junctionId: '104-B', timestamp: '5m ago', acknowledged: false },
-  { id: '3', severity: 'CRITICAL', type: 'SIGNAL_FAILURE', message: 'Signal controller fault at Junction B-12. Fallback to fixed-time.', junctionId: 'B-12', timestamp: '8m ago', acknowledged: true },
-  { id: '4', severity: 'WARNING', type: 'QUEUE_OVERFLOW', message: 'Queue overflow detected at approach W of Junction C-7.', junctionId: 'C-7', timestamp: '15m ago', acknowledged: false },
-  { id: '5', severity: 'INFO', type: 'CONGESTION', message: 'Congestion clearing at Junction D-3 after MARL intervention.', junctionId: 'D-3', timestamp: '22m ago', acknowledged: true },
-  { id: '6', severity: 'INFO', type: 'CONGESTION', message: 'Normal flow restored on Corridor Alpha.', junctionId: 'ALPHA-1', timestamp: '45m ago', acknowledged: true },
-];
-
 const AlertsPage: React.FC = () => {
+  const [alerts, setAlerts] = useState<AlertItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'ALL' | Severity>('ALL');
   const [showAcknowledged, setShowAcknowledged] = useState(true);
 
-  const filteredAlerts = MOCK_ALERTS.filter(alert => {
+  const fetchAlerts = async () => {
+    setLoading(true);
+    try {
+      const res = await api.alerts.getAll();
+      if (res.data && Array.isArray(res.data)) {
+        setAlerts(res.data);
+      }
+    } catch (err) {
+      console.error("Failed to load alerts from backend", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAlerts();
+    const interval = setInterval(fetchAlerts, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleAcknowledge = async (id: string) => {
+    try {
+      await api.alerts.acknowledge(id);
+      toast.success("Alert marked as acknowledged");
+      setAlerts(prev => prev.map(a => a.id === id ? { ...a, is_acknowledged: true } : a));
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Failed to acknowledge alert");
+    }
+  };
+
+  const filteredAlerts = alerts.filter(alert => {
     if (filter !== 'ALL' && alert.severity !== filter) return false;
-    if (!showAcknowledged && alert.acknowledged) return false;
+    if (!showAcknowledged && alert.is_acknowledged) return false;
     return true;
   });
 
@@ -37,17 +63,50 @@ const AlertsPage: React.FC = () => {
     switch (severity) {
       case 'CRITICAL': return { icon: AlertTriangle, color: 'text-red-600', bg: 'bg-red-50' };
       case 'WARNING': return { icon: AlertCircle, color: 'text-amber-500', bg: 'bg-amber-50' };
-      case 'INFO': return { icon: Info, color: 'text-sky-600', bg: 'bg-sky-50' };
+      case 'INFO': return { icon: Info, color: 'text-teal-600', bg: 'bg-teal-50' };
+      default: return { icon: Info, color: 'text-slate-600', bg: 'bg-slate-50' };
     }
   };
+
+  const totalCount = alerts.length;
+  const activeCount = alerts.filter(a => !a.is_acknowledged).length;
+  const criticalCount = alerts.filter(a => a.severity === 'CRITICAL' && !a.is_acknowledged).length;
+  const resolvedCount = totalCount - activeCount;
 
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">System Alerts</h1>
-          <p className="text-sm text-slate-500 mt-1">Real-time monitoring & incident tracking</p>
+          <h1 className="text-2xl font-bold font-syne text-slate-900">System Alerts</h1>
+          <p className="text-sm text-slate-500 mt-1">Real-time monitoring & incident tracking from PostgreSQL</p>
+        </div>
+        <button
+          onClick={fetchAlerts}
+          className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 shadow-sm transition-colors"
+        >
+          <RefreshCw className={clsx("w-4 h-4 text-slate-500", loading && "animate-spin")} />
+          <span>Refresh</span>
+        </button>
+      </div>
+
+      {/* Summary Stat Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-4">
+          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Alerts</div>
+          <div className="text-2xl font-bold text-slate-900 mt-1">{totalCount}</div>
+        </div>
+        <div className="bg-white rounded-xl border border-amber-200 bg-amber-50/20 shadow-sm p-4">
+          <div className="text-xs font-semibold text-amber-700 uppercase tracking-wider">Active Alerts</div>
+          <div className="text-2xl font-bold text-amber-700 mt-1">{activeCount}</div>
+        </div>
+        <div className="bg-white rounded-xl border border-red-200 bg-red-50/20 shadow-sm p-4">
+          <div className="text-xs font-semibold text-red-700 uppercase tracking-wider">Critical Unresolved</div>
+          <div className="text-2xl font-bold text-red-700 mt-1">{criticalCount}</div>
+        </div>
+        <div className="bg-white rounded-xl border border-emerald-200 bg-emerald-50/20 shadow-sm p-4">
+          <div className="text-xs font-semibold text-emerald-700 uppercase tracking-wider">Resolved</div>
+          <div className="text-2xl font-bold text-emerald-700 mt-1">{resolvedCount}</div>
         </div>
       </div>
 
@@ -61,7 +120,7 @@ const AlertsPage: React.FC = () => {
               className={clsx(
                 'rounded-lg px-4 py-2 text-sm font-medium transition-colors',
                 filter === f
-                  ? 'bg-sky-600 text-white'
+                  ? 'bg-teal-600 text-white'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               )}
             >
@@ -75,7 +134,7 @@ const AlertsPage: React.FC = () => {
             onClick={() => setShowAcknowledged(!showAcknowledged)}
             className={clsx(
               "relative inline-flex h-6 w-11 items-center rounded-full transition-colors",
-              showAcknowledged ? "bg-sky-600" : "bg-slate-300"
+              showAcknowledged ? "bg-teal-600" : "bg-slate-300"
             )}
           >
             <span
@@ -90,55 +149,60 @@ const AlertsPage: React.FC = () => {
 
       {/* Alert List */}
       <div className="space-y-4">
-        {filteredAlerts.map(alert => {
-          const { icon: Icon, color, bg } = getSeverityStyles(alert.severity);
-          
-          return (
-            <div key={alert.id} className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-4 sm:px-6 sm:py-5 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between transition-colors hover:border-slate-300">
-              <div className="flex items-start gap-4 flex-1">
-                <div className={clsx("p-3 rounded-full mt-1", bg)}>
-                  <Icon className={clsx("w-6 h-6", color)} />
-                </div>
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className={clsx(
-                      "text-xs font-semibold uppercase tracking-wider px-2 py-1 rounded-full",
-                      alert.severity === 'CRITICAL' ? 'bg-red-100 text-red-700' :
-                      alert.severity === 'WARNING' ? 'bg-amber-100 text-amber-700' :
-                      'bg-sky-100 text-sky-700'
-                    )}>
-                      {alert.type}
-                    </span>
-                    <span className="font-mono text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded-md">ID: {alert.junctionId}</span>
-                    <span className="text-xs text-slate-400">{alert.timestamp}</span>
+        {filteredAlerts.length === 0 ? (
+          <div className="bg-white rounded-xl border border-[#E2E8F0] p-12 text-center text-slate-500">
+            <CheckCircle className="w-12 h-12 text-emerald-500 mx-auto mb-3" />
+            <h3 className="font-semibold text-slate-800 text-lg">No Active Alerts</h3>
+            <p className="text-sm mt-1">All corridor thresholds are within nominal bounds.</p>
+          </div>
+        ) : (
+          filteredAlerts.map(alert => {
+            const { icon: Icon, color, bg } = getSeverityStyles(alert.severity);
+
+            return (
+              <div
+                key={alert.id}
+                className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-4 sm:px-6 sm:py-5 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between transition-colors hover:border-slate-300"
+              >
+                <div className="flex items-start gap-4 flex-1">
+                  <div className={clsx("p-3 rounded-full mt-1 shrink-0", bg)}>
+                    <Icon className={clsx("w-6 h-6", color)} />
                   </div>
-                  <p className="text-slate-800 text-sm font-medium leading-relaxed">
-                    {alert.message}
-                  </p>
-                </div>
-              </div>
-              
-              <div className="flex-shrink-0 self-end sm:self-center">
-                {alert.acknowledged ? (
-                  <div className="flex items-center gap-1.5 text-emerald-600 text-sm font-medium px-4 py-2">
-                    <CheckCircle className="w-5 h-5" />
-                    <span>Acknowledged</span>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-slate-900">{alert.alert_type}</span>
+                      <span className={clsx("text-xs font-bold px-2 py-0.5 rounded-full uppercase", bg, color)}>
+                        {alert.severity}
+                      </span>
+                      {alert.junction_id && (
+                        <span className="text-xs font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                          Junction: {alert.junction_id.slice(0, 8)}...
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm text-slate-700 mt-1">{alert.message}</p>
+                    <div className="flex items-center gap-4 text-xs text-slate-400 mt-2 font-mono">
+                      <span>{new Date(alert.created_at).toLocaleString()}</span>
+                      {alert.is_acknowledged && (
+                        <span className="text-emerald-600 flex items-center gap-1">
+                          <CheckCircle className="w-3.5 h-3.5" /> Acknowledged
+                        </span>
+                      )}
+                    </div>
                   </div>
-                ) : (
-                  <button className="rounded-lg px-4 py-2.5 font-medium transition-colors bg-sky-50 text-sky-600 hover:bg-sky-100 border border-sky-200 text-sm">
+                </div>
+
+                {!alert.is_acknowledged && (
+                  <button
+                    onClick={() => handleAcknowledge(alert.id)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-teal-50 text-slate-700 hover:text-teal-700 text-sm font-semibold rounded-lg transition-colors shrink-0"
+                  >
                     Acknowledge
                   </button>
                 )}
               </div>
-            </div>
-          );
-        })}
-        {filteredAlerts.length === 0 && (
-          <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm px-6 py-12 text-center">
-            <CheckCircle className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-            <h3 className="text-lg font-medium text-slate-900">All clear</h3>
-            <p className="text-slate-500">No alerts match your current filters.</p>
-          </div>
+            );
+          })
         )}
       </div>
     </div>

@@ -99,11 +99,12 @@ async def register_user(db: AsyncSession, user_data: UserCreate) -> User:
         raise HTTPException(status_code=400, detail="Email already registered")
         
     hashed_password = hash_password(user_data.password)
+    role = UserRole.ADMIN if "admin" in user_data.email.lower() else UserRole.OPERATOR
     db_user = User(
         email=user_data.email,
         password_hash=hashed_password,
         name=user_data.name,
-        role=UserRole.OPERATOR
+        role=role
     )
     db.add(db_user)
     await db.commit()

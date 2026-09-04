@@ -29,8 +29,10 @@ class JunctionUpdate(BaseModel):
 
 class SensorCreate(BaseModel):
     junction_id: UUID
-    sensor_type: str
-    approach_direction: str
+    sensor_type: Optional[str] = None
+    approach_direction: Optional[str] = "N"
+    type: Optional[str] = None
+    name: Optional[str] = None
 
 class SensorResponse(BaseModel):
     id: UUID
@@ -39,17 +41,21 @@ class SensorResponse(BaseModel):
     approach_direction: str
     is_active: bool
     created_at: datetime
+    type: Optional[str] = None
+    name: Optional[str] = None
     
     model_config = ConfigDict(from_attributes=True)
 
 class TrafficReadingCreate(BaseModel):
     sensor_id: UUID
-    junction_id: UUID
-    vehicle_count: float
-    pcu_value: float
+    junction_id: Optional[UUID] = None
+    vehicle_count: float = 0.0
+    pcu_value: Optional[float] = None
     avg_speed: Optional[float] = None
+    average_speed: Optional[float] = None
     queue_length: Optional[float] = None
     vehicle_breakdown: Optional[Dict[str, Any]] = None
+    timestamp: Optional[datetime] = None
 
 class TrafficReadingResponse(BaseModel):
     id: UUID
