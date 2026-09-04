@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<viewsettings>
+    <scheme name="real world">
+        <vehicles vehicleSize="3.5" showBlinker="true"/>
+    </scheme>
+    <viewport zoom="280" x="550" y="100"/>
+    <delay value="80"/>
+</viewsettings>

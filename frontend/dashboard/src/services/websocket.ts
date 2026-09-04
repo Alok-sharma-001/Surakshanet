@@ -10,29 +10,36 @@ class WebSocketService {
     if (this.sockets.has(channel)) return;
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    const ws = new WebSocket(`${protocol}//${host}/ws/${channel}`);
+    const wsUrl = window.location.port === '5173'
+      ? `ws://${window.location.hostname}:8000/ws/${channel}`
+      : `${protocol}//${window.location.host}/ws/${channel}`;
+
+    const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
-      console.log(`WebSocket connected: ${channel}`);
+      console.log(`[Surakshanet WS] Connected to channel: ${channel} via ${wsUrl}`);
       this.startHeartbeat(channel, ws);
     };
 
     ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      const channelCallbacks = this.callbacks.get(channel);
-      if (channelCallbacks) {
-        channelCallbacks.forEach(cb => cb(data));
+      try {
+        const data = JSON.parse(event.data);
+        const channelCallbacks = this.callbacks.get(channel);
+        if (channelCallbacks) {
+          channelCallbacks.forEach(cb => cb(data));
+        }
+      } catch (e) {
+        console.error(`[Surakshanet WS] Failed to parse message on ${channel}:`, e);
       }
     };
 
     ws.onclose = () => {
-      console.log(`WebSocket disconnected: ${channel}`);
+      console.log(`[Surakshanet WS] Disconnected: ${channel}. Reconnecting in 2s...`);
       this.sockets.delete(channel);
       this.stopHeartbeat(channel);
       
-      // Auto-reconnect with 5s delay
-      const timeoutId = window.setTimeout(() => this.connect(channel), 5000);
+      // Auto-reconnect with 2s delay
+      const timeoutId = window.setTimeout(() => this.connect(channel), 2000);
       this.reconnectTimeouts.set(channel, timeoutId);
     };
 

@@ -37,7 +37,8 @@ export default function TrafficMapPage() {
   const [throughput, setThroughput] = useState(1185);
   const [networkLos, setNetworkLos] = useState('C Fair Flow');
   const [activeAlerts, setActiveAlerts] = useState(2);
-  const [isTwinConnected, setIsTwinConnected] = useState(true);
+  const [isTwinConnected, setIsTwinConnected] = useState(false);
+  const [lastStepReceived, setLastStepReceived] = useState<number | null>(null);
 
   // Junction-level live telemetry
   const [junctionsData, setJunctionsData] = useState(DEFAULT_JUNCTIONS);
@@ -57,6 +58,9 @@ export default function TrafficMapPage() {
 
     const unsubscribeTraffic = wsService.onMessage('traffic', (data: any) => {
       setIsTwinConnected(true);
+      if (data.step !== undefined) {
+        setLastStepReceived(data.step);
+      }
       if (data.total_vehicles !== undefined) {
         setTotalVehicles(data.total_vehicles);
       }
@@ -263,12 +267,20 @@ export default function TrafficMapPage() {
       {/* TOP METRIC RIBBON - FULLY DYNAMIC LIVE DATA */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center space-x-3 w-max">
         {/* Connection Status Badge */}
-        <div className="bg-slate-900/90 backdrop-blur-md rounded-xl border border-slate-700/80 shadow-xl px-3.5 py-3 flex items-center space-x-2 text-white">
-          <div className={clsx("w-2.5 h-2.5 rounded-full", isTwinConnected ? "bg-emerald-400 animate-ping" : "bg-amber-400")} />
+        <div className={clsx(
+          "backdrop-blur-md rounded-xl border shadow-xl px-3.5 py-3 flex items-center space-x-2 text-white transition-all",
+          isTwinConnected ? "bg-slate-900/90 border-emerald-500/60" : "bg-slate-900/90 border-amber-500/60"
+        )}>
+          <div className={clsx(
+            "w-2.5 h-2.5 rounded-full",
+            isTwinConnected ? "bg-emerald-400 animate-ping" : "bg-amber-400 animate-pulse"
+          )} />
           <div>
-            <div className="text-[9px] font-bold text-emerald-400 uppercase tracking-widest font-mono">SUMO DIGITAL TWIN</div>
+            <div className={clsx("text-[9px] font-bold uppercase tracking-widest font-mono", isTwinConnected ? "text-emerald-400" : "text-amber-400")}>
+              SUMO DIGITAL TWIN
+            </div>
             <div className="text-xs font-mono font-bold text-slate-200">
-              {isTwinConnected ? "STREAM: LIVE" : "STANDALONE"}
+              {isTwinConnected ? `STREAM: LIVE (Step ${lastStepReceived ?? 0})` : "STANDALONE SIM"}
             </div>
           </div>
         </div>
