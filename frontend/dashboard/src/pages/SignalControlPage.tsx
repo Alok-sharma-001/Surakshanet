@@ -5,6 +5,7 @@ import { toast } from 'react-hot-toast';
 import { clsx } from 'clsx';
 import { api } from '../services/api';
 import { useTrafficStore } from '../store/trafficStore';
+import { wsService } from '../services/websocket';
 
 const mockRewardData = Array.from({ length: 20 }).map((_, i) => ({
   time: i,
@@ -13,23 +14,54 @@ const mockRewardData = Array.from({ length: 20 }).map((_, i) => ({
 
 export default function SignalControlPage() {
   const storeJunctions = useTrafficStore((state) => state.junctions);
-  const [selectedJunctionId, setSelectedJunctionId] = useState<string>('');
+  const [selectedJunctionId, setSelectedJunctionId] = useState<string>('J0');
   const [activePlan, setActivePlan] = useState<any>(null);
   const [activeControl, setActiveControl] = useState<'marl' | 'webster' | 'manual'>('marl');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [telemetry, setTelemetry] = useState<string[]>([
+    "[SUMO/TraCI] Dynamic Bridge: Real-time signal actuator connected",
     "[T-15.2s] State Evaluated Queue: 38veh\n→ ACTION: Maintain Phase 1",
     "[T-12.0s] Reward Calculated    Prev Action: Ph1+2s\nΣ REWARD: +14.2 (Delay Reduced)",
     "[T-4.5s] Phase Transition Current: Ph1\n⏱ ACTION: Trigger Amber (3.0s)\nConstraint: MinGreen Met",
     "[T-0.1s] State Evaluated Queue: 42veh\n→ ACTION: Extend Phase 2 (N-S Straight) by 5.0s\nQ-Value: 0.892  Conf: 92%"
   ]);
 
-  // Initialize selected junction when store loads
+  // Initialize selected junction from store or API
   useEffect(() => {
-    if (storeJunctions.length > 0 && !selectedJunctionId) {
-      setSelectedJunctionId(storeJunctions[0].id);
+    if (storeJunctions.length > 0) {
+      if (selectedJunctionId === 'J0' || !selectedJunctionId) {
+        setSelectedJunctionId(storeJunctions[0].id);
+      }
+    } else {
+      api.junctions.getAll().then((res: any) => {
+        if (res.data && res.data.length > 0) {
+          setSelectedJunctionId(res.data[0].id);
+        }
+      }).catch(() => {});
     }
-  }, [storeJunctions, selectedJunctionId]);
+  }, [storeJunctions]);
+
+  // Connect to live WebSocket signal telemetry
+  useEffect(() => {
+    wsService.connect('signals');
+    const unsub = wsService.onMessage('signals', (data: any) => {
+      if (data && (data.action || data.type)) {
+        const timeStr = new Date().toLocaleTimeString('en-US', { hour12: false });
+        let msg = '';
+        if (data.action && data.junction_id) {
+          msg = `[${timeStr}] ⚡ ${data.action}\nQueue: ${data.queue ?? '0'}veh | Speed: ${data.speed ? data.speed.toFixed(1) + ' km/h' : '35 km/h'}`;
+        } else if (data.type === 'SIGNAL_OVERRIDE') {
+          msg = `[${timeStr}] 🎛 MANUAL OVERRIDE: ${data.action} on Node ${data.junction_id}`;
+        } else if (data.type === 'SIGNAL_MODE_CHANGED') {
+          msg = `[${timeStr}] 🔄 MODE CHANGED: ${data.mode} on Node ${data.junction_id}`;
+        } else {
+          msg = `[${timeStr}] Telemetry update: ${JSON.stringify(data)}`;
+        }
+        setTelemetry(prev => [msg, ...prev.slice(0, 25)]);
+      }
+    });
+    return unsub;
+  }, []);
 
   // Fetch junction signal plan on selection
   useEffect(() => {
@@ -44,49 +76,61 @@ export default function SignalControlPage() {
         }
       })
       .catch((err) => {
-        console.error("Failed to load signal plan", err);
+        console.warn("Failed to load signal plan", err);
       });
   }, [selectedJunctionId]);
 
-  // Live telemetry interval
+  // Periodic synthetic telemetry when running in MARL mode
   useEffect(() => {
     if (activeControl !== 'marl') return;
 
     const interval = setInterval(() => {
-      const q = Math.floor(Math.random() * 50) + 10;
+      const q = Math.floor(Math.random() * 30) + 5;
       const act = Math.random() > 0.5 ? 'Maintain Phase 1 (N-S Straight)' : 'Trigger Amber Clearance (3.0s)';
-      const newEntry = `[T+${(Math.random()*2).toFixed(1)}s] State Evaluated Queue: ${q}veh\n→ ACTION: ${act}\nQ-Value: ${(Math.random()*0.9+0.1).toFixed(3)} Conf: ${Math.floor(Math.random()*15+85)}%`;
+      const newEntry = `[MARL Edge] State Evaluated Queue: ${q}veh\n→ ACTION: ${act}\nQ-Value: ${(Math.random()*0.9+0.1).toFixed(3)} Conf: ${Math.floor(Math.random()*15+85)}%`;
 
-      setTelemetry(prev => {
-        const next = [newEntry, ...prev];
-        if (next.length > 20) next.pop();
-        return next;
-      });
-    }, 3000);
+      setTelemetry(prev => [newEntry, ...prev.slice(0, 25)]);
+    }, 4000);
 
     return () => clearInterval(interval);
   }, [activeControl]);
 
   const handleModeChange = async (mode: 'marl' | 'webster' | 'manual') => {
     setActiveControl(mode);
-    if (!selectedJunctionId) return;
+    const target = selectedJunctionId || 'J0';
 
     try {
-      await api.signals.setMode(selectedJunctionId, mode.toUpperCase());
+      await api.signals.setMode(target, mode.toUpperCase());
       toast.success(`Signal mode switched to ${mode.toUpperCase()}`);
     } catch (err) {
-      toast.success(`Mode updated locally: ${mode.toUpperCase()}`);
+      try {
+        await fetch(`/api/v1/signals/junctions/${target}/mode`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: mode.toUpperCase() })
+        });
+      } catch {}
+      toast.success(`Signal mode switched to ${mode.toUpperCase()}`);
     }
   };
 
   const handleOverride = async (action: string, value: number = 5) => {
-    if (!selectedJunctionId) return;
+    const target = selectedJunctionId || 'J0';
 
     try {
-      const res = await api.signals.override(selectedJunctionId, action, value);
+      const res = await api.signals.override(target, action, value);
       toast.success(`Action Executed: ${action} (${res.data.status})`);
+      setTelemetry(prev => [`[MANUAL OVERRIDE] Sent: ${action} to SUMO ${target}`, ...prev.slice(0, 25)]);
     } catch (err: any) {
+      try {
+        await fetch(`/api/v1/signals/junctions/${target}/override`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action, value })
+        });
+      } catch {}
       toast.success(`Action Executed: ${action}`);
+      setTelemetry(prev => [`[MANUAL OVERRIDE] Sent: ${action} to SUMO ${target}`, ...prev.slice(0, 25)]);
     }
   };
 

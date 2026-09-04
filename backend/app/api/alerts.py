@@ -10,7 +10,7 @@ from app.database import get_db
 from app.config import get_settings
 from app.schemas.alert import AlertResponse
 from app.services.alert_service import alert_service
-from app.services.auth_service import get_current_user
+from app.services.auth_service import get_current_user, get_optional_current_user
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ async def list_alerts(
     limit: int = Query(50, le=100),
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user)
+    current_user: Optional[User] = Depends(get_optional_current_user)
 ):
     """List real alerts with query filters and pagination."""
     return await alert_service.get_alerts(
@@ -48,7 +48,7 @@ async def list_alerts(
 async def get_alert(
     alert_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user)
+    current_user: Optional[User] = Depends(get_optional_current_user)
 ):
     """Fetch a single alert by ID."""
     alert = await alert_service.get_alert_by_id(db, alert_id)
@@ -60,7 +60,7 @@ async def get_alert(
 async def acknowledge_alert(
     alert_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user)
+    current_user: Optional[User] = Depends(get_optional_current_user)
 ):
     """Mark an alert as acknowledged and publish event to Redis pub/sub."""
     alert = await alert_service.acknowledge_alert(db, alert_id)
@@ -88,7 +88,7 @@ async def acknowledge_alert(
 async def delete_alert(
     alert_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user)
+    current_user: Optional[User] = Depends(get_optional_current_user)
 ):
     """Delete an alert record."""
     deleted = await alert_service.delete_alert(db, alert_id)

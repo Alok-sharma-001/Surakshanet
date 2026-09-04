@@ -14,7 +14,7 @@ from app.schemas.traffic import (
     SensorCreate, SensorResponse,
     TrafficReadingCreate, TrafficReadingResponse
 )
-from app.services.auth_service import get_current_user, require_role
+from app.services.auth_service import get_current_user, get_optional_current_user, require_role
 from app.models.user import User
 
 router = APIRouter(prefix="/traffic", tags=["traffic"])
@@ -24,7 +24,7 @@ async def list_junctions(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: Optional[User] = Depends(get_optional_current_user)
 ) -> Any:
     result = await db.execute(select(Junction).offset(skip).limit(limit))
     return result.scalars().all()
@@ -33,7 +33,7 @@ async def list_junctions(
 async def get_junction(
     id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: Optional[User] = Depends(get_optional_current_user)
 ) -> Any:
     result = await db.execute(select(Junction).where(Junction.id == id))
     junction = result.scalar_one_or_none()
@@ -80,7 +80,7 @@ async def list_sensors(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: Optional[User] = Depends(get_optional_current_user)
 ) -> Any:
     query = select(TrafficSensor)
     if junction_id:
@@ -135,7 +135,7 @@ async def list_readings(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: Optional[User] = Depends(get_optional_current_user)
 ) -> Any:
     query = select(TrafficReading)
     if junction_id:
@@ -156,7 +156,7 @@ async def get_latest_readings(
     junction_id: UUID,
     limit: int = Query(10, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: Optional[User] = Depends(get_optional_current_user)
 ) -> Any:
     query = select(TrafficReading).where(
         TrafficReading.junction_id == junction_id
@@ -169,7 +169,7 @@ async def get_latest_readings(
 async def create_reading(
     reading_in: TrafficReadingCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user) 
+    current_user: Optional[User] = Depends(get_optional_current_user)
 ) -> Any:
     j_id = reading_in.junction_id
     if not j_id:

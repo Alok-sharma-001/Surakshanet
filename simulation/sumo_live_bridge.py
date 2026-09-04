@@ -21,6 +21,7 @@ import socket
 import logging
 import argparse
 import threading
+import queue
 
 logger = logging.getLogger("surakshanet.sumo_bridge")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -48,7 +49,7 @@ except ImportError:
         logger.error("TraCI module not found. Make sure SUMO is installed on the system.")
         sys.exit(1)
 
-def publish_redis_raw(channel: str, message: str, host: str = "localhost", port: int = 6379) -> bool:
+def publish_redis_raw(channel: str, message: str, host: str = "127.0.0.1", port: int = 6379) -> bool:
     """Publishes a message to Redis using raw TCP socket (zero external pip dependencies)."""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -67,18 +68,18 @@ class SumoLiveBridge:
         self,
         config_path: str,
         gui: bool = True,
-        step_delay_ms: int = 50,
-        redis_host: str = "localhost",
+        step_delay_ms: int = 80,
+        redis_host: str = "127.0.0.1",
         redis_port: int = 6379,
-        mqtt_host: str = "localhost",
+        mqtt_host: str = "127.0.0.1",
         mqtt_port: int = 1883
     ):
         self.config_path = os.path.abspath(config_path)
         self.gui = gui
         self.step_delay_ms = step_delay_ms
-        self.redis_host = redis_host
+        self.redis_host = "127.0.0.1" if redis_host == "localhost" else redis_host
         self.redis_port = redis_port
-        self.mqtt_host = mqtt_host
+        self.mqtt_host = "127.0.0.1" if mqtt_host == "localhost" else mqtt_host
         self.mqtt_port = mqtt_port
 
         self.is_running = False
@@ -86,6 +87,7 @@ class SumoLiveBridge:
         self.departed_total = 0
         self.emergency_mode = False
         self.active_ambulance_id = None
+        self.command_queue = queue.Queue()
 
     def start(self):
         """Launches SUMO and begins the live TraCI streaming loop."""
@@ -113,7 +115,26 @@ class SumoLiveBridge:
 
         try:
             while self.is_running:
-                # When emergency corridor is active, enforce Green wave across all corridor traffic lights
+                # 1. Process all queued commands from dashboard safely in the MAIN TraCI thread
+                while not self.command_queue.empty():
+                    try:
+                        cmd = self.command_queue.get_nowait()
+                        p_type = cmd.get("type", "")
+                        if p_type == "EMERGENCY_ACTIVATED":
+                            logger.info("🚨 [REDIS] EMERGENCY GREEN CORRIDOR ACTIVATION COMMAND RECEIVED!")
+                            self.trigger_emergency_corridor()
+                        elif p_type == "EMERGENCY_DEACTIVATED":
+                            logger.info("✅ [REDIS] EMERGENCY CORRIDOR DEACTIVATION COMMAND RECEIVED!")
+                            self.clear_emergency_corridor()
+                        elif p_type == "SIGNAL_OVERRIDE":
+                            action = cmd.get("action", "")
+                            val = cmd.get("value", 5)
+                            logger.info(f"🎛 DASHBOARD SIGNAL OVERRIDE: {action} (val={val})")
+                            self.handle_signal_override(action, val)
+                    except Exception as e:
+                        logger.warning(f"Error executing queued command: {e}")
+
+                # 2. When emergency corridor is active, enforce Green wave across all corridor traffic lights
                 if self.emergency_mode:
                     for tl in traci.trafficlight.getIDList():
                         try:
@@ -277,14 +298,25 @@ class SumoLiveBridge:
         logger.info("🟢 [SUMO SIMULATION] ALL 4 CORRIDOR INTERSECTIONS FORCED TO GREEN (PHASE 0 HOLD)")
 
     def clear_emergency_corridor(self):
-        """Restores normal signal cycles."""
+        """Restores normal signal cycles and resets camera view."""
         self.emergency_mode = False
         self.active_ambulance_id = None
         for tl in traci.trafficlight.getIDList():
             try:
                 traci.trafficlight.setProgram(tl, "0")
+                traci.trafficlight.setPhase(tl, 0)
+                traci.trafficlight.setPhaseDuration(tl, 10)
             except Exception:
                 pass
+
+        if self.gui:
+            try:
+                traci.gui.trackVehicle("View #0", "")
+                traci.gui.setOffset("View #0", 450.0, 0.0)
+                traci.gui.setZoom("View #0", 180.0)
+            except Exception:
+                pass
+
         logger.info("✅ [SUMO SIMULATION] Emergency cleared. Restored signals to standard dynamic cycles.")
 
     def handle_signal_override(self, action: str, value: int = 5):
@@ -313,39 +345,33 @@ class SumoLiveBridge:
 
     def listen_dashboard_commands(self):
         """Background thread listening for manual overrides and emergency events from the dashboard."""
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.connect((self.redis_host, self.redis_port))
-            # SUBSCRIBE emergency_events signal_events
-            sub_cmd = "*3\r\n$9\r\nSUBSCRIBE\r\n$16\r\nemergency_events\r\n$13\r\nsignal_events\r\n"
-            s.sendall(sub_cmd.encode("utf-8"))
-            f = s.makefile("r", encoding="utf-8", errors="ignore")
-            while self.is_running:
-                line = f.readline()
-                if not line:
-                    break
-                if line.startswith("$"):
-                    length = int(line[1:].strip())
-                    msg = f.read(length)
-                    f.readline()
-                    try:
-                        payload = json.loads(msg)
-                        p_type = payload.get("type", "")
-                        if p_type == "EMERGENCY_ACTIVATED":
-                            logger.info("🚨 [REDIS] EMERGENCY GREEN CORRIDOR ACTIVATION COMMAND RECEIVED!")
-                            self.trigger_emergency_corridor()
-                        elif p_type == "EMERGENCY_DEACTIVATED":
-                            logger.info("✅ [REDIS] EMERGENCY CORRIDOR DEACTIVATION COMMAND RECEIVED!")
-                            self.clear_emergency_corridor()
-                        elif p_type == "SIGNAL_OVERRIDE":
-                            action = payload.get("action", "")
-                            val = payload.get("value", 5)
-                            logger.info(f"🎛 DASHBOARD SIGNAL OVERRIDE: {action} (val={val})")
-                            self.handle_signal_override(action, val)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+        while self.is_running:
+            logger.info(f"Connecting to Redis command bus at {self.redis_host}:{self.redis_port}...")
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.connect((self.redis_host, self.redis_port))
+                sub_cmd = "*3\r\n$9\r\nSUBSCRIBE\r\n$16\r\nemergency_events\r\n$13\r\nsignal_events\r\n"
+                s.sendall(sub_cmd.encode("utf-8"))
+                f = s.makefile("r", encoding="utf-8", errors="ignore")
+                logger.info("✅ Redis Command Bus: Subscribed to emergency_events & signal_events")
+                while self.is_running:
+                    line = f.readline()
+                    if not line:
+                        break
+                    if line.startswith("$"):
+                        length = int(line[1:].strip())
+                        msg = f.read(length)
+                        f.readline()
+                        try:
+                            payload = json.loads(msg)
+                            if isinstance(payload, dict) and ("type" in payload or "action" in payload):
+                                self.command_queue.put(payload)
+                        except Exception:
+                            pass
+            except Exception as e:
+                if self.is_running:
+                    logger.warning(f"Dashboard command listener reconnecting in 2s ({e})...")
+                    time.sleep(2)
 
     def stop(self):
         """Stops TraCI simulation gracefully."""

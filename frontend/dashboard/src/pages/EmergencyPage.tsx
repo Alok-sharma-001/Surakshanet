@@ -4,6 +4,7 @@ import { clsx } from 'clsx';
 import { toast } from 'react-hot-toast';
 import { api } from '../services/api';
 import { useTrafficStore } from '../store/trafficStore';
+import { wsService } from '../services/websocket';
 
 type EmergencyType = 'AMBULANCE' | 'FIRE' | 'POLICE';
 
@@ -33,6 +34,31 @@ export default function EmergencyPage() {
   const [speed, setSpeed] = useState(68);
   const [origin, setOrigin] = useState("Connaught Place Outer Circle");
   const [destination, setDestination] = useState("AIIMS Flyover - Ring Road");
+
+  // Synchronize initial emergency state with backend on mount
+  useEffect(() => {
+    api.emergency.getStatus().then((res: any) => {
+      const active = res.data?.active_events;
+      if (Array.isArray(active) && active.length > 0) {
+        setIsActivated(true);
+        setActiveEventId(active[0].id);
+      }
+    }).catch(() => {});
+
+    wsService.connect('emergency');
+    const unsub = wsService.onMessage('emergency', (data: any) => {
+      if (data && data.type === 'EMERGENCY_ACTIVATED') {
+        setIsActivated(true);
+        if (data.event_id) setActiveEventId(data.event_id);
+      } else if (data && data.type === 'EMERGENCY_DEACTIVATED') {
+        setIsActivated(false);
+        setActiveEventId(null);
+        setJunctions(DEFAULT_ROUTE_JUNCTIONS);
+      }
+    });
+
+    return unsub;
+  }, []);
 
   // Speed and corridor progression
   useEffect(() => {

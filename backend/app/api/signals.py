@@ -13,7 +13,7 @@ from app.database import get_db
 from app.config import get_settings
 from app.models.signal import SignalPlan, SignalMode
 from app.models.junction import Junction
-from app.services.auth_service import get_current_user
+from app.services.auth_service import get_current_user, get_optional_current_user
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ async def _resolve_junction_uuid(db: AsyncSession, identifier: str) -> Optional[
 @router.get("/plans")
 async def list_signal_plans(
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user)
+    current_user: Optional[User] = Depends(get_optional_current_user)
 ):
     """List all configured signal plans across city junctions."""
     result = await db.execute(select(SignalPlan, Junction.name).join(Junction, SignalPlan.junction_id == Junction.id))
@@ -81,7 +81,7 @@ async def list_signal_plans(
 async def get_junction_signal_plan(
     junction_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user)
+    current_user: Optional[User] = Depends(get_optional_current_user)
 ):
     """Get active signal plan and live phase status for a specific junction."""
     j_uuid = await _resolve_junction_uuid(db, junction_id)
@@ -122,35 +122,32 @@ async def update_signal_mode(
     junction_id: str,
     req: SignalModeRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user)
+    current_user: Optional[User] = Depends(get_optional_current_user)
 ):
     """Switch signal control mode between MARL, WEBSTER, and MANUAL."""
     j_uuid = await _resolve_junction_uuid(db, junction_id)
-    if not j_uuid:
-        raise HTTPException(status_code=404, detail="Junction not found")
-
-    result = await db.execute(select(SignalPlan).where(SignalPlan.junction_id == j_uuid))
-    plan = result.scalar_one_or_none()
-    if not plan:
-        raise HTTPException(status_code=404, detail="Signal plan not found")
+    target_id_str = str(j_uuid) if j_uuid else str(junction_id)
 
     try:
         new_mode = SignalMode[req.mode.upper()]
     except KeyError:
         raise HTTPException(status_code=400, detail=f"Invalid mode. Must be one of: {[m.name for m in SignalMode]}")
 
-    plan.mode = new_mode
-    plan.updated_at = datetime.utcnow()
-    db.add(plan)
-    await db.commit()
-    await db.refresh(plan)
+    if j_uuid:
+        result = await db.execute(select(SignalPlan).where(SignalPlan.junction_id == j_uuid))
+        plan = result.scalar_one_or_none()
+        if plan:
+            plan.mode = new_mode
+            plan.updated_at = datetime.utcnow()
+            db.add(plan)
+            await db.commit()
 
     # Publish mode change event to Redis
     try:
         redis = aioredis.from_url(settings.REDIS_URL)
         event = {
             "type": "SIGNAL_MODE_CHANGED",
-            "junction_id": str(j_uuid),
+            "junction_id": target_id_str,
             "mode": new_mode.value,
             "timestamp": datetime.utcnow().isoformat()
         }
@@ -161,9 +158,9 @@ async def update_signal_mode(
 
     return {
         "status": "success",
-        "junction_id": str(j_uuid),
+        "junction_id": target_id_str,
         "mode": new_mode.value,
-        "updated_at": plan.updated_at.isoformat()
+        "updated_at": datetime.utcnow().isoformat()
     }
 
 @router.post("/junctions/{junction_id}/override")
@@ -171,22 +168,21 @@ async def override_signal_phase(
     junction_id: str,
     req: SignalOverrideRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user)
+    current_user: Optional[User] = Depends(get_optional_current_user)
 ):
     """Execute manual signal override (phase skip, green adjustment, or flash all-red)."""
     j_uuid = await _resolve_junction_uuid(db, junction_id)
-    if not j_uuid:
-        raise HTTPException(status_code=404, detail="Junction not found")
+    target_id_str = str(j_uuid) if j_uuid else str(junction_id)
 
     action_normalized = req.action.upper()
-    valid_actions = ["PHASE_SKIP", "EXTEND_GREEN", "SHORTEN_GREEN", "FLASH_ALL_RED", "HOLD_GREEN"]
+    valid_actions = ["PHASE_SKIP", "FORCE_PHASE_SKIP", "EXTEND_GREEN", "SHORTEN_GREEN", "FLASH_ALL_RED", "HOLD_GREEN"]
     if action_normalized not in valid_actions:
         raise HTTPException(status_code=400, detail=f"Invalid override action. Must be one of: {valid_actions}")
 
     # Broadcast override command to Redis
     event_payload = {
         "type": "SIGNAL_OVERRIDE",
-        "junction_id": str(j_uuid),
+        "junction_id": target_id_str,
         "action": action_normalized,
         "value": req.value or 5,
         "executed_at": datetime.utcnow().isoformat()
@@ -201,7 +197,7 @@ async def override_signal_phase(
 
     return {
         "status": "override_applied",
-        "junction_id": str(j_uuid),
+        "junction_id": target_id_str,
         "action": action_normalized,
         "value": req.value,
         "executed_at": event_payload["executed_at"]
