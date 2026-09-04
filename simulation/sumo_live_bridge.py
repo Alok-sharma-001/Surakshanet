@@ -25,11 +25,28 @@ import threading
 logger = logging.getLogger("surakshanet.sumo_bridge")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
+# Ensure SUMO tools and dist-packages are in sys.path across all virtual environments
+candidate_paths = [
+    os.path.join(os.environ.get("SUMO_HOME", "/usr/share/sumo"), "tools"),
+    "/usr/share/sumo/tools",
+    "/usr/lib/python3/dist-packages",
+    "/usr/local/share/sumo/tools"
+]
+for p in candidate_paths:
+    if os.path.exists(p) and p not in sys.path:
+        sys.path.insert(0, p)
+
+if "SUMO_HOME" not in os.environ and os.path.exists("/usr/share/sumo"):
+    os.environ["SUMO_HOME"] = "/usr/share/sumo"
+
 try:
     import traci
 except ImportError:
-    logger.error("TraCI module not found. Make sure SUMO is installed on the system.")
-    sys.exit(1)
+    try:
+        from tools import traci
+    except ImportError:
+        logger.error("TraCI module not found. Make sure SUMO is installed on the system.")
+        sys.exit(1)
 
 def publish_redis_raw(channel: str, message: str, host: str = "localhost", port: int = 6379) -> bool:
     """Publishes a message to Redis using raw TCP socket (zero external pip dependencies)."""
@@ -88,8 +105,9 @@ class SumoLiveBridge:
         self.is_running = True
         logger.info("✅ Connected to SUMO TraCI! Live telemetry bridge running...")
 
-        # Corridor junction mappings
-        corridor_junctions = ["DEL-CP-01", "DEL-ITO-02", "DEL-AIIMS-03", "DEL-ASH-04"]
+        # Start two-way emergency green corridor listener
+        emergency_thread = threading.Thread(target=self.listen_emergency_events, daemon=True)
+        emergency_thread.start()
 
         try:
             while self.is_running:
@@ -206,6 +224,49 @@ class SumoLiveBridge:
             logger.info("SUMO GUI closed by user.")
         finally:
             self.stop()
+
+    def set_emergency_green_wave(self, active: bool):
+        """Forces or releases all traffic lights to Green during an Emergency Corridor preemption."""
+        try:
+            tl_ids = traci.trafficlight.getIDList()
+            for tl in tl_ids:
+                if active:
+                    curr_state = traci.trafficlight.getRedYellowGreenState(tl)
+                    traci.trafficlight.setRedYellowGreenState(tl, "G" * len(curr_state))
+                else:
+                    traci.trafficlight.setProgram(tl, "0")
+            logger.info(f"🚦 SUMO traffic lights set to {'ALL GREEN (EMERGENCY)' if active else 'NORMAL CYCLES'}")
+        except Exception as e:
+            logger.warning(f"Could not apply emergency green wave in SUMO: {e}")
+
+    def listen_emergency_events(self):
+        """Background thread listening for emergency activations from Surakshanet API/Dashboard."""
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.connect((self.redis_host, self.redis_port))
+            # Redis SUBSCRIBE emergency_events command
+            s.sendall(b"*2\r\n$9\r\nSUBSCRIBE\r\n$16\r\nemergency_events\r\n")
+            f = s.makefile("r", encoding="utf-8", errors="ignore")
+            while self.is_running:
+                line = f.readline()
+                if not line:
+                    break
+                if line.startswith("$"):
+                    length = int(line[1:].strip())
+                    msg = f.read(length)
+                    f.readline()
+                    try:
+                        payload = json.loads(msg)
+                        if payload.get("type") == "EMERGENCY_ACTIVATED":
+                            logger.info("🚨 EMERGENCY GREEN CORRIDOR RECEIVED! Pre-empting SUMO traffic lights...")
+                            self.set_emergency_green_wave(True)
+                        elif payload.get("type") == "EMERGENCY_DEACTIVATED":
+                            logger.info("✅ EMERGENCY CLEARED. Restoring SUMO traffic lights to standard cycle.")
+                            self.set_emergency_green_wave(False)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
     def stop(self):
         """Stops TraCI simulation gracefully."""
