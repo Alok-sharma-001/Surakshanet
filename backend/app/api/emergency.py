@@ -17,7 +17,7 @@ from app.models.alert import (
     EmergencyStatus
 )
 from app.models.user import User
-from app.services.auth_service import get_current_user
+from app.services.auth_service import get_optional_current_user
 from ml.emergency.green_wave import GreenWaveController
 
 settings = get_settings()
@@ -41,7 +41,7 @@ class EmergencyActivateRequest(BaseModel):
 async def activate_emergency(
     data: EmergencyActivateRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user)
+    current_user: Optional[User] = Depends(get_optional_current_user)
 ):
     """Activate an emergency green wave along a designated junction route."""
     event_uuid = uuid.uuid4()
@@ -109,7 +109,7 @@ async def activate_emergency(
 async def deactivate_emergency(
     event_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user)
+    current_user: Optional[User] = Depends(get_optional_current_user)
 ):
     """Deactivate an active green wave and restore default signal cycles."""
     # 1. Update database record

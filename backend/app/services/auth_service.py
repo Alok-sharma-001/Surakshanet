@@ -81,6 +81,24 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession
         raise HTTPException(status_code=400, detail="Inactive user")
     return user
 
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)
+
+async def get_optional_current_user(token: Optional[str] = Depends(oauth2_scheme_optional), db: AsyncSession = Depends(get_db)) -> Optional[User]:
+    """Resolves current user if a valid token is provided, returns None gracefully otherwise."""
+    if not token:
+        return None
+    try:
+        settings = get_settings()
+        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        user_id_str: str = payload.get("sub")
+        if not user_id_str:
+            return None
+        user_id = UUID(user_id_str)
+        result = await db.execute(select(User).where(User.id == user_id))
+        return result.scalar_one_or_none()
+    except Exception:
+        return None
+
 def require_role(*roles: str):
     def role_checker(current_user: User = Depends(get_current_user)):
         user_role = getattr(current_user.role, 'value', getattr(current_user.role, 'name', str(current_user.role)))

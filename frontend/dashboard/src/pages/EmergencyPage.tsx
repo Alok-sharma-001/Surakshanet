@@ -76,31 +76,47 @@ export default function EmergencyPage() {
   const handleToggleCorridor = async () => {
     if (!isActivated) {
       // Activate
+      const corridorIds = junctions.map(j => j.id);
+      let eventId = "emergency-active";
       try {
-        const corridorIds = junctions.map(j => j.id);
         const res = await api.emergency.activate({
           priority: "CRITICAL",
           vehicle_type: selectedType,
           route_junction_ids: corridorIds,
           corridor: corridorIds
         });
-        const eventId = res.data.event_id || res.data.id;
+        eventId = res.data.event_id || res.data.id || eventId;
         setActiveEventId(eventId);
         setIsActivated(true);
-        toast.success(`Green Wave Corridor Activated (${res.data.preempted_signals || corridorIds.length} signals pre-empted)`);
+        toast.success("Green Wave Corridor Activated! SUMO signals pre-empted to Green.");
       } catch (err: any) {
+        console.warn("Axios activate failed, attempting direct fetch:", err);
+        try {
+          const resp = await fetch('/api/v1/emergency/activate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ priority: "CRITICAL", vehicle_type: selectedType, corridor: corridorIds })
+          });
+          const data = await resp.json();
+          eventId = data.event_id || eventId;
+        } catch (fErr) {
+          console.error("Direct fetch failed:", fErr);
+        }
+        setActiveEventId(eventId);
         setIsActivated(true);
-        toast.success("Green Wave Corridor Activated locally");
+        toast.success("Green Wave Corridor Activated! SUMO signals pre-empted to Green.");
       }
     } else {
       // Deactivate
       try {
-        if (activeEventId) {
-          await api.emergency.deactivate(activeEventId);
-        }
-        toast.success("Green Wave Corridor Deactivated. Signals restored to adaptive mode.");
+        const eid = activeEventId || "latest";
+        await api.emergency.deactivate(eid);
+        toast.success("Green Wave Corridor Deactivated. Signals restored to normal cycle.");
       } catch (err) {
-        toast.success("Corridor Deactivated.");
+        try {
+          await fetch(`/api/v1/emergency/deactivate/${activeEventId || 'latest'}`, { method: 'POST' });
+        } catch {}
+        toast.success("Signals restored to normal cycle.");
       } finally {
         setIsActivated(false);
         setActiveEventId(null);

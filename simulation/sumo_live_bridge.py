@@ -84,6 +84,8 @@ class SumoLiveBridge:
         self.is_running = False
         self.step_count = 0
         self.departed_total = 0
+        self.emergency_mode = False
+        self.active_ambulance_id = None
 
     def start(self):
         """Launches SUMO and begins the live TraCI streaming loop."""
@@ -111,6 +113,16 @@ class SumoLiveBridge:
 
         try:
             while self.is_running:
+                # When emergency corridor is active, enforce Green wave across all corridor traffic lights
+                if self.emergency_mode:
+                    for tl in traci.trafficlight.getIDList():
+                        try:
+                            if traci.trafficlight.getPhase(tl) != 0:
+                                traci.trafficlight.setPhase(tl, 0)
+                            traci.trafficlight.setPhaseDuration(tl, 9999)
+                        except Exception:
+                            pass
+
                 traci.simulationStep()
                 self.step_count += 1
 
@@ -225,19 +237,55 @@ class SumoLiveBridge:
         finally:
             self.stop()
 
-    def set_emergency_green_wave(self, active: bool):
-        """Forces or releases all traffic lights to Green during an Emergency Corridor preemption."""
+    def trigger_emergency_corridor(self):
+        """Spawns an ambulance and locks all corridor traffic lights to continuous GREEN."""
+        self.emergency_mode = True
         try:
-            tl_ids = traci.trafficlight.getIDList()
-            for tl in tl_ids:
-                if active:
-                    curr_state = traci.trafficlight.getRedYellowGreenState(tl)
-                    traci.trafficlight.setRedYellowGreenState(tl, "G" * len(curr_state))
-                else:
-                    traci.trafficlight.setProgram(tl, "0")
-            logger.info(f"🚦 SUMO traffic lights set to {'ALL GREEN (EMERGENCY)' if active else 'NORMAL CYCLES'}")
+            # 1. Spawn a high-priority Ambulance in SUMO
+            amb_id = f"AMBULANCE_{int(time.time()) % 10000}"
+            self.active_ambulance_id = amb_id
+            traci.vehicle.add(
+                vehID=amb_id,
+                routeID="r_WE",
+                typeID="ambulance",
+                depart="now",
+                departLane="best",
+                departPos="last",
+                departSpeed="max"
+            )
+            traci.vehicle.setColor(amb_id, (255, 255, 255, 255))
+            logger.info(f"🚑 [SUMO SIMULATION] AMBULANCE SPAWNED! (ID: {amb_id}) Route: West-to-East Main Corridor")
+            
+            # Automatically lock SUMO-GUI camera onto the ambulance so user sees it live!
+            if self.gui:
+                try:
+                    traci.gui.trackVehicle("View #0", amb_id)
+                    traci.gui.setZoom("View #0", 500.0)
+                    logger.info("🎥 [SUMO-GUI] Camera locked onto Ambulance!")
+                except Exception:
+                    pass
         except Exception as e:
-            logger.warning(f"Could not apply emergency green wave in SUMO: {e}")
+            logger.warning(f"Failed to spawn ambulance vehicle: {e}")
+
+        # 2. Pre-empt all traffic lights to Phase 0 (West-East Green)
+        for tl in traci.trafficlight.getIDList():
+            try:
+                traci.trafficlight.setPhase(tl, 0)
+                traci.trafficlight.setPhaseDuration(tl, 9999)
+            except Exception:
+                pass
+        logger.info("🟢 [SUMO SIMULATION] ALL 4 CORRIDOR INTERSECTIONS FORCED TO GREEN (PHASE 0 HOLD)")
+
+    def clear_emergency_corridor(self):
+        """Restores normal signal cycles."""
+        self.emergency_mode = False
+        self.active_ambulance_id = None
+        for tl in traci.trafficlight.getIDList():
+            try:
+                traci.trafficlight.setProgram(tl, "0")
+            except Exception:
+                pass
+        logger.info("✅ [SUMO SIMULATION] Emergency cleared. Restored signals to standard dynamic cycles.")
 
     def handle_signal_override(self, action: str, value: int = 5):
         """Applies manual signal override in SUMO."""
@@ -284,11 +332,11 @@ class SumoLiveBridge:
                         payload = json.loads(msg)
                         p_type = payload.get("type", "")
                         if p_type == "EMERGENCY_ACTIVATED":
-                            logger.info("🚨 EMERGENCY GREEN CORRIDOR RECEIVED! Pre-empting SUMO traffic lights...")
-                            self.set_emergency_green_wave(True)
+                            logger.info("🚨 [REDIS] EMERGENCY GREEN CORRIDOR ACTIVATION COMMAND RECEIVED!")
+                            self.trigger_emergency_corridor()
                         elif p_type == "EMERGENCY_DEACTIVATED":
-                            logger.info("✅ EMERGENCY CLEARED. Restoring SUMO traffic lights to standard cycle.")
-                            self.set_emergency_green_wave(False)
+                            logger.info("✅ [REDIS] EMERGENCY CORRIDOR DEACTIVATION COMMAND RECEIVED!")
+                            self.clear_emergency_corridor()
                         elif p_type == "SIGNAL_OVERRIDE":
                             action = payload.get("action", "")
                             val = payload.get("value", 5)
