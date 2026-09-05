@@ -268,18 +268,18 @@ export default function TrafficMapPage() {
       <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center space-x-3 w-max">
         {/* Connection Status Badge */}
         <div className={clsx(
-          "backdrop-blur-md rounded-xl border shadow-xl px-3.5 py-3 flex items-center space-x-2 text-white transition-all",
-          isTwinConnected ? "bg-slate-900/90 border-emerald-500/60" : "bg-slate-900/90 border-amber-500/60"
+          "bg-white/95 backdrop-blur-md rounded-xl border shadow-xl px-3.5 py-3 flex items-center space-x-2.5 transition-all",
+          isTwinConnected ? "border-emerald-300" : "border-amber-300"
         )}>
           <div className={clsx(
-            "w-2.5 h-2.5 rounded-full",
-            isTwinConnected ? "bg-emerald-400 animate-ping" : "bg-amber-400 animate-pulse"
+            "w-2.5 h-2.5 rounded-full shrink-0",
+            isTwinConnected ? "bg-emerald-500 animate-ping" : "bg-amber-500 animate-pulse"
           )} />
           <div>
-            <div className={clsx("text-[9px] font-bold uppercase tracking-widest font-mono", isTwinConnected ? "text-emerald-400" : "text-amber-400")}>
+            <div className={clsx("text-[9px] font-bold uppercase tracking-widest font-mono", isTwinConnected ? "text-emerald-700" : "text-amber-700")}>
               SUMO DIGITAL TWIN
             </div>
-            <div className="text-xs font-mono font-bold text-slate-200">
+            <div className="text-xs font-mono font-bold text-slate-800">
               {isTwinConnected ? `STREAM: LIVE (Step ${lastStepReceived ?? 0})` : "STANDALONE SIM"}
             </div>
           </div>
@@ -366,7 +366,7 @@ export default function TrafficMapPage() {
                 key={layer}
                 className={clsx(
                   "flex-1 py-1.5 px-2 rounded-md text-xs font-bold transition-colors",
-                  i === 1 ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  i === 1 ? "bg-teal-600 text-white shadow-xs" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                 )}
               >
                 {layer}

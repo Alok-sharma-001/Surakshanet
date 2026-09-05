@@ -310,22 +310,22 @@ export default function EmergencyPage() {
             </span>
           </div>
 
-          <div className="bg-slate-900 rounded-xl p-5 text-white flex-1 flex flex-col justify-center space-y-4">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-              <span className="text-xs text-slate-400 uppercase">Emergency Vehicle ID</span>
-              <span className="font-mono font-bold text-teal-400">AMB-DL-01-9421</span>
+          <div className="bg-slate-50/80 rounded-xl p-5 border border-slate-200/80 flex-1 flex flex-col justify-center space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-200/80 pb-3">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Emergency Vehicle ID</span>
+              <span className="font-mono font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded border border-teal-200/60">AMB-DL-01-9421</span>
             </div>
-            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-              <span className="text-xs text-slate-400 uppercase">Current Velocity</span>
-              <span className="font-mono text-2xl font-bold text-emerald-400">{speed} km/h</span>
+            <div className="flex justify-between items-center border-b border-slate-200/80 pb-3">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Current Velocity</span>
+              <span className="font-mono text-2xl font-bold text-emerald-600">{speed} km/h</span>
             </div>
-            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-              <span className="text-xs text-slate-400 uppercase">Preempted Intersections</span>
-              <span className="font-mono font-bold text-amber-400">{isActivated ? `${junctions.length} Signals Hold` : "None"}</span>
+            <div className="flex justify-between items-center border-b border-slate-200/80 pb-3">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Preempted Intersections</span>
+              <span className="font-mono font-bold text-amber-700">{isActivated ? `${junctions.length} Signals Hold` : "None"}</span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-xs text-slate-400 uppercase">Route Distance</span>
-              <span className="font-mono font-bold text-slate-200">8.9 km</span>
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Route Distance</span>
+              <span className="font-mono font-bold text-slate-800">8.9 km</span>
             </div>
           </div>
 

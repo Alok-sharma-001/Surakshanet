@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /root/.local /root/.local
 ENV PATH=/root/.local/bin:$PATH
-ENV PYTHONPATH=/app:$PYTHONPATH
+ENV PYTHONPATH=/app
 ENV YOLO_CONFIG_DIR=/tmp/Ultralytics
 
 # Copy backend application, ml engine, simulation wrappers, and shared constants

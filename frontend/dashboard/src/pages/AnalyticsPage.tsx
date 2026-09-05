@@ -163,21 +163,21 @@ export default function AnalyticsPage() {
             <h2 className="text-sm font-semibold text-slate-800">Congestion Heatmap</h2>
           </div>
           
-          <div className="flex-1 bg-slate-900 rounded-xl relative overflow-hidden flex items-center justify-center border border-slate-800">
+          <div className="flex-1 bg-slate-50/70 rounded-xl relative overflow-hidden flex items-center justify-center border border-slate-200 min-h-[180px]">
             {/* Heatmap Visual */}
-            <div className="absolute w-32 h-32 bg-red-500/40 rounded-full blur-2xl top-4 left-6"></div>
-            <div className="absolute w-24 h-24 bg-red-400/50 rounded-full blur-xl top-12 left-16"></div>
-            <div className="absolute w-40 h-40 bg-blue-500/30 rounded-full blur-2xl bottom-4 right-4"></div>
-            <div className="absolute w-20 h-20 bg-amber-500/40 rounded-full blur-xl top-10 right-10"></div>
+            <div className="absolute w-32 h-32 bg-red-500/30 rounded-full blur-2xl top-4 left-6"></div>
+            <div className="absolute w-24 h-24 bg-red-400/40 rounded-full blur-xl top-12 left-16"></div>
+            <div className="absolute w-40 h-40 bg-teal-500/20 rounded-full blur-2xl bottom-4 right-4"></div>
+            <div className="absolute w-20 h-20 bg-amber-500/30 rounded-full blur-xl top-10 right-10"></div>
             
-            <div className="absolute z-10 flex flex-col items-center gap-1 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-white/90">
-              <AlertTriangle className="w-6 h-6 text-amber-400 drop-shadow-md" />
-              <span className="text-[10px] font-bold tracking-wider">CRITICAL NODE</span>
+            <div className="absolute z-10 flex flex-col items-center gap-1 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-slate-800">
+              <AlertTriangle className="w-6 h-6 text-amber-500 drop-shadow-sm" />
+              <span className="text-[10px] font-bold tracking-wider text-slate-700 bg-white/80 px-2 py-0.5 rounded shadow-xs">CRITICAL NODE</span>
             </div>
             
             {/* Legend inside map view */}
-            <div className="absolute bottom-3 left-3 right-3 bg-white/10 backdrop-blur-sm p-2 rounded-lg border border-white/20">
-              <div className="flex justify-between text-[10px] text-white/80 font-medium mb-1">
+            <div className="absolute bottom-3 left-3 right-3 bg-white/90 backdrop-blur-sm p-2 rounded-lg border border-slate-200/80 shadow-xs">
+              <div className="flex justify-between text-[10px] text-slate-600 font-medium mb-1">
                 <span>Free Flow</span>
                 <span>Severe</span>
               </div>

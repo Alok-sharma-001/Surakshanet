@@ -218,19 +218,19 @@ export default function SignalControlPage() {
 
         {/* Left Column — Agent Telemetry Stream */}
         <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm flex flex-col h-[600px]">
-          <div className="p-4 border-b border-[#E2E8F0] flex justify-between items-center bg-slate-50/50 rounded-t-xl">
+          <div className="p-4 border-b border-[#E2E8F0] flex justify-between items-center bg-slate-50/70 rounded-t-xl">
             <h3 className="text-sm font-semibold text-slate-800 flex items-center">
-              <Radio className="w-4 h-4 mr-2 text-teal-500" />
+              <Radio className="w-4 h-4 mr-2 text-teal-600" />
               Agent Telemetry Stream
             </h3>
-            <span className="flex items-center text-xs font-mono text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+            <span className="flex items-center text-xs font-mono text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 font-semibold">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping mr-1.5" />
               10Hz Stream
             </span>
           </div>
-          <div className="p-4 overflow-y-auto flex-1 font-mono text-xs space-y-3 bg-[#0f172a] text-slate-300 rounded-b-xl">
+          <div className="p-4 overflow-y-auto flex-1 font-mono text-xs space-y-2.5 bg-slate-50 text-slate-800 rounded-b-xl border-t border-slate-100">
             {telemetry.map((t, i) => (
-              <div key={i} className="p-2.5 rounded bg-slate-800/80 border border-slate-700/60 leading-relaxed whitespace-pre-line">
+              <div key={i} className="p-3 rounded-lg bg-white border border-slate-200 shadow-[0_1px_2px_rgba(0,0,0,0.03)] leading-relaxed whitespace-pre-line text-slate-700 font-medium">
                 {t}
               </div>
             ))}
