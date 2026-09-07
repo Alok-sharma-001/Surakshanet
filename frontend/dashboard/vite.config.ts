@@ -21,4 +21,34 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    chunkSizeWarningLimit: 500,
+    rollupOptions: {
+      output: {
+        manualChunks: (id) => {
+          if (id.includes('node_modules')) {
+            if (id.includes('leaflet') || id.includes('mapbox-gl')) {
+              return 'vendor-maps';
+            }
+            if (id.includes('recharts') || id.includes('d3')) {
+              return 'vendor-charts';
+            }
+            if (id.includes('three/src/renderers') || id.includes('three/src/materials') || id.includes('three/src/textures')) {
+              return 'vendor-three-render';
+            }
+            if (id.includes('three')) {
+              return 'vendor-three-core';
+            }
+            if (id.includes('lucide-react') || id.includes('framer-motion')) {
+              return 'vendor-icons';
+            }
+            if (id.includes('react') || id.includes('zustand') || id.includes('axios')) {
+              return 'vendor-core';
+            }
+            return 'vendor-misc';
+          }
+        },
+      },
+    },
+  },
 });

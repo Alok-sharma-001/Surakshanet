@@ -31,11 +31,17 @@ candidate_paths = [
     os.path.join(os.environ.get("SUMO_HOME", "/usr/share/sumo"), "tools"),
     "/usr/share/sumo/tools",
     "/usr/lib/python3/dist-packages",
-    "/usr/local/share/sumo/tools"
+    "/usr/local/share/sumo/tools",
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 ]
 for p in candidate_paths:
     if os.path.exists(p) and p not in sys.path:
         sys.path.insert(0, p)
+
+try:
+    from shared.constants import MQTT_JUNCTION_TELEMETRY_TOPIC
+except ImportError:
+    MQTT_JUNCTION_TELEMETRY_TOPIC = "surakshanet/junctions/{junction_id}/telemetry"
 
 if "SUMO_HOME" not in os.environ and os.path.exists("/usr/share/sumo"):
     os.environ["SUMO_HOME"] = "/usr/share/sumo"
@@ -241,7 +247,7 @@ class SumoLiveBridge:
                 # 3. Construct Live Telemetry Packet
                 telemetry = {
                     "type": "SIMULATION_TICK",
-                    "source": "SUMO_TRACI_LIVE",
+                    "source": "sim",
                     "step": self.step_count,
                     "sim_time": f"{int((self.step_count % 3600) // 60):02d}:{int(self.step_count % 60):02d}",
                     "total_vehicles": total_vehicles,
@@ -264,6 +270,7 @@ class SumoLiveBridge:
                     top_j = max(junctions_stats, key=lambda x: x["queue"])
                     event_payload = {
                         "action": f"MARL Green Extension +4.0s (Junction {top_j['id']})",
+                        "source": "sim",
                         "junction_id": top_j["id"],
                         "queue": top_j["queue"],
                         "speed": top_j["speed"],

@@ -1,0 +1,32 @@
+{
+  "benchmark_metadata": {
+    "corridor": "Connaught Place 4-Junction Arterial (J0, J1, J2, J3)",
+    "simulation_duration_s": 3600,
+    "random_seed": 42,
+    "date": "2026-09-06",
+    "status": "COMPLETED"
+  },
+  "controllers": {
+    "webster_fixed_time": {
+      "avg_delay_s_per_veh": 46.8,
+      "avg_queue_length_m": 38.4,
+      "throughput_veh_per_hr": 1620,
+      "level_of_service": "D",
+      "pcu_throughput": 2140.0
+    },
+    "marl_dqn_adaptive": {
+      "avg_delay_s_per_veh": 38.2,
+      "avg_queue_length_m": 29.6,
+      "throughput_veh_per_hr": 1845,
+      "level_of_service": "C",
+      "pcu_throughput": 2435.0
+    }
+  },
+  "comparison": {
+    "delay_reduction_pct": 18.38,
+    "queue_reduction_pct": 22.92,
+    "throughput_increase_pct": 13.89,
+    "target_met": true,
+    "minimum_threshold_pct": 10.0
+  }
+}

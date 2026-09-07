@@ -27,20 +27,20 @@ axiosInstance.interceptors.response.use(
 export const api = {
   auth: {
     login: (email: string, password: string) => axiosInstance.post('/auth/login', { email, password }),
-    register: (data: any) => axiosInstance.post('/auth/register', data),
+    register: (data: Record<string, unknown>) => axiosInstance.post('/auth/register', data),
     getMe: () => axiosInstance.get('/auth/me'),
     refreshToken: () => axiosInstance.post('/auth/refresh'),
   },
   junctions: {
     getAll: () => axiosInstance.get('/traffic/junctions'),
     getById: (id: string) => axiosInstance.get(`/traffic/junctions/${id}`),
-    create: (data: any) => axiosInstance.post('/traffic/junctions', data),
-    update: (id: string, data: any) => axiosInstance.patch(`/traffic/junctions/${id}`, data),
+    create: (data: Record<string, unknown>) => axiosInstance.post('/traffic/junctions', data),
+    update: (id: string, data: Record<string, unknown>) => axiosInstance.patch(`/traffic/junctions/${id}`, data),
   },
   traffic: {
     getReadings: (junctionId: string, limit: number = 20) => axiosInstance.get(`/traffic/readings/${junctionId}?limit=${limit}`),
     getAllReadings: (limit: number = 100) => axiosInstance.get(`/traffic/readings?limit=${limit}`),
-    createReading: (data: any) => axiosInstance.post('/traffic/readings', data),
+    createReading: (data: Record<string, unknown>) => axiosInstance.post('/traffic/readings', data),
   },
   signals: {
     getPlans: () => axiosInstance.get('/signals/plans'),

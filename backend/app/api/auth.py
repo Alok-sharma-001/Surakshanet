@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import datetime, timezone
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -14,7 +15,13 @@ from app.services.auth_service import (
     create_access_token, 
     create_refresh_token,
     get_current_user,
-    decode_token
+    decode_token,
+    oauth2_scheme,
+    revoke_token,
+    is_token_revoked,
+    check_login_rate_limit,
+    record_login_failure,
+    reset_login_failures
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -22,8 +29,6 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)) -> Any:
     return await register_user(db, user_data)
-
-from fastapi import Request
 
 @router.post("/login")
 async def login(request: Request, db: AsyncSession = Depends(get_db)) -> Any:
@@ -61,8 +66,11 @@ async def login(request: Request, db: AsyncSession = Depends(get_db)) -> Any:
             detail="Email/username and password are required",
         )
 
+    await check_login_rate_limit(str(email))
+
     user = await authenticate_user(db, str(email), str(password))
     if not user:
+        await record_login_failure(str(email))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -70,6 +78,8 @@ async def login(request: Request, db: AsyncSession = Depends(get_db)) -> Any:
         )
     if not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
+
+    await reset_login_failures(str(email))
         
     role_str = getattr(user.role, 'value', getattr(user.role, 'name', str(user.role)))
     access_token = create_access_token(data={"sub": str(user.id), "role": role_str})
@@ -96,6 +106,10 @@ async def login(request: Request, db: AsyncSession = Depends(get_db)) -> Any:
 async def refresh_token(refresh_token: str, db: AsyncSession = Depends(get_db)) -> Any:
     try:
         payload = decode_token(refresh_token)
+        jti = payload.get("jti")
+        if jti and await is_token_revoked(jti):
+            raise HTTPException(status_code=401, detail="Token has been revoked")
+
         user_id_str = payload.get("sub")
         if not user_id_str:
             raise HTTPException(status_code=401, detail="Invalid token")
@@ -116,8 +130,45 @@ async def refresh_token(refresh_token: str, db: AsyncSession = Depends(get_db)) 
             "refresh_token": new_refresh_token,
             "token_type": "bearer"
         }
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+@router.post("/logout")
+async def logout(
+    request: Request,
+    token: str = Depends(oauth2_scheme),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """Revoke active JWT tokens and invalidate session."""
+    try:
+        payload = decode_token(token)
+        jti = payload.get("jti")
+        exp = payload.get("exp")
+        if jti and exp:
+            now_ts = datetime.now(timezone.utc).timestamp()
+            remaining_ttl = int(exp - now_ts)
+            if remaining_ttl > 0:
+                await revoke_token(jti, remaining_ttl)
+    except Exception:
+        pass
+
+    try:
+        body = await request.json()
+        refresh_token_val = body.get("refresh_token")
+        if refresh_token_val:
+            r_payload = decode_token(refresh_token_val)
+            r_jti = r_payload.get("jti")
+            r_exp = r_payload.get("exp")
+            if r_jti and r_exp:
+                r_ttl = int(r_exp - datetime.now(timezone.utc).timestamp())
+                if r_ttl > 0:
+                    await revoke_token(r_jti, r_ttl)
+    except Exception:
+        pass
+
+    return {"message": "Successfully logged out"}
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)) -> Any:

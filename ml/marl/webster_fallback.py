@@ -90,12 +90,12 @@ class WebsterFallback:
         ns_g = plan.get('ns_green', 40)
         ew_g = plan.get('ew_green', 40)
         
-        # Assuming simple 4-phase cycle: NS_G, NS_Y, EW_G, EW_Y
+        # Standard 18-character phase states for SUMO corridor network (J0-J3)
         phases = [
-            env.traci.trafficlight.Phase(ns_g, "GGgrrrGGgrrr"), # NS green
-            env.traci.trafficlight.Phase(3, "yyyrrryyyrrr"),    # NS yellow
-            env.traci.trafficlight.Phase(ew_g, "rrrGGgrrrGGg"), # EW green
-            env.traci.trafficlight.Phase(3, "rrryyyrrryyy")     # EW yellow
+            env.traci.trafficlight.Phase(ns_g, "GGggrrrrrGGggrrrrr"),  # NS green
+            env.traci.trafficlight.Phase(3, "yyyyrrrrryyyyrrrrr"),     # NS yellow
+            env.traci.trafficlight.Phase(ew_g, "rrrrGGGggrrrrGGGgg"),  # EW green
+            env.traci.trafficlight.Phase(3, "rrrryyyyyrrrryyyyy")      # EW yellow
         ]
         
         logic = env.traci.trafficlight.Logic("webster_fallback", 0, 0, phases)

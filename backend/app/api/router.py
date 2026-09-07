@@ -9,12 +9,14 @@ from app.api.routing import router as routing_router
 from app.api.alerts import router as alerts_router
 from app.api.emergency import router as emergency_router
 from app.api.signals import router as signals_router
+from app.api.junctions import router as junctions_router
 
 api_router = APIRouter()
 
 api_router.include_router(auth_router)
 api_router.include_router(users_router)
 api_router.include_router(traffic_router)
+api_router.include_router(junctions_router)
 api_router.include_router(ml_router)
 api_router.include_router(simulation_router)
 api_router.include_router(routing_router)

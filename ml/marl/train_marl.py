@@ -12,23 +12,49 @@ from ml.marl.agent import MARLAgent
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-def train_and_save_marl():
+import json
+import random
+
+try:
+    import traci
+except ImportError:
+    traci = None
+
+try:
+    from simulation.sumo_env import SumoEnvironment
+except ImportError:
+    SumoEnvironment = None
+
+def train_and_save_marl(seed: int = 42, episodes: int = 150):
+    # Set deterministic random seeds for full reproducibility
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
     weights_dir = os.path.join(os.path.dirname(__file__), "weights")
     os.makedirs(weights_dir, exist_ok=True)
     checkpoint_path = os.path.join(weights_dir, "marl_policy_downtown.pth")
+    hparams_path = os.path.join(weights_dir, "marl_hyperparameters.json")
 
-    logger.info("Initializing MARLAgent for downtown junction...")
-    # State: [queue_N, queue_E, queue_S, queue_W, speed_N, speed_E, speed_S, speed_W] -> 8 dims
-    agent = MARLAgent(state_dim=8, action_dim=2, junction_id="DEL-CP-01", config={
+    config = {
         "lr": 0.001,
         "batch_size": 32,
         "gamma": 0.99,
         "epsilon": 1.0,
         "epsilon_decay": 0.992,
-        "epsilon_min": 0.05
-    })
+        "epsilon_min": 0.05,
+        "seed": seed,
+        "episodes": episodes,
+        "state_dim": 8,
+        "action_dim": 2,
+    }
+    with open(hparams_path, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2)
 
-    logger.info("Training MARL policy over 150 simulated corridor episodes...")
+    logger.info(f"Initializing MARLAgent with seed {seed}...")
+    agent = MARLAgent(state_dim=8, action_dim=2, junction_id="DEL-CP-01", config=config)
+
+    logger.info(f"Training MARL policy over {episodes} corridor episodes (seed: {seed})...")
     for ep in range(150):
         # Simulate an episode of 60 seconds (1 second steps)
         state = np.random.uniform(5, 40, size=8).astype(np.float32)

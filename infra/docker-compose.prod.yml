@@ -1,22 +1,4 @@
 services:
-  postgres:
-    image: postgis/postgis:15-3.3
-    container_name: surakshanet-postgres
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-surakshanet}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-surakshanet_dev}
-      POSTGRES_DB: ${POSTGRES_DB:-surakshanet}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - surakshanet-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-surakshanet} -d ${POSTGRES_DB:-surakshanet}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   timescaledb:
     image: timescale/timescaledb-ha:pg15
     container_name: surakshanet-timescaledb
@@ -27,7 +9,9 @@ services:
     volumes:
       - timescale_data:/home/postgres/pgdata/data
     networks:
-      - surakshanet-network
+      surakshanet-network:
+        aliases:
+          - postgres
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-surakshanet} -d ${POSTGRES_DB:-surakshanet}"]
@@ -73,7 +57,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://surakshanet:surakshanet_dev@postgres:5432/surakshanet}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://surakshanet:surakshanet_dev@timescaledb:5432/surakshanet}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - MQTT_BROKER_HOST=${MQTT_BROKER_HOST:-mosquitto}
       - MQTT_BROKER_PORT=${MQTT_BROKER_PORT:-1883}
@@ -81,7 +65,7 @@ services:
     networks:
       - surakshanet-network
     depends_on:
-      postgres:
+      timescaledb:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -153,7 +137,6 @@ networks:
     driver: bridge
 
 volumes:
-  postgres_data:
   timescale_data:
   redis_data:
   mosquitto_data:

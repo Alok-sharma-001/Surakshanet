@@ -29,8 +29,8 @@ interface NavItem {
 }
 
 const mainNavItems: NavItem[] = [
-  { name: 'Dashboard', path: '/app', icon: LayoutDashboard, end: true },
-  { name: 'Junctions', path: '/app/junctions', icon: Network },
+  { name: 'Live Traffic Map', path: '/app', icon: LayoutDashboard, end: true },
+  { name: 'Junction Directory', path: '/app/junctions', icon: Network },
   { name: 'Signal Control', path: '/app/signals', icon: SlidersHorizontal },
   { name: 'Forecasting', path: '/app/forecasting', icon: TrendingUp },
   { name: 'Emergency', path: '/app/emergency', icon: Siren, badge: 1 },

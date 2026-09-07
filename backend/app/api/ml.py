@@ -31,24 +31,65 @@ from ml.forecasting.traffic_forecaster import TrafficForecaster
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ml", tags=["ML"])
 
-# Singletons for model inference
-vehicle_detector = VehicleDetector(confidence_threshold=0.4)
-traffic_forecaster = TrafficForecaster()
+# Lazy model instances (deferred until first request to minimize startup memory & speed)
+_detector: Optional[object] = None
+_forecaster: Optional[object] = None
 
-# Try loading saved forecasting models if they exist
-_candidate_dirs = [
-    os.environ.get("FORECASTING_WEIGHTS_DIR", ""),
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../ml/forecasting/weights")),
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "../../ml/forecasting/weights")),
-    "/app/ml/forecasting/weights"
-]
-WEIGHTS_DIR = next((d for d in _candidate_dirs if d and os.path.exists(d)), None)
-if WEIGHTS_DIR:
-    try:
-        traffic_forecaster.load_models(WEIGHTS_DIR)
-        logger.info(f"Loaded traffic forecasting weights from {WEIGHTS_DIR}")
-    except Exception as e:
-        logger.warning(f"Forecasting weights not yet loaded: {e}")
+def get_vehicle_detector():
+    global _detector
+    if _detector is None:
+        try:
+            from ml.vision.vehicle_detector import VehicleDetector
+            _detector = VehicleDetector(confidence_threshold=0.4)
+        except Exception as e:
+            logger.warning(f"Could not initialize VehicleDetector: {e}")
+            class _DummyDetector:
+                model_loaded = False
+                def detect_from_bytes(self, b):
+                    return {"vehicle_counts": {}, "total_pcu": 0.0, "detections": [], "processing_time_ms": 0.0}
+            _detector = _DummyDetector()
+    return _detector
+
+def get_traffic_forecaster():
+    global _forecaster
+    if _forecaster is None:
+        try:
+            from ml.forecasting.traffic_forecaster import TrafficForecaster
+            _forecaster = TrafficForecaster()
+            _candidate_dirs = [
+                os.environ.get("FORECASTING_WEIGHTS_DIR", ""),
+                os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../ml/forecasting/weights")),
+                os.path.abspath(os.path.join(os.path.dirname(__file__), "../../ml/forecasting/weights")),
+                "/app/ml/forecasting/weights"
+            ]
+            weights_dir = next((d for d in _candidate_dirs if d and os.path.exists(d)), None)
+            if weights_dir:
+                try:
+                    _forecaster.load_models(weights_dir)
+                    logger.info(f"Loaded traffic forecasting weights from {weights_dir}")
+                except Exception as e:
+                    logger.warning(f"Forecasting weights not yet loaded: {e}")
+        except Exception as e:
+            logger.warning(f"Could not initialize TrafficForecaster: {e}")
+            class _DummyForecaster:
+                is_lstm_trained = False
+                is_xgb_trained = False
+                sequence_length = 12
+                def predict(self, *a, **kw): return []
+                def generate_synthetic_data(self, *a, **kw): return pd.DataFrame()
+            _forecaster = _DummyForecaster()
+    return _forecaster
+
+class _LazyModelProxy:
+    def __init__(self, getter):
+        object.__setattr__(self, "_getter", getter)
+    def __getattr__(self, name):
+        return getattr(self._getter(), name)
+    def __setattr__(self, name, value):
+        setattr(self._getter(), name, value)
+
+vehicle_detector = _LazyModelProxy(get_vehicle_detector)
+traffic_forecaster = _LazyModelProxy(get_traffic_forecaster)
 
 # Global state for MARL training status
 _training_status = {
@@ -216,6 +257,8 @@ async def get_training_status(current_user: Optional[User] = Depends(get_current
     global _training_status
     return TrainingStatus(**_training_status)
 
+@router.get("/models", response_model=ModelHealth)
+@router.get("/health", response_model=ModelHealth)
 @router.get("/models/health", response_model=ModelHealth)
 async def get_models_health(current_user: Optional[User] = Depends(get_current_user)):
     """Check health and availability of all AI models."""

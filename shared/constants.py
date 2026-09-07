@@ -46,3 +46,8 @@ EMERGENCY_CONFIG: Dict[str, Any] = {
     'lookahead_junctions': 3,
     'green_hold_s': 30
 }
+
+# MQTT Standard Telemetry Topics
+MQTT_SENSOR_TELEMETRY_TOPIC: str = "surakshanet/sensors/{sensor_id}/telemetry"
+MQTT_JUNCTION_TELEMETRY_TOPIC: str = "surakshanet/junctions/{junction_id}/telemetry"
+

@@ -113,11 +113,35 @@ class GreenWaveController:
         return list(self.active_events.values())
         
     def _get_approach_phase(self, from_junction: str, to_junction: str) -> int:
-        """Determine which signal phase to activate for the approach.
-        In a full implementation, this maps network topology to phase indices.
+        """Determine which signal phase to activate for the approach based on network topology.
+        Phase 0: East-West arterial green (corridor flow, e.g. J0<->J1<->J2<->J3).
+        Phase 2: North-South cross street green.
         """
-        # Placeholder mapping
-        return 0
+        fj = str(from_junction).upper()
+        tj = str(to_junction).upper()
+
+        # East-West arterial pairs along corridor
+        ew_pairs = {
+            ("J0", "J1"), ("J1", "J0"),
+            ("J1", "J2"), ("J2", "J1"),
+            ("J2", "J3"), ("J3", "J2"),
+            ("J3", "J4"), ("J4", "J3"),
+            ("W", "J0"), ("J3", "E"),
+        }
+        if (fj, tj) in ew_pairs:
+            return 0
+
+        # Check directional markers
+        if any(p in fj for p in ["E_", "W_", "WEST", "EAST"]) or any(p in tj for p in ["E_", "W_", "WEST", "EAST"]):
+            return 0
+        if any(p in fj for p in ["N_", "S_", "NORTH", "SOUTH", "CROSS"]) or any(p in tj for p in ["N_", "S_", "NORTH", "SOUTH", "CROSS"]):
+            return 2
+
+        # Default arterial green for corridor J-nodes
+        if fj.startswith("J") and tj.startswith("J"):
+            return 0
+
+        return 2
         
     def _resolve_priority(self, event1: Dict[str, Any], event2: Dict[str, Any]) -> str:
         """Determine which event wins in case of conflict at a junction."""

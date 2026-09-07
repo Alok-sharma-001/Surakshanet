@@ -1,11 +1,12 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from typing import Optional
 from uuid import UUID
 from datetime import datetime
+from app.models.user import UserRole
 
 class UserCreate(BaseModel):
-    email: str
-    password: str
+    email: EmailStr
+    password: str = Field(..., min_length=1)
     name: str
 
 class UserLogin(BaseModel):
@@ -16,7 +17,7 @@ class UserResponse(BaseModel):
     id: UUID
     email: str
     name: str
-    role: str
+    role: UserRole
     is_active: bool
     created_at: datetime
     
@@ -24,7 +25,7 @@ class UserResponse(BaseModel):
 
 class UserUpdate(BaseModel):
     name: Optional[str] = None
-    role: Optional[str] = None
+    role: Optional[UserRole] = None
 
 class TokenResponse(BaseModel):
     access_token: str

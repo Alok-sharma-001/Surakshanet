@@ -1,28 +1,9 @@
 services:
-  postgres:
-    image: postgis/postgis:15-3.3
-    container_name: surakshanet-postgres
-    ports:
-      - "5434:5432"
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-surakshanet}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-surakshanet_dev}
-      POSTGRES_DB: ${POSTGRES_DB:-surakshanet}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - surakshanet-network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-surakshanet} -d ${POSTGRES_DB:-surakshanet}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   timescaledb:
     image: timescale/timescaledb-ha:pg15
     container_name: surakshanet-timescaledb
     ports:
-      - "5433:5432"
+      - "5432:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-surakshanet}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-surakshanet_dev}
@@ -30,7 +11,9 @@ services:
     volumes:
       - timescale_data:/home/postgres/pgdata/data
     networks:
-      - surakshanet-network
+      surakshanet-network:
+        aliases:
+          - postgres
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-surakshanet} -d ${POSTGRES_DB:-surakshanet}"]
       interval: 10s
@@ -70,7 +53,6 @@ networks:
     driver: bridge
 
 volumes:
-  postgres_data:
   timescale_data:
   redis_data:
   mosquitto_data:

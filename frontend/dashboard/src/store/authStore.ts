@@ -46,58 +46,21 @@ export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
   
   login: async (email, password) => {
-    // If operator ID is used, map to registered admin credentials
-    const isOperatorCode = !email.includes('@') || email.startsWith('OP-');
-    const primaryEmail = isOperatorCode ? 'aloks92440@gmail.com' : email;
-    const primaryPassword = isOperatorCode ? 'Alok@2005' : password;
-
     try {
-      const response = await api.auth.login(primaryEmail, primaryPassword);
+      const response = await api.auth.login(email, password);
       const data = response.data;
       const token = data.token || data.access_token;
-      const user = data.user || {
-        id: '278528ec-6d7d-43d8-abc9-e36f5aa65abd',
-        email: primaryEmail,
-        name: 'Alok Sharma',
-        role: 'ADMIN',
-        is_active: true,
-        created_at: new Date().toISOString(),
-      };
+      const user = data.user || null;
       
       if (token) {
         safeStorage.setItem('token', token);
       }
       
       set({ user, token, isAuthenticated: true });
-      return;
-    } catch {
-      // If primary failed and email was custom, also try user-provided directly
-      if (isOperatorCode) {
-        try {
-          const response = await api.auth.login(email, password);
-          const data = response.data;
-          const token = data.token || data.access_token;
-          const user = data.user || null;
-          if (token) safeStorage.setItem('token', token);
-          set({ user, token, isAuthenticated: true });
-          return;
-        } catch {
-          // continue to offline fallback
-        }
-      }
-
-      // Offline / standalone session initialization
-      const fallbackUser: User = {
-        id: '278528ec-6d7d-43d8-abc9-e36f5aa65abd',
-        email: email || 'aloks92440@gmail.com',
-        name: 'Alok Sharma',
-        role: 'ADMIN',
-        is_active: true,
-        created_at: new Date().toISOString(),
-      };
-      const fallbackToken = 'demo-jwt-token-surakshanet';
-      safeStorage.setItem('token', fallbackToken);
-      set({ user: fallbackUser, token: fallbackToken, isAuthenticated: true });
+    } catch (error) {
+      safeStorage.removeItem('token');
+      set({ user: null, token: null, isAuthenticated: false });
+      throw error;
     }
   },
 
@@ -116,20 +79,13 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({
         token,
         isAuthenticated: true,
-        user: {
-          id: '278528ec-6d7d-43d8-abc9-e36f5aa65abd',
-          email: 'aloks92440@gmail.com',
-          name: 'Alok Sharma',
-          role: 'ADMIN',
-          is_active: true,
-          created_at: new Date().toISOString(),
-        }
+        user: null,
       });
-      // Optionally refresh user profile from backend without kicking out on failure
       api.auth.getMe().then(res => {
         if (res.data) set({ user: res.data });
       }).catch(() => {
-        // Backend offline or non-blocking, keep session active
+        safeStorage.removeItem('token');
+        set({ token: null, isAuthenticated: false, user: null });
       });
     }
   }

@@ -5,7 +5,7 @@ import logging
 import random
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 try:
     from simulation.sumo_env import SumoEnvironment
@@ -98,37 +98,37 @@ class MicroSimRunner:
         self.step_count = 0
         self.sim_time_s = 0
 
+from app.websocket.manager import manager
+
 # Global simulation instance and lock
 sim_instance = None
 sim_mode = "microsim"  # "sumo" or "microsim"
 sim_lock = asyncio.Lock()
-active_websockets: List[WebSocket] = []
 
 class StartSimulationRequest(BaseModel):
     scenario_profile: str = "morning_peak"
+    scenario: Optional[str] = None
+    duration: Optional[int] = Field(None, ge=0)
     net_file: str = "corridor.net.xml"
     route_file: str = "corridor.rou.xml"
+
+    def model_post_init(self, __context):
+        if self.scenario is not None:
+            self.scenario_profile = self.scenario
 
 class StepRequest(BaseModel):
     steps: int = 1
 
 async def broadcast_state(state: dict):
-    disconnected = []
-    for ws in active_websockets:
-        try:
-            await ws.send_json(state)
-        except Exception:
-            disconnected.append(ws)
-    for ws in disconnected:
-        if ws in active_websockets:
-            active_websockets.remove(ws)
+    await manager.broadcast("simulation", state)
+    await manager.broadcast("traffic", state)
 
 @router.post("/start")
 async def start_simulation(req: StartSimulationRequest):
     global sim_instance, sim_mode
     async with sim_lock:
         if sim_instance and getattr(sim_instance, "is_running", False):
-            raise HTTPException(status_code=400, detail="Simulation already running")
+            raise HTTPException(status_code=409, detail="Simulation already running")
 
         has_sumo = shutil.which("sumo") is not None or os.path.exists("/usr/bin/sumo")
         if has_sumo and SumoEnvironment:
@@ -194,11 +194,9 @@ async def reset_simulation():
 
 @router.websocket("/ws")
 async def simulation_ws(websocket: WebSocket):
-    await websocket.accept()
-    active_websockets.append(websocket)
+    await manager.connect(websocket, "simulation")
     try:
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
-        if websocket in active_websockets:
-            active_websockets.remove(websocket)
+        manager.disconnect(websocket, "simulation")

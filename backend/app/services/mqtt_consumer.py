@@ -14,6 +14,7 @@ import redis.asyncio as aioredis
 from app.config import get_settings
 from app.models.traffic import TrafficReading
 from app.models.junction import Junction, TrafficSensor
+from shared.constants import MQTT_SENSOR_TELEMETRY_TOPIC, MQTT_JUNCTION_TELEMETRY_TOPIC
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -79,7 +80,10 @@ class MQTTTelemetryConsumer:
     def _on_connect(self, client, userdata, flags, rc):
         if rc == 0:
             logger.info("MQTT Telemetry Consumer connected successfully.")
-            client.subscribe("surakshanet/sensors/+/telemetry", qos=1)
+            sensor_sub = MQTT_SENSOR_TELEMETRY_TOPIC.replace("{sensor_id}", "+")
+            junction_sub = MQTT_JUNCTION_TELEMETRY_TOPIC.replace("{junction_id}", "+")
+            client.subscribe(sensor_sub, qos=1)
+            client.subscribe(junction_sub, qos=1)
             client.subscribe("surakshanet/junction/+/telemetry", qos=1)
             client.subscribe("surakshanet/telemetry/#", qos=1)
         else:
@@ -135,6 +139,10 @@ class MQTTTelemetryConsumer:
             queue = float(data.get("queue_length", data.get("queue", 8.0)))
             v_count = float(data.get("vehicle_count", data.get("total_vehicles", 22.0)))
 
+            source = data.get("source", "live")
+            if source not in ("live", "sim", "mock"):
+                source = "live"
+
             reading = TrafficReading(
                 id=uuid.uuid4(),
                 timestamp=datetime.utcnow(),
@@ -144,7 +152,8 @@ class MQTTTelemetryConsumer:
                 pcu_value=pcu,
                 avg_speed=speed,
                 queue_length=queue,
-                vehicle_breakdown=data.get("vehicle_breakdown", data.get("vehicle_counts", {"car": 12, "motorcycle": 8, "bus": 2}))
+                vehicle_breakdown=data.get("vehicle_breakdown", data.get("vehicle_counts", {"car": 12, "motorcycle": 8, "bus": 2})),
+                source=source
             )
 
             # 1. Insert into database
@@ -158,6 +167,7 @@ class MQTTTelemetryConsumer:
                     self.redis_client = aioredis.from_url(settings.REDIS_URL)
                 event_payload = {
                     "type": "TELEMETRY_UPDATE",
+                    "source": source,
                     "junction_id": str(junction_id),
                     "sensor_id": str(sensor_id),
                     "pcu": reading.pcu_value,
@@ -197,6 +207,7 @@ class MQTTTelemetryConsumer:
 
                         tick_payload = {
                             "type": "TELEMETRY_UPDATE",
+                            "source": "mock",
                             "junction_id": str(j_id),
                             "junction_name": j_name,
                             "pcu": pcu,

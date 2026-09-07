@@ -1,0 +1,14 @@
+{
+  "description": "Arterial Corridor 4-Junction Network Configuration",
+  "corridor_junctions": ["J1", "J2", "J3", "J4"],
+  "canonical_junction_mapping": {
+    "J1": "J0",
+    "J2": "J1",
+    "J3": "J2",
+    "J4": "J3"
+  },
+  "total_links": 18,
+  "standard_phase_string": "rrrrGGGggrrrrGGGgg",
+  "arterial_green_phase": 0,
+  "cross_street_green_phase": 2
+}

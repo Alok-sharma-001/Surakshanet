@@ -36,7 +36,13 @@ class TrainingStatus(BaseModel):
 
 class TrainingStartRequest(BaseModel):
     num_episodes: int = 500
+    episodes: Optional[int] = None
+    seed: Optional[int] = 42
     scenario: str = 'morning_peak'
+
+    def model_post_init(self, __context):
+        if self.episodes is not None:
+            self.num_episodes = self.episodes
 
 class ModelHealth(BaseModel):
     status: str = "healthy"

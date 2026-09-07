@@ -15,14 +15,20 @@ settings = get_settings()
 async def redis_pubsub_bridge():
     """
     Subscribes to internal Redis channels and broadcasts telemetry, signals,
-    and alert events live to connected frontend WebSockets.
+    and alert events live to connected frontend WebSockets across all workers.
     """
     retry_delay = 2
     while True:
         try:
+            from app.middleware.metrics import REDIS_PUBSUB_MESSAGES_TOTAL
             redis = aioredis.from_url(settings.REDIS_URL)
             pubsub = redis.pubsub()
-            await pubsub.subscribe("traffic_updates", "signal_events", "alert_events", "emergency_events")
+            channels = [
+                "traffic_updates", "signal_events", "alert_events", "emergency_events", "simulation_updates",
+                "surakshanet:events:traffic", "surakshanet:events:signals", "surakshanet:events:alerts",
+                "surakshanet:events:emergency", "surakshanet:events:training", "surakshanet:events:simulation"
+            ]
+            await pubsub.subscribe(*channels)
             print("Redis-to-WebSocket bridge listening on pub/sub channels...")
 
             async for message in pubsub.listen():
@@ -33,20 +39,32 @@ async def redis_pubsub_bridge():
                     text_data = raw_data.decode("utf-8") if isinstance(raw_data, bytes) else str(raw_data)
 
                     try:
+                        REDIS_PUBSUB_MESSAGES_TOTAL.labels(channel=channel_name).inc()
+                    except Exception:
+                        pass
+
+                    try:
                         payload = json.loads(text_data)
                     except Exception:
                         payload = {"raw": text_data}
 
                     # Map Redis channel to WebSocket room
-                    ws_target = "traffic"
-                    if "signal" in channel_name:
+                    if "surakshanet:events:" in channel_name:
+                        ws_target = channel_name.replace("surakshanet:events:", "")
+                    elif "signal" in channel_name:
                         ws_target = "signals"
                     elif "alert" in channel_name:
                         ws_target = "alerts"
                     elif "emergency" in channel_name:
                         ws_target = "emergency"
+                    elif "simulation" in channel_name:
+                        ws_target = "simulation"
+                    elif "training" in channel_name:
+                        ws_target = "training"
+                    else:
+                        ws_target = "traffic"
 
-                    await manager.broadcast(ws_target, payload)
+                    await manager.local_broadcast(ws_target, payload)
         except asyncio.CancelledError:
             break
         except Exception as e:
@@ -91,6 +109,48 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+from app.middleware.correlation import CorrelationIdMiddleware
+from fastapi import Request, HTTPException, status
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+import uuid
+
+app.add_middleware(CorrelationIdMiddleware)
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "detail": exc.detail,
+            "error": {
+                "code": exc.status_code,
+                "message": str(exc.detail),
+                "details": exc.detail,
+                "request_id": req_id
+            }
+        },
+        headers={"X-Request-ID": req_id}
+    )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={
+            "detail": exc.errors(),
+            "error": {
+                "code": 422,
+                "message": "Validation error",
+                "details": exc.errors(),
+                "request_id": req_id
+            }
+        },
+        headers={"X-Request-ID": req_id}
+    )
 
 app.middleware("http")(metrics_middleware)
 app.add_route("/metrics", MetricsEndpoint)

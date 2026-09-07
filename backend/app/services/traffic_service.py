@@ -1,79 +1,335 @@
+import uuid
 from typing import List, Optional
 from uuid import UUID
+from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import desc
+from sqlalchemy import select, desc, func, or_, and_, cast
+from geoalchemy2 import Geography
+from geoalchemy2.functions import ST_Distance, ST_DWithin, ST_SetSRID, ST_MakePoint
 
-# Assuming schemas and models are defined elsewhere in the project
-# For this file to be complete, I will import them hypothetically
-# from ..models import Junction, TrafficSensor, TrafficReading
-# from ..schemas import JunctionCreate, JunctionUpdate, SensorCreate, TrafficReadingQuery, TrafficReadingCreate
+from app.models.junction import Junction, TrafficSensor, SensorType, ApproachDirection
+from app.models.traffic import TrafficReading
+from app.schemas.traffic import (
+    JunctionCreate,
+    JunctionUpdate,
+    SensorCreate,
+    SensorResponse,
+    TrafficReadingCreate,
+    TrafficReadingQuery,
+)
 
-class Junction: pass
-class TrafficSensor: pass
-class TrafficReading: pass
-class JunctionCreate: pass
-class JunctionUpdate: pass
-class SensorCreate: pass
-class TrafficReadingQuery: pass
-class TrafficReadingCreate: pass
+
+def _get_dialect_name(db: AsyncSession) -> str:
+    try:
+        if db.bind:
+            return db.bind.dialect.name
+    except Exception:
+        pass
+    return "postgresql"
+
 
 async def get_junctions(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[Junction]:
     result = await db.execute(select(Junction).offset(skip).limit(limit))
-    return result.scalars().all()
+    return list(result.scalars().all())
+
 
 async def get_junction(db: AsyncSession, junction_id: UUID) -> Optional[Junction]:
     result = await db.execute(select(Junction).where(Junction.id == junction_id))
     return result.scalar_one_or_none()
 
+
 async def create_junction(db: AsyncSession, data: JunctionCreate) -> Junction:
-    junction = Junction(**data.dict())
+    junction_dict = data.model_dump()
+    junction = Junction(**junction_dict)
     db.add(junction)
     await db.commit()
     await db.refresh(junction)
     return junction
 
+
 async def update_junction(db: AsyncSession, junction_id: UUID, data: JunctionUpdate) -> Optional[Junction]:
     junction = await get_junction(db, junction_id)
-    if junction:
-        for key, value in data.dict(exclude_unset=True).items():
-            setattr(junction, key, value)
-        await db.commit()
-        await db.refresh(junction)
+    if not junction:
+        return None
+    update_data = data.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(junction, key, value)
+    db.add(junction)
+    await db.commit()
+    await db.refresh(junction)
     return junction
 
-async def get_sensors(db: AsyncSession, junction_id: Optional[UUID] = None) -> List[TrafficSensor]:
+
+async def get_sensors(
+    db: AsyncSession,
+    junction_id: Optional[UUID] = None,
+    skip: int = 0,
+    limit: int = 100
+) -> List[TrafficSensor]:
     query = select(TrafficSensor)
     if junction_id:
         query = query.where(TrafficSensor.junction_id == junction_id)
+    query = query.offset(skip).limit(limit)
     result = await db.execute(query)
-    return result.scalars().all()
+    return list(result.scalars().all())
+
 
 async def create_sensor(db: AsyncSession, data: SensorCreate) -> TrafficSensor:
-    sensor = TrafficSensor(**data.dict())
+    raw_type = (data.sensor_type or data.type or "CAMERA").upper()
+    valid_types = ["CAMERA", "INDUCTION", "ACOUSTIC", "GPS"]
+    sensor_type = raw_type if raw_type in valid_types else "CAMERA"
+
+    raw_dir = (data.approach_direction or "N").upper()
+    valid_dirs = ["N", "E", "S", "W"]
+    approach_direction = raw_dir if raw_dir in valid_dirs else "N"
+
+    sensor = TrafficSensor(
+        junction_id=data.junction_id,
+        sensor_type=sensor_type,
+        approach_direction=approach_direction,
+        is_active=True,
+    )
     db.add(sensor)
     await db.commit()
     await db.refresh(sensor)
     return sensor
 
-async def get_readings(db: AsyncSession, query_params: TrafficReadingQuery) -> List[TrafficReading]:
-    # Placeholder implementation based on hypothetical query params
+
+async def get_readings(
+    db: AsyncSession,
+    junction_id: Optional[UUID] = None,
+    sensor_id: Optional[UUID] = None,
+    start_time: Optional[datetime] = None,
+    end_time: Optional[datetime] = None,
+    skip: int = 0,
+    limit: int = 100
+) -> List[TrafficReading]:
     query = select(TrafficReading)
-    if hasattr(query_params, 'junction_id') and query_params.junction_id:
-        query = query.where(TrafficReading.junction_id == query_params.junction_id)
-    if hasattr(query_params, 'limit') and query_params.limit:
-        query = query.limit(query_params.limit)
-    result = await db.execute(query)
-    return result.scalars().all()
+    if junction_id:
+        query = query.where(TrafficReading.junction_id == junction_id)
+    if sensor_id:
+        query = query.where(TrafficReading.sensor_id == sensor_id)
+    if start_time:
+        if start_time.tzinfo is not None:
+            start_time = start_time.replace(tzinfo=None)
+        query = query.where(TrafficReading.timestamp >= start_time)
+    if end_time:
+        if end_time.tzinfo is not None:
+            end_time = end_time.replace(tzinfo=None)
+        query = query.where(TrafficReading.timestamp <= end_time)
 
-async def get_latest_readings(db: AsyncSession, junction_id: UUID) -> List[TrafficReading]:
-    query = select(TrafficReading).where(TrafficReading.junction_id == junction_id).order_by(desc(TrafficReading.timestamp)).limit(10)
+    query = query.order_by(desc(TrafficReading.timestamp)).offset(skip).limit(limit)
     result = await db.execute(query)
-    return result.scalars().all()
+    return list(result.scalars().all())
 
-async def create_reading(db: AsyncSession, data: TrafficReadingCreate) -> TrafficReading:
-    reading = TrafficReading(**data.dict())
+
+async def get_latest_readings(db: AsyncSession, junction_id: UUID, limit: int = 10) -> List[TrafficReading]:
+    query = (
+        select(TrafficReading)
+        .where(TrafficReading.junction_id == junction_id)
+        .order_by(desc(TrafficReading.timestamp))
+        .limit(limit)
+    )
+    result = await db.execute(query)
+    return list(result.scalars().all())
+
+
+async def create_reading(
+    db: AsyncSession,
+    data: TrafficReadingCreate,
+    source: Optional[str] = None
+) -> TrafficReading:
+    reading_dict = data.model_dump()
+    j_id = reading_dict.get("junction_id")
+    if not j_id:
+        res = await db.execute(select(TrafficSensor).where(TrafficSensor.id == data.sensor_id))
+        sensor = res.scalar_one_or_none()
+        if sensor:
+            j_id = sensor.junction_id
+        else:
+            j_id = uuid.uuid4()
+
+    speed = reading_dict.get("avg_speed")
+    if speed is None:
+        speed = reading_dict.get("average_speed")
+
+    pcu = reading_dict.get("pcu_value")
+    if pcu is None:
+        pcu = float(reading_dict.get("vehicle_count", 0.0)) * 1.0
+
+    ts = reading_dict.get("timestamp")
+    if ts is None:
+        ts = datetime.utcnow()
+    elif ts.tzinfo is not None:
+        ts = ts.replace(tzinfo=None)
+
+    resolved_source = source or reading_dict.get("source") or "live"
+    if resolved_source not in ("live", "sim", "mock"):
+        resolved_source = "live"
+
+    reading = TrafficReading(
+        id=uuid.uuid4(),
+        sensor_id=data.sensor_id,
+        junction_id=j_id,
+        vehicle_count=reading_dict.get("vehicle_count", 0.0),
+        pcu_value=pcu,
+        avg_speed=speed,
+        queue_length=reading_dict.get("queue_length") or 0.0,
+        vehicle_breakdown=reading_dict.get("vehicle_breakdown") or {},
+        source=resolved_source,
+        timestamp=ts,
+    )
     db.add(reading)
     await db.commit()
     await db.refresh(reading)
     return reading
+
+
+# ---------------------------------------------------------------------------
+# Spatial Queries (PostGIS with SQLite Dialect Fallback)
+# ---------------------------------------------------------------------------
+
+async def get_nearest_junction(
+    db: AsyncSession,
+    latitude: float,
+    longitude: float
+) -> Optional[Junction]:
+    """
+    Find the nearest junction using PostGIS ST_Distance (with spatial index)
+    when on PostgreSQL, or Euclidean distance fallback when on SQLite.
+    """
+    dialect = _get_dialect_name(db)
+    if dialect == "postgresql":
+        try:
+            point = func.ST_SetSRID(func.ST_MakePoint(longitude, latitude), 4326)
+            query = (
+                select(Junction)
+                .where(Junction.location.is_not(None))
+                .order_by(func.ST_Distance(cast(Junction.location, Geography), cast(point, Geography)))
+                .limit(1)
+            )
+            result = await db.execute(query)
+            junction = result.scalar_one_or_none()
+            if junction:
+                return junction
+        except Exception:
+            pass
+
+    # Fallback (SQLite or if location column is unpopulated)
+    query = (
+        select(Junction)
+        .order_by(
+            (Junction.latitude - latitude) * (Junction.latitude - latitude) +
+            (Junction.longitude - longitude) * (Junction.longitude - longitude)
+        )
+        .limit(1)
+    )
+    result = await db.execute(query)
+    return result.scalar_one_or_none()
+
+
+async def get_junctions_within_radius(
+    db: AsyncSession,
+    latitude: float,
+    longitude: float,
+    radius_meters: float = 5000.0
+) -> List[Junction]:
+    """
+    Query junctions within radius_meters using ST_DWithin on PostgreSQL/PostGIS,
+    or degree distance fallback on SQLite.
+    """
+    dialect = _get_dialect_name(db)
+    if dialect == "postgresql":
+        try:
+            point = func.ST_SetSRID(func.ST_MakePoint(longitude, latitude), 4326)
+            query = (
+                select(Junction)
+                .where(
+                    or_(
+                        func.ST_DWithin(
+                            cast(Junction.location, Geography),
+                            cast(point, Geography),
+                            radius_meters
+                        ),
+                        and_(
+                            Junction.location.is_(None),
+                            ((Junction.latitude - latitude) * (Junction.latitude - latitude) +
+                             (Junction.longitude - longitude) * (Junction.longitude - longitude))
+                            <= (radius_meters / 111000.0) * (radius_meters / 111000.0)
+                        )
+                    )
+                )
+                .order_by(
+                    func.ST_Distance(
+                        cast(func.coalesce(Junction.location, point), Geography),
+                        cast(point, Geography)
+                    )
+                )
+            )
+            result = await db.execute(query)
+            return list(result.scalars().all())
+        except Exception:
+            pass
+
+    # SQLite fallback
+    deg_radius = radius_meters / 111000.0
+    query = (
+        select(Junction)
+        .where(
+            ((Junction.latitude - latitude) * (Junction.latitude - latitude) +
+             (Junction.longitude - longitude) * (Junction.longitude - longitude))
+            <= (deg_radius * deg_radius)
+        )
+    )
+    result = await db.execute(query)
+    return list(result.scalars().all())
+
+
+async def get_junctions_in_bbox(
+    db: AsyncSession,
+    min_lat: float,
+    min_lon: float,
+    max_lat: float,
+    max_lon: float
+) -> List[Junction]:
+    """
+    Query junctions within a bounding box using ST_MakeEnvelope on PostGIS
+    or coordinate comparisons on SQLite.
+    """
+    dialect = _get_dialect_name(db)
+    if dialect == "postgresql":
+        try:
+            envelope = func.ST_MakeEnvelope(min_lon, min_lat, max_lon, max_lat, 4326)
+            query = (
+                select(Junction)
+                .where(
+                    or_(
+                        func.ST_Within(Junction.location, envelope),
+                        and_(
+                            Junction.latitude >= min_lat,
+                            Junction.latitude <= max_lat,
+                            Junction.longitude >= min_lon,
+                            Junction.longitude <= max_lon,
+                        )
+                    )
+                )
+            )
+            result = await db.execute(query)
+            return list(result.scalars().all())
+        except Exception:
+            pass
+
+    # SQLite fallback
+    query = (
+        select(Junction)
+        .where(
+            and_(
+                Junction.latitude >= min_lat,
+                Junction.latitude <= max_lat,
+                Junction.longitude >= min_lon,
+                Junction.longitude <= max_lon,
+            )
+        )
+    )
+    result = await db.execute(query)
+    return list(result.scalars().all())

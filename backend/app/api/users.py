@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import Any, List
+from typing import Any, List, Optional
 from uuid import UUID
 
 from app.database import get_db
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.auth import UserResponse
 from app.services.auth_service import require_role
 
@@ -36,16 +36,40 @@ async def get_user(
 @router.patch("/{user_id}/role", response_model=UserResponse)
 async def update_user_role(
     user_id: UUID,
-    role: str,
+    request: Request,
+    role: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role("ADMIN"))
 ) -> Any:
+    target_role = role
+    if not target_role:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                target_role = body.get("role")
+        except Exception:
+            pass
+
+    if not target_role:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Role field is required"
+        )
+
+    valid_roles = {r.value: r for r in UserRole}
+    normalized_role = target_role.strip().upper() if isinstance(target_role, str) else ""
+    if normalized_role not in valid_roles:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid role '{target_role}'. Allowed roles: {list(valid_roles.keys())}"
+        )
+
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    user.role = role
+    user.role = valid_roles[normalized_role]
     db.add(user)
     await db.commit()
     await db.refresh(user)

@@ -5,6 +5,14 @@ import uuid
 import paho.mqtt.client as mqtt
 from typing import Dict, Any, List
 
+try:
+    from shared.constants import MQTT_SENSOR_TELEMETRY_TOPIC
+except ImportError:
+    import sys
+    import os
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+    from shared.constants import MQTT_SENSOR_TELEMETRY_TOPIC
+
 class SensorSimulator:
     def __init__(self, broker_host: str, broker_port: int, junctions: List[Dict[str, Any]]):
         self.broker_host = broker_host
@@ -36,6 +44,7 @@ class SensorSimulator:
         sensor_id = junction.get("sensor_id", str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{junction['id']}-N")))
 
         return {
+            "source": "sim",
             "junction_id": junction["id"],
             "junction_name": junction["name"],
             "sensor_id": sensor_id,
@@ -54,7 +63,7 @@ class SensorSimulator:
         }
 
     def publish_telemetry(self, junction: Dict[str, Any], data: Dict[str, Any]) -> None:
-        topic = f"surakshanet/sensors/{data['sensor_id']}/telemetry"
+        topic = MQTT_SENSOR_TELEMETRY_TOPIC.format(sensor_id=data['sensor_id'])
         self.client.publish(topic, json.dumps(data))
         print(f"[{time.strftime('%H:%M:%S')}] Published to {topic} -> {junction['name']}: {data['pcu_value']} PCU, {data['avg_speed']} km/h")
 

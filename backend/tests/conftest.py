@@ -26,14 +26,25 @@ async def client(db_session):
         yield ac
     app.dependency_overrides.clear()
 
+from sqlalchemy import select
+from app.models.user import User, UserRole
+
 @pytest.fixture
-async def auth_headers(client):
+async def auth_headers(client, db_session):
     # Attempt register (in case first run)
     await client.post("/api/v1/auth/register", json={
         "email": "admin@test.com",
         "password": "testpassword123",
         "name": "Test Admin"
     })
+    # Explicitly elevate user role to ADMIN in test database session
+    result = await db_session.execute(select(User).where(User.email == "admin@test.com"))
+    user = result.scalar_one_or_none()
+    if user:
+        user.role = UserRole.ADMIN
+        db_session.add(user)
+        await db_session.commit()
+
     # Login to obtain JWT
     response = await client.post("/api/v1/auth/login", json={
         "email": "admin@test.com",
@@ -41,4 +52,5 @@ async def auth_headers(client):
     })
     token = response.json().get("access_token")
     return {"Authorization": f"Bearer {token}"}
+
 

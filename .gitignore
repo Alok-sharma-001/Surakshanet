@@ -56,3 +56,11 @@ Thumbs.db
 *.pem
 *.key
 *.crt
+surakshanet-key.pem
+infra/nginx/certs/
+
+# Media & Backups
+Travel/
+backups/
+.agents/
+

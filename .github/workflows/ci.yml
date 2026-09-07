@@ -1,15 +1,18 @@
 name: CI
 
-on:
+'on':
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
 
 jobs:
-  lint-and-test-backend:
+  backend:
+    name: Backend Lint, Typecheck, and Tests
     runs-on: ubuntu-latest
     services:
-      postgres:
-        image: postgres:15
+      timescaledb:
+        image: timescale/timescaledb-ha:pg15
         env:
           POSTGRES_USER: surakshanet
           POSTGRES_PASSWORD: test_password
@@ -25,45 +28,81 @@ jobs:
         image: redis:7-alpine
         ports:
           - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install dependencies
+
+      - name: Install Python Dependencies
         run: |
           cd backend
+          pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio pytest-cov flake8 httpx aiosqlite
-      - name: Lint
+          pip install pytest pytest-asyncio pytest-cov flake8 ruff mypy httpx aiosqlite
+
+      - name: Lint with ruff and flake8
         run: |
           cd backend
+          ruff check app/
           flake8 app/ --max-line-length=120 --ignore=E501,W503
-      - name: Test
+
+      - name: Typecheck with mypy
+        run: |
+          cd backend
+          mypy app/ --ignore-missing-imports
+
+      - name: Run Database Migrations
+        env:
+          DATABASE_URL: postgresql+asyncpg://surakshanet:test_password@localhost:5432/surakshanet_test
+        run: |
+          cd backend
+          alembic upgrade head
+
+      - name: Run Backend Pytest Suite
         env:
           DATABASE_URL: postgresql+asyncpg://surakshanet:test_password@localhost:5432/surakshanet_test
           REDIS_URL: redis://localhost:6379/0
-          JWT_SECRET_KEY: test-secret-key
+          JWT_SECRET_KEY: test-secret-key-that-is-at-least-32-characters-long
+          ENVIRONMENT: testing
         run: |
           cd backend
           pytest tests/ -v --cov=app --cov-report=term-missing
 
-  lint-frontend:
+  frontend:
+    name: Frontend Lint, Typecheck, Test, and Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Install dependencies
+
+      - name: Install Frontend Dependencies
         run: |
           cd frontend/dashboard
           npm install
-      - name: Type check
+
+      - name: Typecheck with tsc
         run: |
           cd frontend/dashboard
           npx tsc --noEmit
-      - name: Build
+
+      - name: Run Frontend Tests
+        run: |
+          cd frontend/dashboard
+          npm test
+
+      - name: Build Dashboard
         run: |
           cd frontend/dashboard
           npm run build

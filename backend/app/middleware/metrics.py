@@ -20,6 +20,29 @@ ACTIVE_CONNECTIONS = Gauge(
     "Number of active connections"
 )
 
+WS_CONNECTIONS_ACTIVE = Gauge(
+    "surakshanet_ws_active_connections",
+    "Active WebSocket connections by channel",
+    ["channel"]
+)
+
+REDIS_PUBSUB_MESSAGES_TOTAL = Counter(
+    "surakshanet_redis_pubsub_messages_total",
+    "Total Redis pub/sub messages processed",
+    ["channel"]
+)
+
+ML_INFERENCE_DURATION_SECONDS = Histogram(
+    "surakshanet_ml_inference_duration_seconds",
+    "ML model inference duration in seconds",
+    ["model_name"]
+)
+
+SIMULATION_STEP_DURATION_SECONDS = Histogram(
+    "surakshanet_simulation_step_duration_seconds",
+    "Traffic simulation step duration in seconds"
+)
+
 async def metrics_middleware(request: Request, call_next):
     ACTIVE_CONNECTIONS.inc()
     start_time = time.perf_counter()

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import * as THREE from 'three';
+import * as THREE from 'three/src/Three.js';
 
 export const Studio3DSphere: React.FC = () => {
   const containerRef = useRef<HTMLDivElement | null>(null);

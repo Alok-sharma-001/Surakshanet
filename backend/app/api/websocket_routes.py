@@ -9,7 +9,8 @@ async def handle_websocket(websocket: WebSocket, channel: str):
     try:
         while True:
             data = await websocket.receive_text()
-            # Handle incoming data if needed, like heartbeats
+            if data in ("ping", '{"type":"ping"}', '{"type": "ping"}'):
+                await websocket.send_text("pong")
     except WebSocketDisconnect:
         manager.disconnect(websocket, channel)
 
@@ -32,3 +33,11 @@ async def emergency_ws(websocket: WebSocket):
 @ws_router.websocket('/ws/training')
 async def training_ws(websocket: WebSocket):
     await handle_websocket(websocket, 'training')
+
+@ws_router.websocket('/api/v1/ws')
+async def root_ws(websocket: WebSocket):
+    await handle_websocket(websocket, 'default')
+
+@ws_router.websocket('/ws/{channel}')
+async def dynamic_channel_ws(websocket: WebSocket, channel: str):
+    await handle_websocket(websocket, channel)

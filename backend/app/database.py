@@ -27,13 +27,34 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with async_session_maker() as session:
         yield session
 
+import asyncio
+import logging
+import os
+from alembic.config import Config
+from alembic import command
+
+logger = logging.getLogger(__name__)
+
+def run_alembic_migrations() -> None:
+    """Execute Alembic migrations up to head synchronously."""
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    alembic_ini_path = os.path.join(backend_dir, "alembic.ini")
+    if os.path.exists(alembic_ini_path):
+        alembic_cfg = Config(alembic_ini_path)
+        alembic_cfg.set_main_option("script_location", os.path.join(backend_dir, "alembic"))
+        logger.info("Executing Alembic migrations up to head...")
+        command.upgrade(alembic_cfg, "head")
+        logger.info("Alembic migrations completed successfully.")
+    else:
+        logger.warning(f"alembic.ini not found at {alembic_ini_path}")
+
 async def init_db() -> None:
-    """Initialize the database by creating all tables and seeding default admin."""
-    try:
+    """Initialize the database by executing Alembic migrations and seeding default admin."""
+    if "sqlite" in settings.DATABASE_URL:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-    except Exception as e:
-        print(f"Table/type initialization note: {e}")
+    else:
+        await asyncio.to_thread(run_alembic_migrations)
     
     # Seed default admin user
     try:
@@ -41,4 +62,4 @@ async def init_db() -> None:
         async with async_session_maker() as session:
             await seed_default_admin(session)
     except Exception as e:
-        print(f"Admin seeding note: {e}")
+        logger.warning(f"Admin seeding note: {e}")

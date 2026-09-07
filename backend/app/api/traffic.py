@@ -1,23 +1,69 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
 from typing import Any, List, Optional
-import uuid
 from uuid import UUID
 from datetime import datetime
 
 from app.database import get_db
-from app.models.junction import Junction, TrafficSensor
-from app.models.traffic import TrafficReading
 from app.schemas.traffic import (
     JunctionCreate, JunctionResponse, JunctionUpdate,
     SensorCreate, SensorResponse,
     TrafficReadingCreate, TrafficReadingResponse
 )
-from app.services.auth_service import get_current_user, get_optional_current_user, require_role
+from app.services.auth_service import get_optional_current_user, require_role
 from app.models.user import User
+from app.services import traffic_service
 
 router = APIRouter(prefix="/traffic", tags=["traffic"])
+
+
+# ---------------------------------------------------------------------------
+# Junctions - Spatial Queries (MUST be placed before /junctions/{id})
+# ---------------------------------------------------------------------------
+
+@router.get("/junctions/spatial/nearest", response_model=JunctionResponse)
+async def get_nearest_junction(
+    latitude: float = Query(..., description="Latitude coordinate", ge=-90.0, le=90.0),
+    longitude: float = Query(..., description="Longitude coordinate", ge=-180.0, le=180.0),
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user)
+) -> Any:
+    junction = await traffic_service.get_nearest_junction(db, latitude=latitude, longitude=longitude)
+    if not junction:
+        raise HTTPException(status_code=404, detail="No junction found")
+    return junction
+
+
+@router.get("/junctions/spatial/radius", response_model=List[JunctionResponse])
+async def get_junctions_within_radius(
+    latitude: float = Query(..., description="Center latitude", ge=-90.0, le=90.0),
+    longitude: float = Query(..., description="Center longitude", ge=-180.0, le=180.0),
+    radius_meters: float = Query(5000.0, ge=0.0, description="Radius in meters"),
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user)
+) -> Any:
+    return await traffic_service.get_junctions_within_radius(
+        db, latitude=latitude, longitude=longitude, radius_meters=radius_meters
+    )
+
+
+@router.get("/junctions/spatial/bbox", response_model=List[JunctionResponse])
+async def get_junctions_in_bbox(
+    min_lat: float = Query(..., description="Minimum latitude"),
+    min_lon: float = Query(..., description="Minimum longitude"),
+    max_lat: float = Query(..., description="Maximum latitude"),
+    max_lon: float = Query(..., description="Maximum longitude"),
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user)
+) -> Any:
+    return await traffic_service.get_junctions_in_bbox(
+        db, min_lat=min_lat, min_lon=min_lon, max_lat=max_lat, max_lon=max_lon
+    )
+
+
+# ---------------------------------------------------------------------------
+# Junctions CRUD
+# ---------------------------------------------------------------------------
 
 @router.get("/junctions", response_model=List[JunctionResponse])
 async def list_junctions(
@@ -26,8 +72,8 @@ async def list_junctions(
     db: AsyncSession = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_current_user)
 ) -> Any:
-    result = await db.execute(select(Junction).offset(skip).limit(limit))
-    return result.scalars().all()
+    return await traffic_service.get_junctions(db, skip=skip, limit=limit)
+
 
 @router.get("/junctions/{id}", response_model=JunctionResponse)
 async def get_junction(
@@ -35,11 +81,11 @@ async def get_junction(
     db: AsyncSession = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_current_user)
 ) -> Any:
-    result = await db.execute(select(Junction).where(Junction.id == id))
-    junction = result.scalar_one_or_none()
+    junction = await traffic_service.get_junction(db, junction_id=id)
     if not junction:
         raise HTTPException(status_code=404, detail="Junction not found")
     return junction
+
 
 @router.post("/junctions", response_model=JunctionResponse, status_code=status.HTTP_201_CREATED)
 async def create_junction(
@@ -47,11 +93,8 @@ async def create_junction(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role("ADMIN"))
 ) -> Any:
-    junction = Junction(**junction_in.model_dump())
-    db.add(junction)
-    await db.commit()
-    await db.refresh(junction)
-    return junction
+    return await traffic_service.create_junction(db, data=junction_in)
+
 
 @router.patch("/junctions/{id}", response_model=JunctionResponse)
 async def update_junction(
@@ -60,19 +103,15 @@ async def update_junction(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role("ADMIN"))
 ) -> Any:
-    result = await db.execute(select(Junction).where(Junction.id == id))
-    junction = result.scalar_one_or_none()
+    junction = await traffic_service.update_junction(db, junction_id=id, data=junction_in)
     if not junction:
         raise HTTPException(status_code=404, detail="Junction not found")
-    
-    update_data = junction_in.model_dump(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(junction, field, value)
-        
-    db.add(junction)
-    await db.commit()
-    await db.refresh(junction)
     return junction
+
+
+# ---------------------------------------------------------------------------
+# Sensors CRUD
+# ---------------------------------------------------------------------------
 
 @router.get("/sensors", response_model=List[SensorResponse])
 async def list_sensors(
@@ -82,12 +121,8 @@ async def list_sensors(
     db: AsyncSession = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_current_user)
 ) -> Any:
-    query = select(TrafficSensor)
-    if junction_id:
-        query = query.where(TrafficSensor.junction_id == junction_id)
-    query = query.offset(skip).limit(limit)
-    result = await db.execute(query)
-    return result.scalars().all()
+    return await traffic_service.get_sensors(db, junction_id=junction_id, skip=skip, limit=limit)
+
 
 @router.post("/sensors", response_model=SensorResponse, status_code=status.HTTP_201_CREATED)
 async def create_sensor(
@@ -95,26 +130,9 @@ async def create_sensor(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role("ADMIN"))
 ) -> Any:
-    raw_type = (sensor_in.sensor_type or sensor_in.type or "CAMERA").upper()
-    valid_types = ["CAMERA", "INDUCTION", "ACOUSTIC", "GPS"]
-    sensor_type = raw_type if raw_type in valid_types else "CAMERA"
-    
-    raw_dir = (sensor_in.approach_direction or "N").upper()
-    valid_dirs = ["N", "E", "S", "W"]
-    approach_direction = raw_dir if raw_dir in valid_dirs else "N"
-
-    sensor = TrafficSensor(
-        junction_id=sensor_in.junction_id,
-        sensor_type=sensor_type,
-        approach_direction=approach_direction,
-        is_active=True
-    )
-    db.add(sensor)
-    await db.commit()
-    await db.refresh(sensor)
-    
-    st_val = sensor.sensor_type.value if hasattr(sensor.sensor_type, 'value') else str(sensor.sensor_type)
-    ad_val = sensor.approach_direction.value if hasattr(sensor.approach_direction, 'value') else str(sensor.approach_direction)
+    sensor = await traffic_service.create_sensor(db, data=sensor_in)
+    st_val = sensor.sensor_type.value if hasattr(sensor.sensor_type, "value") else str(sensor.sensor_type)
+    ad_val = sensor.approach_direction.value if hasattr(sensor.approach_direction, "value") else str(sensor.approach_direction)
     return SensorResponse(
         id=sensor.id,
         junction_id=sensor.junction_id,
@@ -125,6 +143,11 @@ async def create_sensor(
         type=st_val.lower(),
         name=sensor_in.name or f"{st_val} Sensor"
     )
+
+
+# ---------------------------------------------------------------------------
+# Readings CRUD
+# ---------------------------------------------------------------------------
 
 @router.get("/readings", response_model=List[TrafficReadingResponse])
 async def list_readings(
@@ -137,19 +160,16 @@ async def list_readings(
     db: AsyncSession = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_current_user)
 ) -> Any:
-    query = select(TrafficReading)
-    if junction_id:
-        query = query.where(TrafficReading.junction_id == junction_id)
-    if sensor_id:
-        query = query.where(TrafficReading.sensor_id == sensor_id)
-    if start_time:
-        query = query.where(TrafficReading.timestamp >= start_time)
-    if end_time:
-        query = query.where(TrafficReading.timestamp <= end_time)
-        
-    query = query.order_by(desc(TrafficReading.timestamp)).offset(skip).limit(limit)
-    result = await db.execute(query)
-    return result.scalars().all()
+    return await traffic_service.get_readings(
+        db,
+        junction_id=junction_id,
+        sensor_id=sensor_id,
+        start_time=start_time,
+        end_time=end_time,
+        skip=skip,
+        limit=limit
+    )
+
 
 @router.get("/readings/{junction_id}", response_model=List[TrafficReadingResponse])
 async def get_latest_readings(
@@ -158,45 +178,84 @@ async def get_latest_readings(
     db: AsyncSession = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_current_user)
 ) -> Any:
-    query = select(TrafficReading).where(
-        TrafficReading.junction_id == junction_id
-    ).order_by(desc(TrafficReading.timestamp)).limit(limit)
-    
-    result = await db.execute(query)
-    return result.scalars().all()
+    return await traffic_service.get_latest_readings(db, junction_id=junction_id, limit=limit)
+
 
 @router.post("/readings", response_model=TrafficReadingResponse, status_code=status.HTTP_201_CREATED)
 async def create_reading(
     reading_in: TrafficReadingCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_current_user)
 ) -> Any:
-    j_id = reading_in.junction_id
-    if not j_id:
-        res = await db.execute(select(TrafficSensor).where(TrafficSensor.id == reading_in.sensor_id))
-        sensor = res.scalar_one_or_none()
-        if sensor:
-            j_id = sensor.junction_id
-        else:
-            j_id = uuid.uuid4()
+    source = None
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            source = body.get("source")
+    except Exception:
+        pass
+    return await traffic_service.create_reading(db, data=reading_in, source=source)
 
-    speed = reading_in.avg_speed if reading_in.avg_speed is not None else reading_in.average_speed
-    pcu = reading_in.pcu_value if reading_in.pcu_value is not None else (reading_in.vehicle_count * 1.0)
-    ts = reading_in.timestamp if reading_in.timestamp is not None else datetime.utcnow()
-    if ts.tzinfo is not None:
-        ts = ts.replace(tzinfo=None)
 
-    reading = TrafficReading(
-        sensor_id=reading_in.sensor_id,
+@router.post("/reading", response_model=TrafficReadingResponse, status_code=status.HTTP_201_CREATED)
+async def create_reading_singular(
+    reading_in: TrafficReadingCreate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user)
+) -> Any:
+    return await create_reading(reading_in, request, db, current_user)
+
+
+@router.get("/history", response_model=List[TrafficReadingResponse])
+async def get_traffic_history(
+    junction_id: Optional[str] = None,
+    start_time: Optional[datetime] = None,
+    end_time: Optional[datetime] = None,
+    limit: int = Query(100, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user)
+) -> Any:
+    j_id = None
+    if junction_id:
+        try:
+            j_id = UUID(junction_id)
+        except Exception:
+            j_id = None
+    return await traffic_service.get_readings(
+        db,
         junction_id=j_id,
-        vehicle_count=reading_in.vehicle_count,
-        pcu_value=pcu,
-        avg_speed=speed,
-        queue_length=reading_in.queue_length or 0.0,
-        vehicle_breakdown=reading_in.vehicle_breakdown or {},
-        timestamp=ts
+        start_time=start_time,
+        end_time=end_time,
+        limit=limit
     )
-    db.add(reading)
-    await db.commit()
-    await db.refresh(reading)
-    return reading
+
+
+@router.get("/latest", response_model=List[TrafficReadingResponse])
+async def get_latest_traffic(
+    junction_id: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user)
+) -> Any:
+    if junction_id:
+        try:
+            j_id = UUID(junction_id)
+        except Exception:
+            return []
+        return await traffic_service.get_latest_readings(db, junction_id=j_id, limit=20)
+    return await traffic_service.get_readings(db, limit=20)
+
+
+@router.post("/pcu")
+async def calculate_pcu(
+    data: dict,
+    current_user: Optional[User] = Depends(get_optional_current_user)
+) -> Any:
+    cars = float(data.get("cars", 0))
+    buses = float(data.get("buses", 0))
+    two_wheelers = float(data.get("two_wheelers", data.get("motorcycles", 0)))
+    trucks = float(data.get("trucks", 0))
+    total_pcu = (cars * 1.0) + (buses * 3.0) + (two_wheelers * 0.5) + (trucks * 3.0)
+    return {"pcu": total_pcu, "total_pcu": total_pcu}
+
