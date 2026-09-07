@@ -12,7 +12,23 @@ from ml.forecasting.traffic_forecaster import TrafficForecaster
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-def train_and_save_models():
+def fetch_real_readings_from_db(db_url: str):
+    """Pulls genuine historical traffic readings from TimescaleDB hypertable."""
+    import pandas as pd
+    from sqlalchemy import create_engine, text
+    sync_url = db_url.replace("+asyncpg", "")
+    engine = create_engine(sync_url)
+    query = text("""
+        SELECT timestamp, junction_id, pcu_value, vehicle_count, avg_speed, density
+        FROM traffic_readings
+        ORDER BY timestamp ASC
+        LIMIT 10000;
+    """)
+    with engine.connect() as conn:
+        df = pd.read_sql(query, conn)
+    return df
+
+def train_and_save_models(db_url: str = None):
     weights_dir = os.path.join(os.path.dirname(__file__), "weights")
     os.makedirs(weights_dir, exist_ok=True)
 
@@ -24,8 +40,25 @@ def train_and_save_models():
         forecast_horizons=[3, 6, 12]  # 15 min, 30 min, 60 min (at 5min resolution)
     )
 
-    logger.info("Generating 14 days of realistic city traffic pattern data...")
-    df = forecaster.generate_synthetic_data(num_days=14, junctions=4)
+    df = None
+    target_db_url = db_url or os.environ.get("DATABASE_URL")
+    if target_db_url:
+        try:
+            logger.info("Checking TimescaleDB hypertable for real historical traffic telemetry...")
+            real_df = fetch_real_readings_from_db(target_db_url)
+            if real_df is not None and len(real_df) >= 100:
+                logger.info(f"Retraining forecaster using {len(real_df)} genuine TimescaleDB telemetry readings [source: live].")
+                df = real_df
+            else:
+                count = len(real_df) if real_df is not None else 0
+                logger.info(f"Insufficient TimescaleDB readings ({count} < 100). Synthesizing calibrated 14-day patterns [source: sim].")
+        except Exception as e:
+            logger.warning(f"Could not connect to TimescaleDB ({e}). Synthesizing calibrated 14-day patterns [source: sim].")
+
+    if df is None:
+        logger.info("Generating 14 days of realistic city traffic pattern data...")
+        df = forecaster.generate_synthetic_data(num_days=14, junctions=4)
+    
     pcu_series = df["pcu_value"]
     pcu_values = pcu_series.values
 

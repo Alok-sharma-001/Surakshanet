@@ -52,6 +52,8 @@ class MQTTTelemetryConsumer:
         self.client.on_connect = self._on_connect
         self.client.on_message = self._on_message
         self.client.on_disconnect = self._on_disconnect
+        if settings.MQTT_USERNAME and settings.MQTT_PASSWORD:
+            self.client.username_pw_set(settings.MQTT_USERNAME, settings.MQTT_PASSWORD)
 
         try:
             logger.info(f"Connecting to MQTT broker at {settings.MQTT_BROKER_HOST}:{settings.MQTT_BROKER_PORT}...")

@@ -95,14 +95,42 @@ class SumoLiveBridge:
         self.active_ambulance_id = None
         self.command_queue = queue.Queue()
         self._redis_sock = None
+        self.redis_password = os.environ.get("REDIS_PASSWORD", None)
+        self.redis_client = None
+
+        try:
+            import redis
+            self.redis_client = redis.Redis(
+                host=self.redis_host,
+                port=self.redis_port,
+                password=self.redis_password,
+                decode_responses=True,
+                socket_timeout=2.0,
+                retry_on_timeout=True
+            )
+            logger.info(f"Initialized robust redis-py client connecting to {self.redis_host}:{self.redis_port}")
+        except Exception as e:
+            logger.debug(f"redis-py unavailable or connection pending ({e}), falling back to low-level socket")
 
     def publish_redis(self, channel: str, message: str) -> bool:
-        """Publishes a message to Redis using a persistent, low-latency TCP connection."""
+        """Publishes a message to Redis using redis-py or fallback socket with health reporting."""
+        if self.redis_client:
+            try:
+                self.redis_client.publish(channel, message)
+                self.redis_client.setex("simulation:bridge:heartbeat", 10, str(time.time()))
+                return True
+            except Exception as e:
+                logger.debug(f"redis-py publish retry: {e}")
+
         if self._redis_sock is None:
             try:
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.settimeout(2.0)
                 s.connect((self.redis_host, self.redis_port))
+                if self.redis_password:
+                    auth_cmd = f"*2\r\n$4\r\nAUTH\r\n${len(self.redis_password)}\r\n{self.redis_password}\r\n"
+                    s.sendall(auth_cmd.encode("utf-8"))
+                    s.recv(64)
                 self._redis_sock = s
             except Exception:
                 self._redis_sock = None

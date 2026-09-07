@@ -18,3 +18,11 @@ htmlcov/
 *.crt
 Travel/
 tests/
+docs/
+supporting docs/
+ml/benchmarks/
+scripts/
+*.pt
+*.onnx
+*.zip
+*.tar.gz

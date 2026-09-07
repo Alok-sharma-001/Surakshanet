@@ -19,11 +19,13 @@ class WebSocketService {
     let wsUrl: string;
 
     if (apiUrl) {
-      const parsed = new URL(apiUrl);
-      const apiProtocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
-      wsUrl = `${apiProtocol}//${parsed.host}/ws/${channel}`;
-    } else if (window.location.port === '5173') {
-      wsUrl = `ws://${window.location.hostname}:8000/ws/${channel}`;
+      try {
+        const parsed = new URL(apiUrl, window.location.href);
+        const apiProtocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsUrl = `${apiProtocol}//${parsed.host}/ws/${channel}`;
+      } catch {
+        wsUrl = `${protocol}//${window.location.host}/ws/${channel}`;
+      }
     } else {
       wsUrl = `${protocol}//${window.location.host}/ws/${channel}`;
     }

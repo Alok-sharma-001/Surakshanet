@@ -1,9 +1,9 @@
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import Any
+from typing import Any, Optional
 from uuid import UUID
 
 from app.database import get_db
@@ -31,7 +31,7 @@ async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)) ->
     return await register_user(db, user_data)
 
 @router.post("/login")
-async def login(request: Request, db: AsyncSession = Depends(get_db)) -> Any:
+async def login(request: Request, response: Response, db: AsyncSession = Depends(get_db)) -> Any:
     email = None
     password = None
     content_type = request.headers.get("content-type", "")
@@ -85,6 +85,19 @@ async def login(request: Request, db: AsyncSession = Depends(get_db)) -> Any:
     access_token = create_access_token(data={"sub": str(user.id), "role": role_str})
     refresh_token = create_refresh_token(data={"sub": str(user.id)})
     
+    # Secure httpOnly cookie for refresh token
+    from app.config import get_settings
+    auth_settings = get_settings()
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=auth_settings.ENVIRONMENT.lower() == "production",
+        samesite="lax",
+        max_age=auth_settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS * 86400,
+        path="/api/v1/auth",
+    )
+
     user_data = {
         "id": str(user.id),
         "email": user.email,
@@ -103,9 +116,25 @@ async def login(request: Request, db: AsyncSession = Depends(get_db)) -> Any:
     }
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(refresh_token: str, db: AsyncSession = Depends(get_db)) -> Any:
+async def refresh_token(
+    request: Request,
+    response: Response,
+    refresh_token: Optional[str] = None,
+    db: AsyncSession = Depends(get_db)
+) -> Any:
+    token_candidate = refresh_token or request.cookies.get("refresh_token")
+    if not token_candidate:
+        try:
+            body = await request.json()
+            token_candidate = body.get("refresh_token")
+        except Exception:
+            pass
+
+    if not token_candidate:
+        raise HTTPException(status_code=401, detail="Refresh token required")
+
     try:
-        payload = decode_token(refresh_token)
+        payload = decode_token(token_candidate)
         jti = payload.get("jti")
         if jti and await is_token_revoked(jti):
             raise HTTPException(status_code=401, detail="Token has been revoked")
@@ -125,6 +154,18 @@ async def refresh_token(refresh_token: str, db: AsyncSession = Depends(get_db)) 
         access_token = create_access_token(data={"sub": str(user.id), "role": role_str})
         new_refresh_token = create_refresh_token(data={"sub": str(user.id)})
         
+        from app.config import get_settings
+        auth_settings = get_settings()
+        response.set_cookie(
+            key="refresh_token",
+            value=new_refresh_token,
+            httponly=True,
+            secure=auth_settings.ENVIRONMENT.lower() == "production",
+            samesite="lax",
+            max_age=auth_settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS * 86400,
+            path="/api/v1/auth",
+        )
+
         return {
             "access_token": access_token,
             "refresh_token": new_refresh_token,
@@ -138,10 +179,11 @@ async def refresh_token(refresh_token: str, db: AsyncSession = Depends(get_db)) 
 @router.post("/logout")
 async def logout(
     request: Request,
+    response: Response,
     token: str = Depends(oauth2_scheme),
     current_user: User = Depends(get_current_user),
 ) -> Any:
-    """Revoke active JWT tokens and invalidate session."""
+    """Revoke active JWT tokens, clear httpOnly cookie, and invalidate session."""
     try:
         payload = decode_token(token)
         jti = payload.get("jti")
@@ -154,10 +196,17 @@ async def logout(
     except Exception:
         pass
 
-    try:
-        body = await request.json()
-        refresh_token_val = body.get("refresh_token")
-        if refresh_token_val:
+    # Revoke refresh token from cookie or body if present
+    refresh_token_val = request.cookies.get("refresh_token")
+    if not refresh_token_val:
+        try:
+            body = await request.json()
+            refresh_token_val = body.get("refresh_token")
+        except Exception:
+            pass
+
+    if refresh_token_val:
+        try:
             r_payload = decode_token(refresh_token_val)
             r_jti = r_payload.get("jti")
             r_exp = r_payload.get("exp")
@@ -165,10 +214,11 @@ async def logout(
                 r_ttl = int(r_exp - datetime.now(timezone.utc).timestamp())
                 if r_ttl > 0:
                     await revoke_token(r_jti, r_ttl)
-    except Exception:
-        pass
+        except Exception:
+            pass
 
-    return {"message": "Successfully logged out"}
+    response.delete_cookie(key="refresh_token", path="/api/v1/auth")
+    return {"message": "Successfully logged out", "status": "logged_out"}
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)) -> Any:

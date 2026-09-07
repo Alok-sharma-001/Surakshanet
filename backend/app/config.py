@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     
     MQTT_BROKER_HOST: str = "mosquitto"
     MQTT_BROKER_PORT: int = 1883
+    MQTT_USERNAME: Optional[str] = None
+    MQTT_PASSWORD: Optional[str] = None
     
     JWT_SECRET_KEY: str = "your-super-secret-key-change-in-production"
     JWT_ALGORITHM: str = "HS256"
@@ -110,6 +112,11 @@ class Settings(BaseSettings):
             if self.ADMIN_PASSWORD in insecure_passwords or len(self.ADMIN_PASSWORD) < 8:
                 raise ValueError(
                     "Production environment requires a strong, non-default ADMIN_PASSWORD (min 8 chars)"
+                )
+
+            if self.DATABASE_URL and "surakshanet_dev" in self.DATABASE_URL:
+                raise ValueError(
+                    "Production environment cannot use default development database credentials ('surakshanet_dev')"
                 )
         return self
 

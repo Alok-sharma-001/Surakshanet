@@ -201,11 +201,21 @@ def test_production_startup_refusal():
             ADMIN_PASSWORD="admin"
         )
 
+    # In production, default dev database password must raise ValidationError
+    with pytest.raises(ValidationError):
+        Settings(
+            ENVIRONMENT="production",
+            JWT_SECRET_KEY="a-very-secure-jwt-key-for-prod-2026!",
+            ADMIN_PASSWORD="a-strong-custom-production-password-2026",
+            DATABASE_URL="postgresql+asyncpg://surakshanet:surakshanet_dev@timescaledb:5432/surakshanet"
+        )
+
     # In production with strong secrets, startup succeeds
     prod_settings = Settings(
         ENVIRONMENT="production",
         JWT_SECRET_KEY="a-very-secure-jwt-key-for-prod-2026!",
-        ADMIN_PASSWORD="a-strong-custom-production-password-2026"
+        ADMIN_PASSWORD="a-strong-custom-production-password-2026",
+        DATABASE_URL="postgresql+asyncpg://surakshanet:a-strong-production-db-password-2026!@timescaledb:5432/surakshanet"
     )
     assert prod_settings.ENVIRONMENT == "production"
 
