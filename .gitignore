@@ -58,6 +58,8 @@ Thumbs.db
 *.crt
 surakshanet-key.pem
 infra/nginx/certs/
+infra/mosquitto/password_file
+!infra/mosquitto/password_file.example
 
 # Media & Backups
 Travel/
