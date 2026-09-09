@@ -24,29 +24,14 @@ export default function RoutingPage() {
   
   // VMS State
   const [cluster, setCluster] = useState("Cluster A (North Corridor) [4 Panels]");
-  const [line1, setLine1] = useState("HEAVY TRAFFIC AHEAD");
-  const [line2, setLine2] = useState("USE ALT ROUTE - RING ROAD");
+  const [line1, setLine1] = useState("");
+  const [line2, setLine2] = useState("");
   const [priority, setPriority] = useState("HIGH");
-  const [broadcasts, setBroadcasts] = useState<BroadcastItem[]>([
-    {
-      id: "vms-101",
-      panel_cluster: "Cluster A (North Corridor) [4 Panels]",
-      line1: "HEAVY TRAFFIC AHEAD",
-      line2: "USE ALT ROUTE - RING ROAD",
-      priority: "HIGH",
-      status: "ACTIVE",
-      time: "10m ago"
-    },
-    {
-      id: "vms-102",
-      panel_cluster: "Cluster B (South Corridor) [2 Panels]",
-      line1: "ACCIDENT CLEARED",
-      line2: "RESUME NORMAL SPEED",
-      priority: "NORMAL",
-      status: "EXPIRED",
-      time: "1h ago"
-    }
-  ]);
+  // SN-010: this list was seeded with two invented broadcasts, rendered as live
+  // sign state though nothing had broadcast them. It starts empty and is filled
+  // from GET /routing/vms/active, so a sign shown here always corresponds to a
+  // real broadcast.
+  const [broadcasts, setBroadcasts] = useState<BroadcastItem[]>([]);
 
   useEffect(() => {
     if (storeJunctions.length >= 2) {
