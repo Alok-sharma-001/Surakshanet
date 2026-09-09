@@ -37,27 +37,15 @@ DEFAULT_EDGES = [
 
 routing_engine.build_graph(DEFAULT_JUNCTIONS, DEFAULT_EDGES)
 
-# VMS in-memory store
-vms_broadcasts: List[Dict[str, Any]] = [
-    {
-        "id": "vms-001",
-        "panel_cluster": "Cluster A (North Corr.) [4 Panels]",
-        "line1": "HEAVY TRAFFIC AHEAD",
-        "line2": "USE ALT ROUTE - BETA RING",
-        "priority": "HIGH",
-        "timestamp": time.time() - 3600,
-        "status": "ACTIVE"
-    },
-    {
-        "id": "vms-002",
-        "panel_cluster": "VMS-12 (Ashram Flyover)",
-        "line1": "ACCIDENT CLEARED",
-        "line2": "RESUME NORMAL SPEED",
-        "priority": "NORMAL",
-        "timestamp": time.time() - 7200,
-        "status": "EXPIRED"
-    }
-]
+# VMS in-memory store.
+#
+# SN-010: this was seeded with two invented broadcasts ("HEAVY TRAFFIC AHEAD"
+# and "ACCIDENT CLEARED / RESUME NORMAL SPEED") that the dashboard rendered as
+# live sign state. Nothing had broadcast them and no incident underlay them.
+#
+# It starts empty. Entries are created only by POST /routing/vms/broadcast, so
+# an active sign always corresponds to an action somebody took.
+vms_broadcasts: List[Dict[str, Any]] = []
 
 
 class RouteRequest(BaseModel):

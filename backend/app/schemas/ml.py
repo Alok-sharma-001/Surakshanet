@@ -30,14 +30,24 @@ class PredictionResponse(BaseModel):
 
 
 class TrainingStatus(BaseModel):
-    is_training: bool
-    episode: int
-    total_episodes: int
-    current_reward: float
-    avg_reward_100: float
-    epsilon: float
-    best_reward: float
-    last_trained: Optional[str] = "2026-09-04T10:00:00Z"
+    """
+    MARL training state.
+
+    SN-001/SN-003: every metric is optional and defaults to None. The previous
+    shape required them and defaulted `last_trained` to a hardcoded timestamp,
+    which meant the endpoint could not express "no training data" -- it had to
+    return numbers whether or not any existed.
+    """
+    status: str = "unavailable"          # "unavailable" | "running" | "complete"
+    reason: Optional[str] = None         # why, when status is "unavailable"
+    is_training: bool = False
+    episode: Optional[int] = None
+    total_episodes: Optional[int] = None
+    current_reward: Optional[float] = None
+    avg_reward_100: Optional[float] = None
+    epsilon: Optional[float] = None
+    best_reward: Optional[float] = None
+    last_trained: Optional[str] = None
 
 
 class TrainingStartRequest(BaseModel):
