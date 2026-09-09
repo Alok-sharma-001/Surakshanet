@@ -85,6 +85,12 @@ jobs:
           REDIS_URL: redis://localhost:6379/0
           JWT_SECRET_KEY: test-secret-key-that-is-at-least-32-characters-long
           ENVIRONMENT: testing
+          # app/api/routing.py and app/api/emergency.py import ml.* at module
+          # level, and ml/, shared/ and simulation/ live at the repo root rather
+          # than under backend/. The Docker image flattens everything into /app
+          # so it resolves there; pytest running from backend/ needs the root on
+          # the path explicitly.
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           cd backend
           pytest tests/ -v --cov=app --cov-report=term-missing
