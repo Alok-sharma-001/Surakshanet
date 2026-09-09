@@ -9,6 +9,8 @@ import geoalchemy2.admin.dialects.sqlite as g_sqlite
 
 # Graceful SQLite fallback: catch RecoverGeometryColumn if spatialite is absent in unit tests
 orig_after_create = g_sqlite.after_create
+
+
 def safe_sqlite_after_create(table, bind, **kw):
     try:
         orig_after_create(table, bind, **kw)
@@ -17,9 +19,12 @@ def safe_sqlite_after_create(table, bind, **kw):
             pass
         else:
             raise
+
+
 g_sqlite.after_create = safe_sqlite_after_create
 
 from app.database import Base
+
 
 class SensorType(str, enum.Enum):
     CAMERA = "CAMERA"
@@ -27,11 +32,13 @@ class SensorType(str, enum.Enum):
     ACOUSTIC = "ACOUSTIC"
     GPS = "GPS"
 
+
 class ApproachDirection(str, enum.Enum):
     N = "N"
     E = "E"
     S = "S"
     W = "W"
+
 
 class Junction(Base):
     __tablename__ = "junctions"
@@ -64,6 +71,7 @@ class Junction(Base):
         if lat is not None and lon is not None:
             self.location = f"SRID=4326;POINT({lon} {lat})"
         return value
+
 
 class TrafficSensor(Base):
     __tablename__ = "traffic_sensors"

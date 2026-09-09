@@ -3,12 +3,14 @@ from typing import Optional, Dict, Any
 from uuid import UUID
 from datetime import datetime
 
+
 class JunctionCreate(BaseModel):
     name: str
     latitude: float
     longitude: float
     num_approaches: int = 4
     geometry: Optional[Dict[str, Any]] = None
+
 
 class JunctionResponse(BaseModel):
     id: UUID
@@ -18,8 +20,9 @@ class JunctionResponse(BaseModel):
     num_approaches: int
     is_active: bool
     created_at: datetime
-    
+
     model_config = ConfigDict(from_attributes=True)
+
 
 class JunctionUpdate(BaseModel):
     name: Optional[str] = None
@@ -27,12 +30,14 @@ class JunctionUpdate(BaseModel):
     longitude: Optional[float] = None
     is_active: Optional[bool] = None
 
+
 class SensorCreate(BaseModel):
     junction_id: UUID
     sensor_type: Optional[str] = None
     approach_direction: Optional[str] = "N"
     type: Optional[str] = None
     name: Optional[str] = None
+
 
 class SensorResponse(BaseModel):
     id: UUID
@@ -43,8 +48,9 @@ class SensorResponse(BaseModel):
     created_at: datetime
     type: Optional[str] = None
     name: Optional[str] = None
-    
+
     model_config = ConfigDict(from_attributes=True)
+
 
 class TrafficReadingCreate(BaseModel):
     sensor_id: UUID
@@ -57,6 +63,7 @@ class TrafficReadingCreate(BaseModel):
     vehicle_breakdown: Optional[Dict[str, Any]] = None
     timestamp: Optional[datetime] = None
 
+
 class TrafficReadingResponse(BaseModel):
     id: UUID
     timestamp: datetime
@@ -67,8 +74,9 @@ class TrafficReadingResponse(BaseModel):
     avg_speed: Optional[float]
     queue_length: Optional[float]
     vehicle_breakdown: Optional[Dict[str, Any]]
-    
+
     model_config = ConfigDict(from_attributes=True)
+
 
 class TrafficReadingQuery(BaseModel):
     junction_id: Optional[UUID] = None

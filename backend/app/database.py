@@ -22,10 +22,12 @@ async_session_maker = async_sessionmaker(
 
 Base = declarative_base()
 
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Yields an asynchronous database session."""
     async with async_session_maker() as session:
         yield session
+
 
 import asyncio
 import logging
@@ -34,6 +36,7 @@ from alembic.config import Config
 from alembic import command
 
 logger = logging.getLogger(__name__)
+
 
 def run_alembic_migrations() -> None:
     """Execute Alembic migrations up to head synchronously."""
@@ -48,6 +51,7 @@ def run_alembic_migrations() -> None:
     else:
         logger.warning(f"alembic.ini not found at {alembic_ini_path}")
 
+
 async def init_db() -> None:
     """Initialize the database by executing Alembic migrations and seeding default admin."""
     if "sqlite" in settings.DATABASE_URL:
@@ -55,7 +59,7 @@ async def init_db() -> None:
             await conn.run_sync(Base.metadata.create_all)
     else:
         await asyncio.to_thread(run_alembic_migrations)
-    
+
     # Seed default admin user
     try:
         from app.services.auth_service import seed_default_admin

@@ -2,6 +2,7 @@ import json
 from typing import Dict, Set
 from fastapi import WebSocket
 
+
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[str, Set[WebSocket]] = {
@@ -63,7 +64,7 @@ class ConnectionManager:
                     await connection.send_json(data)
                 except Exception:
                     disconnected.add(connection)
-            
+
             for conn in disconnected:
                 self.disconnect(conn, channel)
 
@@ -74,5 +75,6 @@ class ConnectionManager:
         if channel:
             return len(self.active_connections.get(channel, set()))
         return sum(len(connections) for connections in self.active_connections.values())
+
 
 manager = ConnectionManager()

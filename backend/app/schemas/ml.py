@@ -2,9 +2,11 @@ from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
+
 class DetectionRequest(BaseModel):
     # Empty schema since we receive multipart form data
     pass
+
 
 class DetectionResult(BaseModel):
     vehicle_counts: Dict[str, int]
@@ -13,16 +15,19 @@ class DetectionResult(BaseModel):
     detections: List[Dict[str, Any]]
     processing_time_ms: float
 
+
 class PredictionItem(BaseModel):
     minutes: int
     predicted_pcu: float
     confidence: float
+
 
 class PredictionResponse(BaseModel):
     junction_id: str
     predictions: List[PredictionItem]
     spillback_risk: float
     generated_at: datetime = Field(default_factory=datetime.utcnow)
+
 
 class TrainingStatus(BaseModel):
     is_training: bool
@@ -34,6 +39,7 @@ class TrainingStatus(BaseModel):
     best_reward: float
     last_trained: Optional[str] = "2026-09-04T10:00:00Z"
 
+
 class TrainingStartRequest(BaseModel):
     num_episodes: int = 500
     episodes: Optional[int] = None
@@ -44,12 +50,14 @@ class TrainingStartRequest(BaseModel):
         if self.episodes is not None:
             self.num_episodes = self.episodes
 
+
 class ModelHealth(BaseModel):
     status: str = "healthy"
     vision_model: bool
     forecaster_model: bool
     marl_agent: bool
     sumo_available: bool
+
 
 class ForecastTrainRequest(BaseModel):
     junction_id: Optional[str] = None

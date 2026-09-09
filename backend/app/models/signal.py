@@ -5,10 +5,12 @@ from sqlalchemy import Column, String, Boolean, DateTime, Enum, JSON, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from app.database import Base
 
+
 class SignalMode(str, enum.Enum):
     MARL = "MARL"
     WEBSTER = "WEBSTER"
     MANUAL = "MANUAL"
+
 
 class SignalPlan(Base):
     __tablename__ = "signal_plans"

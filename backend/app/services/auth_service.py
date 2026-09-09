@@ -19,12 +19,14 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 _redis_client: Optional[aioredis.Redis] = None
 
+
 def get_redis_client() -> aioredis.Redis:
     global _redis_client
     if _redis_client is None:
         settings = get_settings()
         _redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
     return _redis_client
+
 
 async def revoke_token(jti: str, expires_in_seconds: int) -> None:
     if not jti:
@@ -36,6 +38,7 @@ async def revoke_token(jti: str, expires_in_seconds: int) -> None:
     except Exception:
         pass
 
+
 async def is_token_revoked(jti: str) -> bool:
     if not jti:
         return False
@@ -45,6 +48,7 @@ async def is_token_revoked(jti: str) -> bool:
         return bool(res)
     except Exception:
         return False
+
 
 async def check_login_rate_limit(identifier: str) -> None:
     """Enforce account lockout after 5 consecutive failed login attempts."""
@@ -64,6 +68,7 @@ async def check_login_rate_limit(identifier: str) -> None:
     except Exception:
         pass
 
+
 async def record_login_failure(identifier: str) -> None:
     """Increment failed login attempts counter with 15-minute expiration."""
     if not identifier:
@@ -78,6 +83,7 @@ async def record_login_failure(identifier: str) -> None:
     except Exception:
         pass
 
+
 async def reset_login_failures(identifier: str) -> None:
     """Reset failed login counter upon successful authentication."""
     if not identifier:
@@ -89,16 +95,19 @@ async def reset_login_failures(identifier: str) -> None:
     except Exception:
         pass
 
+
 def hash_password(password: str) -> str:
     pwd_bytes = password.encode('utf-8')
     salt = bcrypt.gensalt()
     return bcrypt.hashpw(pwd_bytes, salt).decode('utf-8')
+
 
 def verify_password(plain: str, hashed: str) -> bool:
     try:
         return bcrypt.checkpw(plain.encode('utf-8'), hashed.encode('utf-8'))
     except Exception:
         return False
+
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     settings = get_settings()
@@ -113,6 +122,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
     return encoded_jwt
 
+
 def create_refresh_token(data: dict) -> str:
     settings = get_settings()
     to_encode = data.copy()
@@ -122,6 +132,7 @@ def create_refresh_token(data: dict) -> str:
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
     return encoded_jwt
+
 
 def decode_token(token: str) -> dict:
     settings = get_settings()
@@ -134,6 +145,7 @@ def decode_token(token: str) -> dict:
             detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)) -> User:
     credentials_exception = HTTPException(
@@ -153,12 +165,12 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession
     user_id_str: str = payload.get("sub")
     if user_id_str is None:
         raise credentials_exception
-    
+
     try:
         user_id = UUID(user_id_str)
     except ValueError:
         raise credentials_exception
-        
+
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if user is None:
@@ -167,7 +179,9 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession
         raise HTTPException(status_code=400, detail="Inactive user")
     return user
 
+
 oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)
+
 
 async def get_optional_current_user(token: Optional[str] = Depends(oauth2_scheme_optional), db: AsyncSession = Depends(get_db)) -> Optional[User]:
     """Resolves current user if a valid token is provided, returns None gracefully if no token provided, or raises 401 if an invalid/revoked token was provided."""
@@ -199,6 +213,7 @@ async def get_optional_current_user(token: Optional[str] = Depends(oauth2_scheme
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
     return user
 
+
 def require_role(*roles: str):
     def role_checker(current_user: User = Depends(get_current_user)):
         user_role = getattr(current_user.role, 'value', getattr(current_user.role, 'name', str(current_user.role)))
@@ -210,12 +225,13 @@ def require_role(*roles: str):
         return current_user
     return role_checker
 
+
 async def register_user(db: AsyncSession, user_data: UserCreate) -> User:
     from app.models.user import UserRole
     result = await db.execute(select(User).where(User.email == user_data.email))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email already registered")
-        
+
     hashed_password = hash_password(user_data.password)
     role = UserRole.OPERATOR
     db_user = User(
@@ -229,6 +245,7 @@ async def register_user(db: AsyncSession, user_data: UserCreate) -> User:
     await db.refresh(db_user)
     return db_user
 
+
 async def authenticate_user(db: AsyncSession, email: str, password: str) -> Optional[User]:
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
@@ -238,13 +255,14 @@ async def authenticate_user(db: AsyncSession, email: str, password: str) -> Opti
         return None
     return user
 
+
 async def seed_default_admin(db: AsyncSession) -> None:
     """Seed default administrator account if it does not exist."""
     from app.models.user import UserRole
     settings = get_settings()
     admin_email = settings.ADMIN_EMAIL
     admin_password = settings.ADMIN_PASSWORD
-    
+
     # Check if any admin user already exists or if admin_email is already taken
     result = await db.execute(select(User).where((User.email == admin_email) | (User.role == UserRole.ADMIN)))
     existing_admin = result.scalars().first()

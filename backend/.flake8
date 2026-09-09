@@ -1,0 +1,39 @@
+[flake8]
+# Kept in sync with backend/ruff.toml. Ruff is the primary linter; flake8 runs
+# in CI as a second opinion, so their ignore lists must agree or CI fails on
+# findings one tool deliberately allows.
+max-line-length = 120
+
+extend-ignore =
+    # Long lines: handled by formatting, not enforced here.
+    E501,
+    # W503 and W504 are mutually exclusive by design (line break before vs.
+    # after a binary operator). CI previously ignored only W503, which made any
+    # multi-line boolean expression unfixable. Both are ignored, per pycodestyle
+    # guidance to pick one convention rather than enforce both.
+    W503,
+    W504,
+    # E712 (`== True`): required inside SQLAlchemy query expressions such as
+    # .where(Junction.is_active == True). The suggested truthiness form does not
+    # generate valid SQL. Matches the same ignore in ruff.toml.
+    E712,
+    # F824 (`global X` never assigned in scope): correct but redundant -- these
+    # functions mutate a dict's contents rather than rebinding the name, so the
+    # `global` is unnecessary. All 8 occurrences are in app/api/ml.py and
+    # app/api/simulation.py, whose globals are removed outright by SN-001 and
+    # SN-005 (Phase 0). Ignored rather than edited now, so the Phase 0 deletion
+    # diff stays clean. Remove this ignore once Phase 0 lands.
+    F824
+
+per-file-ignores =
+    # E402 module-level import not at top of file. See backend/ruff.toml for the
+    # per-file rationale: geoalchemy2 patching, optional SUMO/TraCI imports, and
+    # engine-before-models ordering are intentional. app/main.py is untidiness
+    # rather than a false positive and is tracked as deferred cleanup.
+    app/models/junction.py:E402
+    app/api/simulation.py:E402
+    app/database.py:E402
+    app/main.py:E402
+    alembic/versions/*.py:E402,F401
+
+exclude = .git,__pycache__,.venv,alembic/versions

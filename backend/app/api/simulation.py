@@ -3,8 +3,8 @@ import shutil
 import asyncio
 import logging
 import random
-from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, WebSocket, WebSocketDisconnect
+from typing import Dict, Any, Optional
+from fastapi import APIRouter, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 try:
@@ -16,6 +16,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/simulation", tags=["Simulation"])
+
 
 class MicroSimRunner:
     """Resilient integrated corridor micro-simulator when TraCI/SUMO binary is unavailable."""
@@ -98,6 +99,7 @@ class MicroSimRunner:
         self.step_count = 0
         self.sim_time_s = 0
 
+
 import json
 import redis.asyncio as aioredis
 from app.config import get_settings
@@ -110,8 +112,10 @@ sim_instance = None
 sim_mode = "microsim"  # "sumo" or "microsim"
 sim_lock = asyncio.Lock()
 
+
 async def get_redis_client():
     return aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+
 
 async def get_redis_sim_state() -> Optional[Dict[str, Any]]:
     try:
@@ -123,6 +127,7 @@ async def get_redis_sim_state() -> Optional[Dict[str, Any]]:
     except Exception as e:
         logger.debug(f"Redis sim state read fallback: {e}")
     return None
+
 
 async def set_redis_sim_state(state: Dict[str, Any]):
     try:
@@ -136,6 +141,7 @@ async def set_redis_sim_state(state: Dict[str, Any]):
     except Exception as e:
         logger.debug(f"Redis sim state write fallback: {e}")
 
+
 class StartSimulationRequest(BaseModel):
     scenario_profile: str = "morning_peak"
     scenario: Optional[str] = None
@@ -147,12 +153,15 @@ class StartSimulationRequest(BaseModel):
         if self.scenario is not None:
             self.scenario_profile = self.scenario
 
+
 class StepRequest(BaseModel):
     steps: int = 1
+
 
 async def broadcast_state(state: dict):
     await manager.broadcast("simulation", state)
     await manager.broadcast("traffic", state)
+
 
 @router.post("/start")
 async def start_simulation(req: StartSimulationRequest):
@@ -187,6 +196,7 @@ async def start_simulation(req: StartSimulationRequest):
         await set_redis_sim_state(initial_state)
         return {"status": "started", "engine": "microsim_driver", "scenario": req.scenario_profile}
 
+
 @router.post("/step")
 async def step_simulation(req: StepRequest, background_tasks: BackgroundTasks):
     global sim_instance
@@ -210,18 +220,20 @@ async def step_simulation(req: StepRequest, background_tasks: BackgroundTasks):
         background_tasks.add_task(broadcast_state, state)
         return {"status": "stepped", "state": state}
 
+
 @router.get("/state")
 @router.get("/status")
 async def get_state():
     global sim_instance
     if sim_instance and getattr(sim_instance, "is_running", False):
         return sim_instance.get_state()
-    
+
     redis_state = await get_redis_sim_state()
     if redis_state and redis_state.get("running"):
         return redis_state
 
     return {"running": False, "step": 0, "sim_time": "00:00:00", "vehicles": 0}
+
 
 @router.post("/stop")
 async def stop_simulation():
@@ -229,17 +241,18 @@ async def stop_simulation():
     async with sim_lock:
         if sim_instance:
             sim_instance.stop()
-        
+
         stopped_state = {"running": False, "status": "stopped"}
         await set_redis_sim_state(stopped_state)
         return {"status": "stopped", "running": False}
+
 
 @router.get("/metrics")
 async def get_metrics():
     global sim_instance
     if sim_instance and getattr(sim_instance, "is_running", False):
         return sim_instance.get_metrics()
-    
+
     redis_state = await get_redis_sim_state()
     if redis_state:
         return {
@@ -250,6 +263,7 @@ async def get_metrics():
             "queue_length": redis_state.get("queue_length", 0)
         }
     return {"throughput": 0, "avg_delay": 0, "avg_speed": 0, "total_vehicles": 0}
+
 
 @router.post("/reset")
 async def reset_simulation():
@@ -264,6 +278,7 @@ async def reset_simulation():
         except Exception:
             pass
         return {"status": "reset"}
+
 
 @router.websocket("/ws")
 async def simulation_ws(websocket: WebSocket):

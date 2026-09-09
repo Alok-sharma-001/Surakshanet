@@ -11,6 +11,7 @@ from app.services.auth_service import require_role
 
 router = APIRouter(prefix="/users", tags=["users"])
 
+
 @router.get("/", response_model=List[UserResponse])
 async def list_users(
     skip: int = Query(0, ge=0),
@@ -20,6 +21,7 @@ async def list_users(
 ) -> Any:
     result = await db.execute(select(User).offset(skip).limit(limit))
     return result.scalars().all()
+
 
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user(
@@ -32,6 +34,7 @@ async def get_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
+
 
 @router.patch("/{user_id}/role", response_model=UserResponse)
 async def update_user_role(
@@ -68,12 +71,13 @@ async def update_user_role(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     user.role = valid_roles[normalized_role]
     db.add(user)
     await db.commit()
     await db.refresh(user)
     return user
+
 
 @router.patch("/{user_id}/status", response_model=UserResponse)
 async def update_user_status(
@@ -86,7 +90,7 @@ async def update_user_status(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     user.is_active = is_active
     db.add(user)
     await db.commit()

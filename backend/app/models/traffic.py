@@ -4,6 +4,7 @@ from sqlalchemy import Column, Float, DateTime, ForeignKey, JSON, String, Primar
 from sqlalchemy.dialects.postgresql import UUID
 from app.database import Base
 
+
 class TrafficReading(Base):
     __tablename__ = "traffic_readings"
 

@@ -2,10 +2,11 @@ import uuid
 import datetime
 from typing import List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc, delete
+from sqlalchemy import select, desc
 
 from app.models.alert import Alert, AlertType, AlertSeverity
 from app.schemas.alert import AlertResponse
+
 
 class AlertEngine:
     """Service for managing and evaluating real system alerts backed by PostgreSQL."""
@@ -170,5 +171,6 @@ class AlertEngine:
         await db.delete(a)
         await db.commit()
         return True
+
 
 alert_service = AlertEngine()

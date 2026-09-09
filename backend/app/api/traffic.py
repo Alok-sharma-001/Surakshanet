@@ -258,4 +258,3 @@ async def calculate_pcu(
     trucks = float(data.get("trucks", 0))
     total_pcu = (cars * 1.0) + (buses * 3.0) + (two_wheelers * 0.5) + (trucks * 3.0)
     return {"pcu": total_pcu, "total_pcu": total_pcu}
-

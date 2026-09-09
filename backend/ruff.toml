@@ -1,0 +1,60 @@
+# Ruff configuration for the Surakshanet backend (FastAPI + SQLAlchemy).
+#
+# Why this file exists: CI runs `ruff check app/` with no configuration, so the
+# rule set was whatever the installed ruff version defaulted to. That produced
+# 478 findings, 101 of which were B008 flagging FastAPI's `Depends()` in
+# argument defaults -- the framework's documented idiom, not a defect.
+#
+# The rule set is staged deliberately. See docs/03-development-roadmap.md.
+#   now       E4/E7/E9 + F  -- real errors: syntax, undefined names, dead imports
+#   after     + I           -- import ordering (touches every file; deferred so it
+#   Phase 0                    does not bury the Phase 0 deletion diff)
+#   Phase 8   + UP, B       -- modernisation and bugbear, with B008 ignored
+
+target-version = "py311"
+line-length = 120
+
+[lint]
+select = ["E4", "E7", "E9", "F"]
+
+ignore = [
+    # Long lines are already exempt in the flake8 step of .github/workflows/ci.yml
+    # (--ignore=E501); keeping the two linters consistent.
+    "E501",
+    # B008: function call in argument default. This is how FastAPI dependency
+    # injection is written (`db: AsyncSession = Depends(get_db)`), so it stays
+    # ignored when the B rules are enabled later.
+    "B008",
+    # E712: `== True` comparison. Required inside SQLAlchemy query expressions
+    # (`.where(Junction.is_active == True)`); ruff's suggested `if x:` form does
+    # not produce valid SQL. Same class of false positive as B008.
+    "E712",
+]
+
+[lint.per-file-ignores]
+# Alembic revision files are generated and follow their own conventions.
+"alembic/versions/*.py" = ["E402", "F401"]
+
+# --- E402: module-level import not at top of file ---
+# Intentional. The geoalchemy2 sqlite monkey-patch must run before `Base` is
+# imported, otherwise spatialite-less unit test runs fail on
+# RecoverGeometryColumn.
+"app/models/junction.py" = ["E402"]
+
+# Intentional. Optional SUMO/TraCI imports are attempted after module setup so
+# an absent SUMO install degrades to an explicit unavailable state rather than
+# an import crash.
+"app/api/simulation.py" = ["E402"]
+
+# Intentional. Engine construction happens before the session/model imports that
+# depend on it.
+"app/database.py" = ["E402"]
+
+# NOT intentional -- untidiness, not a false positive. main.py places several
+# imports mid-file after the CORS/middleware block. They can move to the top;
+# deferred so this config change stays free of code edits. Tracked as cleanup
+# alongside the SN-011/SN-012 documentation pass.
+"app/main.py" = ["E402"]
+
+[lint.isort]
+known-first-party = ["app", "ml", "shared", "simulation"]

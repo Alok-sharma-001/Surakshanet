@@ -1,6 +1,6 @@
 import time
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter
 from pydantic import BaseModel
 from ml.routing.routing_engine import RoutingEngine
 
@@ -59,6 +59,7 @@ vms_broadcasts: List[Dict[str, Any]] = [
     }
 ]
 
+
 class RouteRequest(BaseModel):
     origin_lat: Optional[float] = None
     origin_lon: Optional[float] = None
@@ -90,17 +91,19 @@ class RouteRequest(BaseModel):
 
         return o, d
 
+
 class VMSBroadcastRequest(BaseModel):
     panel_cluster: str
     line1: str
     line2: str
     priority: str = "HIGH"
 
+
 @router.post("/route")
 async def compute_route(data: RouteRequest):
     """Compute optimal route between coordinates using A* search."""
     origin, destination = data.get_coords()
-    
+
     result = routing_engine.find_route(origin, destination)
     if "error" in result:
         # Fallback to direct path with distance estimate
@@ -113,21 +116,23 @@ async def compute_route(data: RouteRequest):
             "distance_km": round(dist_km, 2),
             "congestion_level": "MODERATE"
         }
-    
+
     result["distance"] = result.get("distance_km", 0.0)
     result["duration"] = result.get("estimated_time_min", result.get("eta_minutes", 0.0))
     return result
+
 
 @router.post("/alternatives")
 async def compute_alternatives(data: RouteRequest):
     """Compute primary and alternative routes for dynamic diversion."""
     origin, destination = data.get_coords()
-    
+
     routes = routing_engine.find_alternatives(origin, destination, num_routes=2)
     for r in routes:
         r["distance"] = r.get("distance_km", 0.0)
         r["duration"] = r.get("estimated_time_min", r.get("eta_minutes", 0.0))
     return routes
+
 
 @router.get("/congestion")
 async def get_congestion():
@@ -146,6 +151,7 @@ async def get_congestion():
             })
     return {"edges": edges_data}
 
+
 @router.post("/vms/broadcast")
 async def broadcast_vms(data: VMSBroadcastRequest):
     """Publish message to Variable Message Sign panels."""
@@ -161,11 +167,13 @@ async def broadcast_vms(data: VMSBroadcastRequest):
     vms_broadcasts.insert(0, new_broadcast)
     return {"status": "broadcast_published", "broadcast": new_broadcast}
 
+
 @router.get("/vms/active")
 async def get_active_vms():
     """Get currently active Variable Message Sign broadcasts."""
     active = [b for b in vms_broadcasts if b.get("status") == "ACTIVE"]
     return {"active_broadcasts": active}
+
 
 @router.get("/vms/history")
 async def get_vms_history():

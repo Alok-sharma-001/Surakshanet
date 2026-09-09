@@ -4,8 +4,8 @@ import uuid
 import logging
 import asyncio
 from datetime import datetime
-from typing import Optional, List
-from fastapi import APIRouter, Depends, UploadFile, File, BackgroundTasks, HTTPException, status
+from typing import Optional
+from fastapi import APIRouter, Depends, UploadFile, File, BackgroundTasks, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 import pandas as pd
@@ -19,14 +19,11 @@ from app.schemas.ml import (
     TrainingStatus,
     TrainingStartRequest,
     ModelHealth,
-    ForecastTrainRequest,
     PredictionItem
 )
 from app.services.auth_service import get_current_user
 from app.models.user import User
 
-from ml.vision.vehicle_detector import VehicleDetector
-from ml.forecasting.traffic_forecaster import TrafficForecaster
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ml", tags=["ML"])
@@ -34,6 +31,7 @@ router = APIRouter(prefix="/ml", tags=["ML"])
 # Lazy model instances (deferred until first request to minimize startup memory & speed)
 _detector: Optional[object] = None
 _forecaster: Optional[object] = None
+
 
 def get_vehicle_detector():
     global _detector
@@ -43,12 +41,15 @@ def get_vehicle_detector():
             _detector = VehicleDetector(confidence_threshold=0.4)
         except Exception as e:
             logger.warning(f"Could not initialize VehicleDetector: {e}")
+
             class _DummyDetector:
                 model_loaded = False
+
                 def detect_from_bytes(self, b):
                     return {"vehicle_counts": {}, "total_pcu": 0.0, "detections": [], "processing_time_ms": 0.0}
             _detector = _DummyDetector()
     return _detector
+
 
 def get_traffic_forecaster():
     global _forecaster
@@ -71,22 +72,28 @@ def get_traffic_forecaster():
                     logger.warning(f"Forecasting weights not yet loaded: {e}")
         except Exception as e:
             logger.warning(f"Could not initialize TrafficForecaster: {e}")
+
             class _DummyForecaster:
                 is_lstm_trained = False
                 is_xgb_trained = False
                 sequence_length = 12
+
                 def predict(self, *a, **kw): return []
                 def generate_synthetic_data(self, *a, **kw): return pd.DataFrame()
             _forecaster = _DummyForecaster()
     return _forecaster
 
+
 class _LazyModelProxy:
     def __init__(self, getter):
         object.__setattr__(self, "_getter", getter)
+
     def __getattr__(self, name):
         return getattr(self._getter(), name)
+
     def __setattr__(self, name, value):
         setattr(self._getter(), name, value)
+
 
 vehicle_detector = _LazyModelProxy(get_vehicle_detector)
 traffic_forecaster = _LazyModelProxy(get_traffic_forecaster)
@@ -102,6 +109,7 @@ _training_status = {
     "best_reward": 22.4,
     "last_trained": "2026-09-04T10:00:00Z"
 }
+
 
 async def run_marl_training_task(episodes: int, scenario: str):
     """Background task to simulate / execute MARL training steps."""
@@ -121,6 +129,7 @@ async def run_marl_training_task(episodes: int, scenario: str):
             _training_status["epsilon"] = max(0.01, round(1.0 - (ep / max(1, episodes)), 3))
     finally:
         _training_status["is_training"] = False
+
 
 @router.post("/detect", response_model=DetectionResult)
 async def detect_vehicles(
@@ -148,6 +157,7 @@ async def detect_vehicles(
         logger.error(f"Detection failed: {e}")
         raise HTTPException(status_code=500, detail=f"Image processing error: {str(e)}")
 
+
 @router.get("/predict/{junction_id}", response_model=PredictionResponse)
 async def get_prediction(
     junction_id: str,
@@ -160,7 +170,7 @@ async def get_prediction(
     """
     try:
         recent_readings = []
-        
+
         # 1. Attempt to resolve junction by UUID or name
         j_uuid = None
         try:
@@ -230,6 +240,7 @@ async def get_prediction(
         logger.error(f"Prediction failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.post("/train/start")
 async def start_training(
     req: TrainingStartRequest,
@@ -244,6 +255,7 @@ async def start_training(
     background_tasks.add_task(run_marl_training_task, req.num_episodes, req.scenario)
     return {"message": "MARL training initiated", "scenario": req.scenario, "episodes": req.num_episodes}
 
+
 @router.post("/train/stop")
 async def stop_training(current_user: Optional[User] = Depends(get_current_user)):
     """Stop active MARL training."""
@@ -251,11 +263,13 @@ async def stop_training(current_user: Optional[User] = Depends(get_current_user)
     _training_status["is_training"] = False
     return {"message": "MARL training stopped"}
 
+
 @router.get("/train/status", response_model=TrainingStatus)
 async def get_training_status(current_user: Optional[User] = Depends(get_current_user)):
     """Get real-time status of the MARL training process."""
     global _training_status
     return TrainingStatus(**_training_status)
+
 
 @router.get("/models", response_model=ModelHealth)
 @router.get("/health", response_model=ModelHealth)
@@ -264,7 +278,7 @@ async def get_models_health(current_user: Optional[User] = Depends(get_current_u
     """Check health and availability of all AI models."""
     import shutil
     has_sumo = shutil.which("sumo") is not None or os.path.exists("/usr/bin/sumo")
-    
+
     return ModelHealth(
         vision_model=vehicle_detector.model_loaded,
         forecaster_model=traffic_forecaster.is_lstm_trained and traffic_forecaster.is_xgb_trained,

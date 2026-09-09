@@ -10,17 +10,19 @@ from app.database import get_db
 from app.config import get_settings
 from app.schemas.alert import AlertResponse
 from app.services.alert_service import alert_service
-from app.services.auth_service import get_current_user, get_optional_current_user
+from app.services.auth_service import get_optional_current_user
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
+
 @router.get("/stats")
 async def get_alert_stats(db: AsyncSession = Depends(get_db)):
     """Get aggregated alert statistics from PostgreSQL."""
     return await alert_service.get_alert_stats(db)
+
 
 @router.get("/", response_model=List[AlertResponse])
 async def list_alerts(
@@ -44,6 +46,7 @@ async def list_alerts(
         offset=offset
     )
 
+
 @router.get("/{alert_id}", response_model=AlertResponse)
 async def get_alert(
     alert_id: uuid.UUID,
@@ -55,6 +58,7 @@ async def get_alert(
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
     return alert
+
 
 @router.patch("/{alert_id}/acknowledge", response_model=AlertResponse)
 async def acknowledge_alert(
@@ -83,6 +87,7 @@ async def acknowledge_alert(
         logger.warning(f"Could not publish alert acknowledgement to Redis: {e}")
 
     return alert
+
 
 @router.delete("/{alert_id}")
 async def delete_alert(

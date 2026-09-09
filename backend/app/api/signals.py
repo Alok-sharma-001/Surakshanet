@@ -3,7 +3,7 @@ import uuid
 import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -13,19 +13,22 @@ from app.database import get_db
 from app.config import get_settings
 from app.models.signal import SignalPlan, SignalMode
 from app.models.junction import Junction
-from app.services.auth_service import get_current_user, get_optional_current_user
+from app.services.auth_service import get_optional_current_user
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 router = APIRouter(prefix="/signals", tags=["Signals"])
 
+
 class SignalModeRequest(BaseModel):
     mode: str
+
 
 class SignalOverrideRequest(BaseModel):
     action: str  # PHASE_SKIP, EXTEND_GREEN, SHORTEN_GREEN, FLASH_ALL_RED
     value: Optional[int] = 5
+
 
 class SignalPlanResponse(BaseModel):
     id: str
@@ -37,6 +40,7 @@ class SignalPlanResponse(BaseModel):
     current_phase: int = 1
     cycle_length_s: int = 120
     is_active: bool = True
+
 
 async def _resolve_junction_uuid(db: AsyncSession, identifier: str) -> Optional[uuid.UUID]:
     """Resolve junction identifier (UUID or human name/code) to UUID."""
@@ -51,6 +55,7 @@ async def _resolve_junction_uuid(db: AsyncSession, identifier: str) -> Optional[
     if j:
         return j.id
     return None
+
 
 @router.get("/plans")
 async def list_signal_plans(
@@ -76,6 +81,7 @@ async def list_signal_plans(
             "is_active": plan.is_active
         })
     return plans
+
 
 @router.get("/junctions/{junction_id}")
 async def get_junction_signal_plan(
@@ -116,6 +122,7 @@ async def get_junction_signal_plan(
         "cycle_length_s": total_cycle,
         "is_active": plan.is_active
     }
+
 
 @router.patch("/junctions/{junction_id}/mode")
 async def update_signal_mode(
@@ -162,6 +169,7 @@ async def update_signal_mode(
         "mode": new_mode.value,
         "updated_at": datetime.utcnow().isoformat()
     }
+
 
 @router.post("/junctions/{junction_id}/override")
 async def override_signal_phase(

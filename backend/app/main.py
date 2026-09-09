@@ -12,6 +12,7 @@ from app.websocket.manager import manager
 
 settings = get_settings()
 
+
 async def redis_pubsub_bridge():
     """
     Subscribes to internal Redis channels and broadcasts telemetry, signals,
@@ -71,11 +72,12 @@ async def redis_pubsub_bridge():
             print(f"Redis pubsub bridge reconnecting in {retry_delay}s ({e})...")
             await asyncio.sleep(retry_delay)
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan context manager for startup and shutdown events."""
     await init_db()
-    
+
     # 1. Start MQTT IoT Telemetry Consumer
     try:
         from app.services.mqtt_consumer import mqtt_consumer
@@ -95,6 +97,7 @@ async def lifespan(app: FastAPI):
         mqtt_consumer.stop()
     except Exception:
         pass
+
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -118,6 +121,7 @@ import uuid
 
 app.add_middleware(CorrelationIdMiddleware)
 
+
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID") or str(uuid.uuid4())
@@ -134,6 +138,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         },
         headers={"X-Request-ID": req_id}
     )
+
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -152,6 +157,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         headers={"X-Request-ID": req_id}
     )
 
+
 app.middleware("http")(metrics_middleware)
 app.add_route("/metrics", MetricsEndpoint)
 
@@ -160,6 +166,7 @@ from app.api.websocket_routes import ws_router
 
 app.include_router(api_router, prefix=settings.API_PREFIX)
 app.include_router(ws_router)
+
 
 @app.get("/", tags=["Health"])
 @app.get("/health", tags=["Health"])

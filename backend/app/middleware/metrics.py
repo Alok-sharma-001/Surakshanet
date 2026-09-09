@@ -43,6 +43,7 @@ SIMULATION_STEP_DURATION_SECONDS = Histogram(
     "Traffic simulation step duration in seconds"
 )
 
+
 async def metrics_middleware(request: Request, call_next):
     ACTIVE_CONNECTIONS.inc()
     start_time = time.perf_counter()
@@ -62,6 +63,7 @@ async def metrics_middleware(request: Request, call_next):
         ACTIVE_CONNECTIONS.dec()
 
     return response
+
 
 async def MetricsEndpoint(request: Request) -> Response:
     """Endpoint exposing prometheus metrics."""

@@ -4,14 +4,17 @@ from uuid import UUID
 from datetime import datetime
 from app.models.user import UserRole
 
+
 class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=1)
     name: str
 
+
 class UserLogin(BaseModel):
     email: str
     password: str
+
 
 class UserResponse(BaseModel):
     id: UUID
@@ -20,17 +23,20 @@ class UserResponse(BaseModel):
     role: UserRole
     is_active: bool
     created_at: datetime
-    
+
     model_config = ConfigDict(from_attributes=True)
+
 
 class UserUpdate(BaseModel):
     name: Optional[str] = None
     role: Optional[UserRole] = None
 
+
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = 'bearer'
+
 
 class TokenPayload(BaseModel):
     sub: str

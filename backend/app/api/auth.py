@@ -1,6 +1,5 @@
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Any, Optional
@@ -10,9 +9,9 @@ from app.database import get_db
 from app.models.user import User
 from app.schemas.auth import UserCreate, UserResponse, TokenResponse, UserUpdate
 from app.services.auth_service import (
-    register_user, 
-    authenticate_user, 
-    create_access_token, 
+    register_user,
+    authenticate_user,
+    create_access_token,
     create_refresh_token,
     get_current_user,
     decode_token,
@@ -26,16 +25,18 @@ from app.services.auth_service import (
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)) -> Any:
     return await register_user(db, user_data)
+
 
 @router.post("/login")
 async def login(request: Request, response: Response, db: AsyncSession = Depends(get_db)) -> Any:
     email = None
     password = None
     content_type = request.headers.get("content-type", "")
-    
+
     if "application/json" in content_type:
         try:
             body = await request.json()
@@ -80,11 +81,11 @@ async def login(request: Request, response: Response, db: AsyncSession = Depends
         raise HTTPException(status_code=400, detail="Inactive user")
 
     await reset_login_failures(str(email))
-        
+
     role_str = getattr(user.role, 'value', getattr(user.role, 'name', str(user.role)))
     access_token = create_access_token(data={"sub": str(user.id), "role": role_str})
     refresh_token = create_refresh_token(data={"sub": str(user.id)})
-    
+
     # Secure httpOnly cookie for refresh token
     from app.config import get_settings
     auth_settings = get_settings()
@@ -106,7 +107,7 @@ async def login(request: Request, response: Response, db: AsyncSession = Depends
         "is_active": user.is_active,
         "created_at": user.created_at.isoformat() if user.created_at else None
     }
-    
+
     return {
         "access_token": access_token,
         "token": access_token,
@@ -114,6 +115,7 @@ async def login(request: Request, response: Response, db: AsyncSession = Depends
         "token_type": "bearer",
         "user": user_data
     }
+
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(
@@ -142,18 +144,18 @@ async def refresh_token(
         user_id_str = payload.get("sub")
         if not user_id_str:
             raise HTTPException(status_code=401, detail="Invalid token")
-            
+
         user_id = UUID(user_id_str)
         result = await db.execute(select(User).where(User.id == user_id))
         user = result.scalar_one_or_none()
-        
+
         if not user or not user.is_active:
             raise HTTPException(status_code=401, detail="User not found or inactive")
-            
+
         role_str = getattr(user.role, 'value', getattr(user.role, 'name', str(user.role)))
         access_token = create_access_token(data={"sub": str(user.id), "role": role_str})
         new_refresh_token = create_refresh_token(data={"sub": str(user.id)})
-        
+
         from app.config import get_settings
         auth_settings = get_settings()
         response.set_cookie(
@@ -175,6 +177,7 @@ async def refresh_token(
         raise
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
+
 
 @router.post("/logout")
 async def logout(
@@ -220,19 +223,21 @@ async def logout(
     response.delete_cookie(key="refresh_token", path="/api/v1/auth")
     return {"message": "Successfully logged out", "status": "logged_out"}
 
+
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)) -> Any:
     return current_user
 
+
 @router.patch("/me", response_model=UserResponse)
 async def update_me(
-    user_update: UserUpdate, 
-    current_user: User = Depends(get_current_user), 
+    user_update: UserUpdate,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ) -> Any:
     if user_update.name is not None:
         current_user.name = user_update.name
-    
+
     db.add(current_user)
     await db.commit()
     await db.refresh(current_user)

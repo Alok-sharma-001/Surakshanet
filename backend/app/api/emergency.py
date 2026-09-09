@@ -1,7 +1,7 @@
 import json
 import uuid
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
@@ -26,6 +26,7 @@ router = APIRouter(prefix="/emergency", tags=["emergency"])
 # Singleton controller managing active signal pre-emptions in memory
 green_wave_ctrl = GreenWaveController(lookahead=4, green_hold_s=35)
 
+
 class EmergencyActivateRequest(BaseModel):
     priority: str = "CRITICAL"
     vehicle_type: str = "AMBULANCE"
@@ -36,6 +37,7 @@ class EmergencyActivateRequest(BaseModel):
 
     def get_route(self) -> List[str]:
         return self.route_junction_ids or self.corridor or ["DEL-CP-01", "DEL-ITO-02", "DEL-ASH-04"]
+
 
 @router.post("/activate")
 async def activate_emergency(
@@ -105,6 +107,7 @@ async def activate_emergency(
         "details": result.get("event")
     }
 
+
 @router.post("/deactivate/{event_id}")
 async def deactivate_emergency(
     event_id: str,
@@ -147,6 +150,7 @@ async def deactivate_emergency(
         "active": False
     }
 
+
 @router.get("/status")
 @router.get("/active")
 async def get_active_emergencies(db: AsyncSession = Depends(get_db)):
@@ -178,6 +182,7 @@ async def get_active_emergencies(db: AsyncSession = Depends(get_db)):
 
     return {"active_events": active_events}
 
+
 @router.get("/status/{event_id}")
 async def get_emergency_status(event_id: str):
     """Get status of a specific emergency corridor."""
@@ -185,6 +190,7 @@ async def get_emergency_status(event_id: str):
     if not status:
         raise HTTPException(status_code=404, detail="Active emergency event not found")
     return status
+
 
 @router.get("/history")
 async def get_emergency_history(

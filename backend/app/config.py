@@ -4,33 +4,34 @@ from typing import Any, List, Optional
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class Settings(BaseSettings):
     APP_NAME: str = "Surakshanet"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
     ENVIRONMENT: str = "development"
     API_PREFIX: str = "/api/v1"
-    
+
     POSTGRES_USER: str = "surakshanet"
     POSTGRES_PASSWORD: str = "surakshanet_dev"
     POSTGRES_DB: str = "surakshanet"
     POSTGRES_HOST: str = "postgres"
     POSTGRES_PORT: str = "5432"
-    
+
     DATABASE_URL: Optional[str] = None
-    
+
     REDIS_URL: str = "redis://redis:6379/0"
-    
+
     MQTT_BROKER_HOST: str = "mosquitto"
     MQTT_BROKER_PORT: int = 1883
     MQTT_USERNAME: Optional[str] = None
     MQTT_PASSWORD: Optional[str] = None
-    
+
     JWT_SECRET_KEY: str = "your-super-secret-key-change-in-production"
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-    
+
     ADMIN_EMAIL: str = "admin@surakshanet.local"
     ADMIN_PASSWORD: str = "SurakshaNet@2026"
 
@@ -40,7 +41,7 @@ class Settings(BaseSettings):
         "https://localhost",
         "https://127.0.0.1",
     ]
-    
+
     SUMO_HOME: str = "/usr/share/sumo"
     SUMO_BINARY: str = "sumo"
 
@@ -119,6 +120,7 @@ class Settings(BaseSettings):
                     "Production environment cannot use default development database credentials ('surakshanet_dev')"
                 )
         return self
+
 
 @lru_cache()
 def get_settings() -> Settings:

@@ -3,11 +3,13 @@ from typing import Optional, List
 from uuid import UUID
 from datetime import datetime
 
+
 class AlertCreate(BaseModel):
     junction_id: Optional[UUID] = None
     alert_type: str
     severity: str
     message: str
+
 
 class AlertResponse(BaseModel):
     id: UUID
@@ -18,13 +20,15 @@ class AlertResponse(BaseModel):
     is_acknowledged: bool
     created_at: datetime
     acknowledged_at: Optional[datetime]
-    
+
     model_config = ConfigDict(from_attributes=True)
+
 
 class EmergencyActivate(BaseModel):
     priority: str
     vehicle_type: str
     route: List[UUID]
+
 
 class EmergencyResponse(BaseModel):
     id: UUID
@@ -35,5 +39,5 @@ class EmergencyResponse(BaseModel):
     activated_by: Optional[UUID]
     started_at: datetime
     ended_at: Optional[datetime]
-    
+
     model_config = ConfigDict(from_attributes=True)

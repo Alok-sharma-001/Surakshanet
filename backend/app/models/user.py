@@ -5,10 +5,12 @@ from sqlalchemy import Column, String, Boolean, DateTime, Enum
 from sqlalchemy.dialects.postgresql import UUID
 from app.database import Base
 
+
 class UserRole(str, enum.Enum):
     ADMIN = "ADMIN"
     OPERATOR = "OPERATOR"
     VIEWER = "VIEWER"
+
 
 class User(Base):
     __tablename__ = "users"

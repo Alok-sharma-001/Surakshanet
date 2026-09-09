@@ -13,11 +13,12 @@ import redis.asyncio as aioredis
 
 from app.config import get_settings
 from app.models.traffic import TrafficReading
-from app.models.junction import Junction, TrafficSensor
+from app.models.junction import Junction
 from shared.constants import MQTT_SENSOR_TELEMETRY_TOPIC, MQTT_JUNCTION_TELEMETRY_TOPIC
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
 
 class MQTTTelemetryConsumer:
     """
@@ -225,6 +226,7 @@ class MQTTTelemetryConsumer:
                 logger.debug(f"Telemetry loop tick exception: {e}")
 
             await asyncio.sleep(5)
+
 
 # Global daemon instance
 mqtt_consumer = MQTTTelemetryConsumer()

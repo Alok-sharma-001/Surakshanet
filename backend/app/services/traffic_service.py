@@ -5,17 +5,14 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, func, or_, and_, cast
 from geoalchemy2 import Geography
-from geoalchemy2.functions import ST_Distance, ST_DWithin, ST_SetSRID, ST_MakePoint
 
-from app.models.junction import Junction, TrafficSensor, SensorType, ApproachDirection
+from app.models.junction import Junction, TrafficSensor
 from app.models.traffic import TrafficReading
 from app.schemas.traffic import (
     JunctionCreate,
     JunctionUpdate,
     SensorCreate,
-    SensorResponse,
     TrafficReadingCreate,
-    TrafficReadingQuery,
 )
 
 
