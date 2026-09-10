@@ -65,5 +65,8 @@ infra/mosquitto/password_file
 Travel/
 backups/
 .agents/
+*.db
+*.sqlite
+*.sqlite3
 
 backend/ml/

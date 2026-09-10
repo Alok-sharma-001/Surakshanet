@@ -7,6 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy import select, text
 
 from app.config import get_settings
+from app.database import async_session_maker
 from app.models.junction import Junction, TrafficSensor, SensorType, ApproachDirection
 from app.models.signal import SignalPlan, SignalMode
 from app.models.traffic import TrafficReading
@@ -32,10 +33,7 @@ CITY_JUNCTIONS = [
 ]
 
 async def seed_city():
-    engine = create_async_engine(settings.DATABASE_URL, echo=False)
-    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-    async with async_session() as db:
+    async with async_session_maker() as db:
         # Check if already seeded
         res = await db.execute(select(Junction))
         existing_junctions = res.scalars().all()

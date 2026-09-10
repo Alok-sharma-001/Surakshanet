@@ -1,8 +1,38 @@
 import json
+import os
 from functools import lru_cache
 from typing import Any, List, Optional
 from pydantic import field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+
+try:
+    from pydantic_settings import BaseSettings, SettingsConfigDict
+except ImportError:
+    from pydantic import BaseModel
+
+    class SettingsConfigDict(dict):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+
+    class BaseSettings(BaseModel):
+        def __init__(self, **kwargs):
+            env_data = {}
+            env_file = ".env"
+            if os.path.isfile(env_file):
+                try:
+                    with open(env_file, "r", encoding="utf-8") as f:
+                        for line in f:
+                            line = line.strip()
+                            if line and not line.startswith("#") and "=" in line:
+                                k, v = line.split("=", 1)
+                                env_data[k.strip().upper()] = v.strip().strip("'\"")
+                except Exception:
+                    pass
+            for field_name in type(self).model_fields.keys():
+                val = os.environ.get(field_name.upper()) or os.environ.get(field_name) or env_data.get(field_name.upper())
+                if val is not None:
+                    env_data[field_name] = val
+            env_data.update(kwargs)
+            super().__init__(**env_data)
 
 
 class Settings(BaseSettings):
@@ -44,6 +74,9 @@ class Settings(BaseSettings):
 
     SUMO_HOME: str = "/usr/share/sumo"
     SUMO_BINARY: str = "sumo"
+
+    # Google Antigravity & Gemini API
+    GEMINI_API_KEY: Optional[str] = None
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 

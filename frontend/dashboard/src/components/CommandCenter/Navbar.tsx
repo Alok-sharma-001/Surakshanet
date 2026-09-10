@@ -7,11 +7,12 @@ import {
   AlertTriangle, 
   BarChart3, 
   Layers,
-  ArrowUpRight
+  ArrowUpRight,
+  Bot
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
-export type CommandTab = 'overview' | 'live-map' | 'traffic-ai' | 'signal-control' | 'incidents' | 'analytics';
+export type CommandTab = 'overview' | 'live-map' | 'traffic-ai' | 'signal-control' | 'incidents' | 'analytics' | 'copilot';
 
 interface Props {
   activeTab: CommandTab;
@@ -28,6 +29,7 @@ export const Navbar: React.FC<Props> = ({ activeTab, onTabChange }) => {
     { id: 'traffic-ai', label: 'Traffic AI', icon: Camera },
     { id: 'signal-control', label: 'Signal Control', icon: SlidersHorizontal },
     { id: 'incidents', label: 'Incidents', icon: AlertTriangle, badge: '2' },
+    { id: 'copilot', label: 'TOC Copilot', icon: Bot, badge: 'AI' },
     { id: 'analytics', label: 'Analytics', icon: BarChart3 },
   ];
 

@@ -1,16 +1,37 @@
+import os
+import asyncio
+import logging
 from typing import AsyncGenerator
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
 from app.config import get_settings
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
 
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    pool_size=10,
-    max_overflow=20,
-    echo=settings.DEBUG,
-)
+engine_kwargs = {"echo": settings.DEBUG}
+if "sqlite" not in settings.DATABASE_URL:
+    engine_kwargs.update({"pool_size": 10, "max_overflow": 20})
+
+engine = create_async_engine(settings.DATABASE_URL, **engine_kwargs)
+
+if "sqlite" in settings.DATABASE_URL:
+    @event.listens_for(engine.sync_engine, "connect")
+    def _load_spatialite(dbapi_conn, connection_record):
+        try:
+            raw = getattr(dbapi_conn, "_connection", None)
+            if raw and hasattr(raw, "_conn"):
+                raw._conn.enable_load_extension(True)
+                for lib in ["/usr/lib/mod_spatialite.so", "/usr/local/lib/mod_spatialite.so", "mod_spatialite"]:
+                    if os.path.exists(lib) or "/" not in lib:
+                        try:
+                            raw._conn.load_extension(lib)
+                            break
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.debug(f"SpatiaLite extension load note: {e}")
 
 async_session_maker = async_sessionmaker(
     engine,
@@ -58,7 +79,10 @@ async def init_db() -> None:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
     else:
-        await asyncio.to_thread(run_alembic_migrations)
+        try:
+            await asyncio.to_thread(run_alembic_migrations)
+        except Exception as e:
+            logger.warning(f"Alembic migration notice: {e}")
 
     # Seed default admin user
     try:

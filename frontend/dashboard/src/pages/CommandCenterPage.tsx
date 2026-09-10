@@ -7,6 +7,7 @@ import { SignalControlInteractive } from '../components/CommandCenter/SignalCont
 import { ComputerVisionFeed } from '../components/CommandCenter/ComputerVisionFeed';
 import { LiveIncidents } from '../components/CommandCenter/LiveIncidents';
 import { AnalyticsDashboard } from '../components/CommandCenter/AnalyticsDashboard';
+import { CopilotAssistant } from '../components/CommandCenter/CopilotAssistant';
 import { Map, SlidersHorizontal } from 'lucide-react';
 
 export const CommandCenterPage: React.FC = () => {
@@ -154,7 +155,14 @@ export const CommandCenterPage: React.FC = () => {
           </div>
         )}
 
-        {/* Tab 6: Analytics */}
+        {/* Tab 6: TOC Autonomous Copilot */}
+        {activeTab === 'copilot' && (
+          <div className="space-y-6">
+            <CopilotAssistant />
+          </div>
+        )}
+
+        {/* Tab 7: Analytics */}
         {activeTab === 'analytics' && (
           <div className="space-y-6">
             <AnalyticsDashboard />

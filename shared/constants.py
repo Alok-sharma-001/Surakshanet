@@ -1,3 +1,4 @@
+from enum import Enum
 from typing import Dict, Any
 
 PCU_FACTORS: Dict[str, float] = {
@@ -46,6 +47,12 @@ EMERGENCY_CONFIG: Dict[str, Any] = {
     'lookahead_junctions': 3,
     'green_hold_s': 30
 }
+
+class TelemetrySource(str, Enum):
+    LIVE = "live"
+    SIM = "sim"
+    MOCK = "mock"
+
 
 # MQTT Standard Telemetry Topics
 MQTT_SENSOR_TELEMETRY_TOPIC: str = "surakshanet/sensors/{sensor_id}/telemetry"

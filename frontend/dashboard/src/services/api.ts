@@ -94,5 +94,20 @@ export const api = {
     getAll: () => axiosInstance.get('/users'),
     updateRole: (id: string, role: string) => axiosInstance.patch(`/users/${id}/role?role=${role}`),
     updateStatus: (id: string, is_active: boolean) => axiosInstance.patch(`/users/${id}/status?is_active=${is_active}`),
+  },
+  copilot: {
+    chat: (data: { message: string; stream?: boolean; junction_id?: string }) =>
+      axiosInstance.post('/copilot/chat', data),
+    analyzeSnapshot: (data: { image_path: string; junction_id?: string }) =>
+      axiosInstance.post('/copilot/analyze-snapshot', data),
+    simulateAction: (data: {
+      action_type: 'PREEMPT_CORRIDOR' | 'DETOUR_REROUTE';
+      corridor_junctions?: string[];
+      origin_lat?: number;
+      origin_lon?: number;
+      dest_lat?: number;
+      dest_lon?: number;
+      avoid_junctions?: string[];
+    }) => axiosInstance.post('/copilot/simulate-action', data),
   }
 };

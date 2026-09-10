@@ -56,6 +56,14 @@ class TrafficForecaster:
         self.min_val = 0.0
         self.max_val = 1.0
 
+        # Attempt to auto-load existing weights from default weights path
+        default_weights = os.path.join(os.path.dirname(__file__), "weights")
+        if os.path.exists(os.path.join(default_weights, "lstm_model.pth")) and os.path.exists(os.path.join(default_weights, "xgb_models.pkl")):
+            try:
+                self.load_models(default_weights)
+            except Exception:
+                pass
+
     def train_lstm(self, train_data: np.ndarray, epochs=50, lr=0.001, batch_size=32) -> list:
         norm_data, self.min_val, self.max_val = normalize_data(train_data)
         
@@ -120,7 +128,7 @@ class TrafficForecaster:
         if not self.is_xgb_trained:
             raise ValueError("XGBoost model is not trained.")
             
-        X = features.drop(columns=['timestamp', 'pcu_value', 'junction_id'], errors='ignore').iloc[-1:]
+        X = features.drop(columns=['timestamp', 'pcu_value', 'pcu', 'junction_id'], errors='ignore').iloc[-1:]
         predictions = {}
         for horizon in self.forecast_horizons:
             predictions[horizon] = float(self.xgb_models[horizon].predict(X)[0])
