@@ -6,11 +6,11 @@
 **Priority:** `P0` blocks the demo · `P1` required for the target score · `P2` valuable · `P3` optional
 **Rule:** a task is `DONE` only when all ten Definition-of-Done conditions in [23-final-acceptance.md §1](23-final-acceptance.md) hold.
 
-**Progress:** 12 / 150 DONE — **8%** *(Phase 0 complete; baseline at audit time was 42% overall project completion)*
+**Progress:** 16 / 154 DONE — **10%** *(Phase 0 complete, including the four gaps found when the SN-140 greps were first actually run; baseline at audit time was 42% overall project completion)*
 
 | Phase | Tasks | Done |
 |---|---|---|
-| 0 Cleanup | SN-001 … SN-012 | 12/12 |
+| 0 Cleanup | SN-001 … SN-012d | 16/16 |
 | 1 Infrastructure | SN-013 … SN-022 | 0/10 |
 | 2 Real AI control | SN-023 … SN-038 | 0/16 |
 | 3 Emergency corridor | SN-039 … SN-050 | 0/12 |
@@ -121,6 +121,38 @@
 **Files** `STATUS.md`, `ROADMAP.md`, `TEST_READY.md`, `TEST_INFRA.md`
 **API** none · **DB** none · **UI** none
 **Tests** SN-147 · **Acceptance** No root document contradicts `docs/01-current-state.md` · **Demo** none
+
+### SN-012a · Delete the fabricated telemetry ticker
+**Component** MQTT consumer · **Priority** P0 · **Depends** — · **Status** `DONE`
+**Description** Found after Phase 0 was declared complete. `mqtt_consumer.py` ran a five-second background ticker that sampled three junctions, invented `pcu = random.uniform(25.0, 85.0)`, derived speed and queue from it, and published the result to the `traffic_updates` Redis channel as live telemetry. This is the same defect class as SN-005; the original greps missed it because they targeted files the audit had already named. It tagged itself `source: "mock"`, a value that is not a member of the `DataSource` enum SN-008 introduced.
+**Implementation** Delete `_live_telemetry_loop`, the task that started it and the now-unused `random` import. Correct the real ingest path, which still wrote the pre-SN-008 vocabulary `live|sim|mock` and would therefore have failed the `ck_traffic_readings_source` CHECK constraint added by migration `001b`. Ingest now accepts only the measured members `mqtt|sumo|vision`, defaults to `mqtt`, and logs a warning when it rejects an unrecognised value.
+**Files** `backend/app/services/mqtt_consumer.py`
+**API** `traffic_updates` no longer carries synthetic events · **DB** inserts satisfy the enum constraint · **UI** telemetry panels are empty without a real source
+**Tests** SN-140 guard · **Acceptance** `grep -n "random\." backend/app/services/mqtt_consumer.py` returns nothing · **Demo** all
+
+### SN-012b · Make the provenance badge fail closed
+**Component** Frontend · **Priority** P0 · **Depends** SN-009 · **Status** `DONE`
+**Description** `TelemetrySourceBadge` defaulted its `source` prop to `'mqtt'` and fell back to `config.mqtt` for any unrecognised value. A value arriving with missing or unknown provenance therefore rendered as measured edge telemetry — the strongest claim in the set asserted on the weakest evidence, and the exact inversion of SN-009's acceptance condition.
+**Implementation** Remove the default. An absent or unrecognised source renders the `UNAVAILABLE` state. Drop the legacy `live|sim|mock` aliases from the exported type and from `types/index.ts` so the union mirrors `DataSource` in `shared/constants.py`.
+**Files** `frontend/dashboard/src/components/TelemetrySourceBadge.tsx`, `frontend/dashboard/src/types/index.ts`
+**API** none · **DB** none · **UI** unknown provenance reads as unavailable
+**Tests** SN-140 guard · **Acceptance** No code path renders a measured-family badge for a source outside the enum · **Demo** all
+
+### SN-012c · Remove assumed control actions
+**Component** Emergency / green wave · **Priority** P0 · **Depends** — · **Status** `DONE`
+**Description** Two fabrications that the `docs/23-final-acceptance.md` §3 greps name but which had never been run. `EmergencyActivateRequest.get_route` fell back to `["DEL-CP-01", "DEL-ITO-02", "DEL-ASH-04"]`, pre-empting live signals along a corridor nobody requested — a fabricated *control action*, not a fabricated display value. `GreenWaveController.activate` stored `{"mock_plan": True}` as the plan to restore, so a junction could never actually be returned to its original program after an emergency passed.
+**Implementation** `get_route` raises `422` when no route is supplied. `activate` captures the real plan through `env.get_plan` when an environment is attached and records `None` otherwise; a new `_restore` helper refuses to restore when no plan was captured and logs that the junction remains pre-empted, rather than calling `restore_plan(jid, None)` and reporting success.
+**Files** `backend/app/api/emergency.py`, `ml/emergency/green_wave.py`
+**API** `POST /emergency/activate` returns 422 without a route · **DB** none · **UI** activation error surfaced
+**Tests** SN-140 guard · **Acceptance** `grep -rn "mock_plan" ml/ backend/` and `grep -rn "DEL-CP-01" backend/app/api/emergency.py` both return nothing · **Demo** C
+
+### SN-012d · Bring the SN-140 guard forward into CI
+**Component** CI · **Priority** P0 · **Depends** SN-012a…SN-012c · **Status** `DONE`
+**Description** SN-140 schedules the Phase 0 regression greps for final acceptance. Running them nine phases after the deletions is too late — SN-012a proved that a fabrication path can be reintroduced, or simply missed, while the tracker reads complete. The guard belongs in CI from the start.
+**Implementation** `scripts/check_phase0_regressions.sh` implements every grep in [23-final-acceptance.md §3](23-final-acceptance.md) plus one per gap above, wired to `make check-phase0` and to a `phase0-guard` job in `.github/workflows/ci.yml`. The §3 `DEL-CP-01` grep is narrowed to `backend/app/api/emergency.py`: applied to all of `backend/` it also matches the routing topology table and test fixtures, which are legitimate seed data. The two decorative-test greps report as non-blocking `WARN`, because rewriting those assertions requires each test's real intent and is Phase 8 work (SN-111…SN-126); they must reach zero before SN-140 sign-off.
+**Files** `scripts/check_phase0_regressions.sh`, `Makefile`, `.github/workflows/ci.yml`
+**API** none · **DB** none · **UI** none
+**Tests** is a test · **Acceptance** The job fails the build on any reintroduced fabrication · **Demo** none
 
 ---
 
@@ -1107,3 +1139,5 @@
 | Date | Tasks moved to DONE | Completion | Notes |
 |---|---|---|---|
 | — | — | 0% | Baseline at audit commit `84f8f6c` |
+| 2026-09-10 | SN-001 … SN-012 | 8% | Phase 0 committed to `phase0/complete` off `main` |
+| 2026-09-10 | SN-012a … SN-012d | 10% | Gaps found on first real run of the §3 greps; guard now blocking in CI |

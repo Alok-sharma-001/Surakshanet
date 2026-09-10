@@ -36,7 +36,20 @@ class EmergencyActivateRequest(BaseModel):
     destination: Optional[str] = None
 
     def get_route(self) -> List[str]:
-        return self.route_junction_ids or self.corridor or ["DEL-CP-01", "DEL-ITO-02", "DEL-ASH-04"]
+        """The junctions to pre-empt, as supplied by the caller.
+
+        There is no default. Falling back to an invented corridor would
+        pre-empt live signals along a route nobody requested — a fabricated
+        control action rather than a fabricated display value.
+        """
+        route = self.route_junction_ids or self.corridor
+        if not route:
+            raise HTTPException(
+                status_code=422,
+                detail="route_junction_ids or corridor is required; "
+                       "an emergency route is never assumed",
+            )
+        return route
 
 
 @router.post("/activate")

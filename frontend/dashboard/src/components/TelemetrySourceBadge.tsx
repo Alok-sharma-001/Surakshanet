@@ -1,15 +1,15 @@
 import React from 'react';
 
+// Mirrors DataSource in shared/constants.py. The legacy 'live' | 'sim' |
+// 'mock' vocabulary is gone: the backend no longer emits it and
+// traffic_readings.source carries a CHECK constraint against these six.
 export type TelemetrySource =
   | 'sumo'
   | 'vision'
   | 'mqtt'
   | 'model'
   | 'heuristic'
-  | 'manual'
-  | 'live'
-  | 'sim'
-  | 'mock';
+  | 'manual';
 
 interface Props {
   source?: TelemetrySource | string | null;
@@ -18,7 +18,7 @@ interface Props {
 }
 
 export const TelemetrySourceBadge: React.FC<Props> = ({
-  source = 'mqtt',
+  source,
   className = '',
   showIcon = true,
 }) => {
@@ -94,32 +94,23 @@ export const TelemetrySourceBadge: React.FC<Props> = ({
       borderColor: 'border-slate-300',
       dotColor: 'bg-slate-500',
     },
-    // Legacy aliases
-    live: {
-      label: 'LIVE (EDGE)',
-      bgColor: 'bg-emerald-50',
-      textColor: 'text-emerald-700',
-      borderColor: 'border-emerald-200',
-      dotColor: 'bg-emerald-500',
-    },
-    sim: {
-      label: 'SUMO (SIM)',
-      bgColor: 'bg-sky-50',
-      textColor: 'text-sky-700',
-      borderColor: 'border-sky-200',
-      dotColor: 'bg-sky-500',
-    },
-    mock: {
-      label: 'HEURISTIC',
-      prefix: 'est.',
-      bgColor: 'bg-amber-50',
-      textColor: 'text-amber-700',
-      borderColor: 'border-amber-200',
-      dotColor: 'bg-amber-500',
-    },
   };
 
-  const style = config[normSource] || config.mqtt;
+  // SN-009: fail closed. An unrecognised source must never inherit a
+  // measured-family badge — that would be the strongest possible claim
+  // asserted on the weakest possible evidence.
+  const style = config[normSource];
+  if (!style) {
+    return (
+      <span
+        className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-semibold uppercase tracking-wider border bg-slate-50 text-slate-500 border-slate-200 ${className}`}
+        title={`Telemetry Origin: Unrecognised (${normSource})`}
+      >
+        {showIcon && <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />}
+        UNAVAILABLE
+      </span>
+    );
+  }
 
   return (
     <span

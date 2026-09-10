@@ -27,7 +27,7 @@ export interface TrafficReading {
   avg_speed: number | null;
   queue_length: number | null;
   vehicle_breakdown: Record<string, number> | null;
-  source?: 'live' | 'sim' | 'mock';
+  source?: 'sumo' | 'vision' | 'mqtt' | 'model' | 'heuristic' | 'manual';
 }
 
 export interface JunctionState {

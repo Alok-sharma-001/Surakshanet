@@ -1,5 +1,9 @@
+import logging
 import time
 from typing import Dict, List, Any, Optional
+
+logger = logging.getLogger(__name__)
+
 
 class GreenWaveController:
     """Emergency green-wave controller for traffic pre-emption."""
@@ -14,11 +18,17 @@ class GreenWaveController:
         
     def activate(self, event_id: str, priority: str, vehicle_type: str, route_junction_ids: List[str], env=None) -> Dict[str, Any]:
         """Activate a green wave for an emergency vehicle route."""
-        # 1. Store original plans
+        # 1. Capture the real signal plan so it can be restored afterwards.
+        #    A green wave pre-empts live signals; if the plan we captured is a
+        #    placeholder then restore silently returns the junction to nothing,
+        #    leaving it pre-empted after the emergency has passed. Record the
+        #    absence explicitly instead of inventing a plan.
         for jid in route_junction_ids:
             if jid not in self.original_plans:
-                # In real app, fetch current plan from env/DB
-                self.original_plans[jid] = {"mock_plan": True}
+                if env is not None and hasattr(env, 'get_plan'):
+                    self.original_plans[jid] = env.get_plan(jid)
+                else:
+                    self.original_plans[jid] = None
                 
         # 2. Pre-empt upcoming junctions
         active_junctions = route_junction_ids[:self.lookahead]
@@ -60,9 +70,7 @@ class GreenWaveController:
             
         # Vehicle passed previous junctions; restore them
         for i in range(event["current_index"], curr_idx):
-            passed_jid = route[i]
-            if env is not None and hasattr(env, 'restore_plan'):
-                env.restore_plan(passed_jid, self.original_plans.get(passed_jid))
+            self._restore(route[i], env)
                 
         # Update index
         event["current_index"] = curr_idx
@@ -87,9 +95,8 @@ class GreenWaveController:
         event = self.active_events[event_id]
         
         # Restore all affected junctions
-        if env is not None and hasattr(env, 'restore_plan'):
-            for jid in event["route"]:
-                env.restore_plan(jid, self.original_plans.get(jid))
+        for jid in event["route"]:
+            self._restore(jid, env)
                 
         # Clean up plans if no other events use them
         for jid in event["route"]:
@@ -112,6 +119,26 @@ class GreenWaveController:
         """List all active emergency events."""
         return list(self.active_events.values())
         
+    def _restore(self, junction_id: str, env=None) -> bool:
+        """Return one junction to the plan captured at activation.
+
+        Returns False when there is nothing to restore to — either no env is
+        attached or no plan was captured. The caller is left holding a junction
+        that is still pre-empted, which is a condition an operator must see
+        rather than one this controller should paper over.
+        """
+        plan = self.original_plans.get(junction_id)
+        if env is None or not hasattr(env, 'restore_plan'):
+            return False
+        if plan is None:
+            logger.warning(
+                "No captured plan for junction %s; it remains pre-empted and "
+                "must be released manually.", junction_id
+            )
+            return False
+        env.restore_plan(junction_id, plan)
+        return True
+
     def _get_approach_phase(self, from_junction: str, to_junction: str) -> int:
         """Determine which signal phase to activate for the approach based on network topology.
         Phase 0: East-West arterial green (corridor flow, e.g. J0<->J1<->J2<->J3).

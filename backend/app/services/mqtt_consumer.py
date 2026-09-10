@@ -1,23 +1,29 @@
 import asyncio
 import json
 import logging
-import random
 import uuid
 from datetime import datetime
 from typing import Optional
 import paho.mqtt.client as mqtt
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import select
 import redis.asyncio as aioredis
 
 from app.config import get_settings
 from app.models.traffic import TrafficReading
-from app.models.junction import Junction
-from shared.constants import MQTT_SENSOR_TELEMETRY_TOPIC, MQTT_JUNCTION_TELEMETRY_TOPIC
+from shared.constants import (
+    MQTT_SENSOR_TELEMETRY_TOPIC,
+    MQTT_JUNCTION_TELEMETRY_TOPIC,
+    DataSource,
+)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+# Measured provenance a device or bridge may legitimately declare on ingest.
+_MEASURED_SOURCES = frozenset(
+    {DataSource.MQTT.value, DataSource.SUMO.value, DataSource.VISION.value}
+)
 
 
 class MQTTTelemetryConsumer:
@@ -33,7 +39,6 @@ class MQTTTelemetryConsumer:
         self.async_session = None
         self.redis_client = None
         self.loop: Optional[asyncio.AbstractEventLoop] = None
-        self._ticker_task: Optional[asyncio.Task] = None
 
     def start(self):
         """Start the MQTT consumer and background live telemetry loop."""
@@ -63,15 +68,9 @@ class MQTTTelemetryConsumer:
         except Exception as e:
             logger.warning(f"Could not connect to MQTT broker ({e}). Telemetry ingestion will run in standalone mode.")
 
-        # Start continuous telemetry ticker
-        if self.loop and self.loop.is_running():
-            self._ticker_task = self.loop.create_task(self._live_telemetry_loop())
-
     def stop(self):
         """Stop the MQTT consumer cleanly."""
         self.is_running = False
-        if self._ticker_task:
-            self._ticker_task.cancel()
         if self.client:
             try:
                 self.client.loop_stop()
@@ -142,9 +141,22 @@ class MQTTTelemetryConsumer:
             queue = float(data.get("queue_length", data.get("queue", 8.0)))
             v_count = float(data.get("vehicle_count", data.get("total_vehicles", 22.0)))
 
-            source = data.get("source", "live")
-            if source not in ("live", "sim", "mock"):
-                source = "live"
+            # SN-008: provenance must be a DataSource member. A message arriving
+            # on the MQTT ingest path is 'mqtt' unless the payload declares a
+            # more specific measured origin (the SUMO bridge declares 'sumo',
+            # the vision worker declares 'vision'). Anything else is rejected
+            # rather than passed through — traffic_readings.source carries a
+            # CHECK constraint and an unknown value would fail the insert.
+            declared = str(data.get("source", "")).lower()
+            if declared in _MEASURED_SOURCES:
+                source = declared
+            else:
+                if declared:
+                    logger.warning(
+                        "Rejecting unrecognised telemetry source %r on %s; "
+                        "recording as %s", declared, junction_id, DataSource.MQTT.value
+                    )
+                source = DataSource.MQTT.value
 
             reading = TrafficReading(
                 id=uuid.uuid4(),
@@ -184,48 +196,6 @@ class MQTTTelemetryConsumer:
 
         except Exception as e:
             logger.error(f"Error persisting MQTT telemetry: {e}")
-
-    async def _live_telemetry_loop(self):
-        """
-        Background live ticker: Emits periodic telemetry pulses across city junctions
-        to ensure the command center and dashboards always have fresh live streams.
-        """
-        await asyncio.sleep(5)  # Initial grace delay
-        while self.is_running:
-            try:
-                async with self.async_session() as db:
-                    result = await db.execute(select(Junction.id, Junction.name).where(Junction.is_active == True).limit(12))
-                    active_juncs = result.all()
-
-                if active_juncs:
-                    if not self.redis_client:
-                        self.redis_client = aioredis.from_url(settings.REDIS_URL)
-
-                    # Pick 2-3 junctions per tick
-                    sampled = random.sample(active_juncs, min(len(active_juncs), 3))
-                    for j_id, j_name in sampled:
-                        pcu = round(random.uniform(25.0, 85.0), 1)
-                        spd = round(max(12.0, 48.0 - (pcu * 0.35) + random.uniform(-2, 2)), 1)
-                        q_len = round(max(0.0, (pcu - 20) * 0.8), 1)
-
-                        tick_payload = {
-                            "type": "TELEMETRY_UPDATE",
-                            "source": "mock",
-                            "junction_id": str(j_id),
-                            "junction_name": j_name,
-                            "pcu": pcu,
-                            "speed": spd,
-                            "queue": q_len,
-                            "timestamp": datetime.utcnow().isoformat()
-                        }
-                        await self.redis_client.publish("traffic_updates", json.dumps(tick_payload))
-
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.debug(f"Telemetry loop tick exception: {e}")
-
-            await asyncio.sleep(5)
 
 
 # Global daemon instance
