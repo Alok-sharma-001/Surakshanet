@@ -1,33 +1,18 @@
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
-import { Leaf, Wind, Activity, Map, ArrowUp } from 'lucide-react';
+import { Leaf, Wind, Activity, Map } from 'lucide-react';
 
-const mockTrendData = [
-  { name: 'Jan', before: 120, after: 120 },
-  { name: 'Feb', before: 118, after: 110 },
-  { name: 'Mar', before: 122, after: 105 },
-  { name: 'Apr', before: 130, after: 98 },
-  { name: 'May', before: 128, after: 95 },
-  { name: 'Jun', before: 135, after: 90 },
-  { name: 'Jul', before: 140, after: 88 },
-  { name: 'Aug', before: 138, after: 85 },
-];
-
-const mockPieData = [
-  { name: 'Cars', value: 45 },
-  { name: '2W', value: 25 },
-  { name: 'Buses', value: 15 },
-  { name: 'Trucks', value: 15 },
-];
-
+// SN-012g/§13.10: three of the four KPI cards below already say "not
+// measured" honestly, but the fourth showed a hardcoded "12.4t CO2 Saved",
+// and all three charts/tables here (mockTrendData, mockPieData,
+// topCorridors) were fully synthetic — a "Before/After Surakshanet" trend,
+// a vehicle-type emissions pie, and a "Top 5 Corridors by Emission
+// Reduction" table with invented percentages. There is no emissions
+// tracking subsystem anywhere in this project's backend, so this page is
+// now consistently honest instead of three real placeholders and three fakes.
+const mockTrendData: { name: string; before: number; after: number }[] = [];
+const mockPieData: { name: string; value: number }[] = [];
 const COLORS = ['#0284c7', '#10b981', '#f59e0b', '#ef4444'];
-
-const topCorridors = [
-  { name: 'MG Road', reduction: 35 },
-  { name: 'Ring Road Phase 1', reduction: 28 },
-  { name: 'Airport Road', reduction: 25 },
-  { name: 'Tech Park Avenue', reduction: 22 },
-  { name: 'Old Madras Road', reduction: 18 },
-];
+const topCorridors: { name: string; reduction: number }[] = [];
 
 export default function EmissionsPage() {
   return (
@@ -44,13 +29,9 @@ export default function EmissionsPage() {
             <h3 className="text-sm font-semibold text-slate-800">Total CO₂ Saved</h3>
           </div>
           <div className="flex items-baseline gap-2">
-            <div className="text-4xl font-bold text-slate-900">12.4t</div>
-            <div className="flex items-center text-sm font-medium text-emerald-600">
-              <ArrowUp className="w-4 h-4 mr-1" />
-              —
-            </div>
+            <div className="text-4xl font-bold text-slate-300">—</div>
           </div>
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mt-2">no baseline measured</p>
+          <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mt-2">not measured</p>
         </div>
 
         <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm px-6 py-5">
@@ -92,7 +73,12 @@ export default function EmissionsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm px-6 py-5">
           <h3 className="text-sm font-semibold text-slate-800 mb-4">Monthly Emissions Trend (CO₂ tons)</h3>
-          <div className="h-[300px]">
+          <div className="h-[300px] relative">
+            {mockTrendData.length === 0 && (
+              <div className="absolute inset-0 flex items-center justify-center text-xs text-slate-400 z-10">
+                No emissions data measured yet
+              </div>
+            )}
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={mockTrendData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                 <defs>
@@ -120,7 +106,12 @@ export default function EmissionsPage() {
 
         <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm px-6 py-5">
           <h3 className="text-sm font-semibold text-slate-800 mb-4">Emissions by Vehicle Type</h3>
-          <div className="h-[300px]">
+          <div className="h-[300px] relative">
+            {mockPieData.length === 0 && (
+              <div className="absolute inset-0 flex items-center justify-center text-xs text-slate-400 z-10">
+                No emissions data measured yet
+              </div>
+            )}
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
@@ -156,6 +147,13 @@ export default function EmissionsPage() {
               </tr>
             </thead>
             <tbody>
+              {topCorridors.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="px-6 py-8 text-center text-slate-400">
+                    No corridor emissions data measured yet
+                  </td>
+                </tr>
+              )}
               {topCorridors.map((corridor, idx) => (
                 <tr key={idx} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
                   <td className="px-6 py-4 font-medium text-slate-900">{corridor.name}</td>

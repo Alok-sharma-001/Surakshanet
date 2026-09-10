@@ -9,15 +9,12 @@ import {
 } from 'recharts';
 import clsx from 'clsx';
 
-const mockChartData = [
-  { name: 'Mon', baseline: 65, active: 82 },
-  { name: 'Tue', baseline: 62, active: 85 },
-  { name: 'Wed', baseline: 58, active: 80 },
-  { name: 'Thu', baseline: 60, active: 84 },
-  { name: 'Fri', baseline: 55, active: 78 },
-  { name: 'Sat', baseline: 75, active: 90 },
-  { name: 'Sun', baseline: 78, active: 92 },
-];
+// SN-012g/§13.10: this "Executive Analytics" page previously claimed
+// specific figures — "-24% Avg Delay Reduction vs 18% baseline", "+15%
+// Throughput Increase", "LOS B+ improved from C" — plus a full
+// Baseline-vs-Active weekly bar chart, none backed by any measurement.
+// Honest placeholders below instead.
+const mockChartData: { name: string; baseline: number; active: number }[] = [];
 
 export default function AnalyticsPage() {
   const [timeRange, setTimeRange] = useState('30d');
@@ -91,11 +88,8 @@ export default function AnalyticsPage() {
             </div>
           </div>
           <div className="flex items-baseline gap-2 mb-2">
-            <span className="text-3xl font-syne font-bold text-teal-600">-24%</span>
-            <span className="text-sm text-slate-500">vs 18% baseline</span>
-          </div>
-          <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-            <div className="h-full bg-teal-500 rounded-full" style={{ width: '75%' }}></div>
+            <span className="text-3xl font-syne font-bold text-slate-300">—</span>
+            <span className="text-sm text-slate-500">not measured</span>
           </div>
         </div>
 
@@ -107,11 +101,8 @@ export default function AnalyticsPage() {
             </div>
           </div>
           <div className="flex items-baseline gap-2 mb-2">
-            <span className="text-3xl font-syne font-bold text-teal-600">+15%</span>
-            <span className="text-sm text-slate-500">peak hours</span>
-          </div>
-          <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-            <div className="h-full bg-emerald-500 rounded-full" style={{ width: '60%' }}></div>
+            <span className="text-3xl font-syne font-bold text-slate-300">—</span>
+            <span className="text-sm text-slate-500">not measured</span>
           </div>
         </div>
 
@@ -123,15 +114,8 @@ export default function AnalyticsPage() {
             </div>
           </div>
           <div className="flex items-baseline gap-2 mb-3">
-            <span className="text-3xl font-syne font-bold text-slate-900">B+</span>
-            <span className="text-sm text-slate-500">improved from C</span>
-          </div>
-          <div className="flex gap-1 h-3 items-end">
-            <div className="flex-1 bg-slate-200 rounded-sm h-1/3"></div>
-            <div className="flex-1 bg-slate-200 rounded-sm h-1/2"></div>
-            <div className="flex-1 bg-slate-200 rounded-sm h-2/3"></div>
-            <div className="flex-1 bg-teal-400 rounded-sm h-full"></div>
-            <div className="flex-1 bg-teal-500 rounded-sm h-full"></div>
+            <span className="text-3xl font-syne font-bold text-slate-300">—</span>
+            <span className="text-sm text-slate-500">not measured</span>
           </div>
         </div>
       </div>
@@ -140,7 +124,12 @@ export default function AnalyticsPage() {
       <div className="grid grid-cols-3 gap-6">
         <div className="col-span-2 bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-5">
           <h2 className="text-sm font-semibold text-slate-800 mb-6">Peak-Hour Performance Trends</h2>
-          <div className="h-72">
+          <div className="h-72 relative">
+            {mockChartData.length === 0 && (
+              <div className="absolute inset-0 flex items-center justify-center text-xs text-slate-400 z-10">
+                No performance trend data measured yet
+              </div>
+            )}
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={mockChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
@@ -164,24 +153,13 @@ export default function AnalyticsPage() {
           </div>
           
           <div className="flex-1 bg-slate-50/70 rounded-xl relative overflow-hidden flex items-center justify-center border border-slate-200 min-h-[180px]">
-            {/* Heatmap Visual */}
-            <div className="absolute w-32 h-32 bg-red-500/30 rounded-full blur-2xl top-4 left-6"></div>
-            <div className="absolute w-24 h-24 bg-red-400/40 rounded-full blur-xl top-12 left-16"></div>
-            <div className="absolute w-40 h-40 bg-teal-500/20 rounded-full blur-2xl bottom-4 right-4"></div>
-            <div className="absolute w-20 h-20 bg-amber-500/30 rounded-full blur-xl top-10 right-10"></div>
-            
-            <div className="absolute z-10 flex flex-col items-center gap-1 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-slate-800">
-              <AlertTriangle className="w-6 h-6 text-amber-500 drop-shadow-sm" />
-              <span className="text-[10px] font-bold tracking-wider text-slate-700 bg-white/80 px-2 py-0.5 rounded shadow-xs">CRITICAL NODE</span>
-            </div>
-            
-            {/* Legend inside map view */}
-            <div className="absolute bottom-3 left-3 right-3 bg-white/90 backdrop-blur-sm p-2 rounded-lg border border-slate-200/80 shadow-xs">
-              <div className="flex justify-between text-[10px] text-slate-600 font-medium mb-1">
-                <span>Free Flow</span>
-                <span>Severe</span>
-              </div>
-              <div className="h-1.5 w-full rounded-full bg-gradient-to-r from-emerald-400 via-amber-400 to-red-500"></div>
+            {/* SN-012g/§13.10: this used to render fixed blur blobs and a
+                "CRITICAL NODE" label unconditionally — a specific claim with
+                no congestion data behind it. No real per-node congestion
+                heatmap source is wired to this page yet. */}
+            <div className="flex flex-col items-center gap-2 text-slate-400">
+              <AlertTriangle className="w-6 h-6" />
+              <span className="text-xs">No congestion data measured yet</span>
             </div>
           </div>
         </div>
