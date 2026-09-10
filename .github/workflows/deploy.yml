@@ -52,7 +52,14 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -euo pipefail
-            cd /opt/surakshanet
+            DEPLOY_DIR="${DEPLOY_PATH:-/opt/surakshanet}"
+            if [ ! -d "$DEPLOY_DIR" ]; then
+              echo "Deployment directory $DEPLOY_DIR not found. Creating and initializing repository..."
+              sudo mkdir -p "$DEPLOY_DIR"
+              sudo chown -R "$USER:$USER" "$DEPLOY_DIR"
+              git clone https://github.com/Alok-sharma-001/Surakshanet.git "$DEPLOY_DIR"
+            fi
+            cd "$DEPLOY_DIR"
 
             # Record previous commit for rollback capability
             PREV_COMMIT=$(git rev-parse HEAD || echo "")
