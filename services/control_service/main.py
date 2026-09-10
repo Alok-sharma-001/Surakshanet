@@ -113,6 +113,18 @@ class ControlService:
         self.is_running = True
         logger.info("Starting SurakshaNet Autonomous Control Service...")
 
+        # SN-037: control_service runs as its own process (not inside the backend's
+        # FastAPI app), so its Prometheus counters/histograms were being recorded
+        # in-process and never scraped — /metrics on :8000 only reflects the
+        # backend process's own registry. Expose this process's registry too.
+        metrics_port = int(os.environ.get("CONTROL_SERVICE_METRICS_PORT", "9108"))
+        try:
+            from prometheus_client import start_http_server
+            start_http_server(metrics_port)
+            logger.info(f"Control service metrics exposed at :{metrics_port}/metrics")
+        except OSError as e:
+            logger.warning(f"Could not bind metrics port {metrics_port} (already in use?): {e}")
+
         # Setup database
         db_url = os.environ.get("DATABASE_URL") or settings.DATABASE_URL
         if db_url and "@postgres:" in db_url:

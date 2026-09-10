@@ -7,6 +7,14 @@ scrape_configs:
       - targets: ['backend:8000']
     metrics_path: '/metrics'
 
+  # SN-037: control_service (services/control_service/main.py) runs as a bare host
+  # process started by start.sh, not inside this compose network, so it's reached
+  # via host.docker.internal (see prometheus service's extra_hosts).
+  - job_name: 'surakshanet-control-service'
+    static_configs:
+      - targets: ['host.docker.internal:9108']
+    metrics_path: '/metrics'
+
   - job_name: 'node-exporter'
     static_configs:
       - targets: ['node-exporter:9100']
