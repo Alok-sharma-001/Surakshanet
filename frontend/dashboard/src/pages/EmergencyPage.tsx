@@ -1,39 +1,42 @@
 import { useState, useEffect } from 'react';
-import { MapPin, Flag, ArrowUpDown, Clock, CheckCircle2, AlertTriangle, Radio, Activity } from 'lucide-react';
+import { MapPin, Flag, ArrowUpDown, CheckCircle2, AlertTriangle, Radio, Activity } from 'lucide-react';
 import { clsx } from 'clsx';
 import { toast } from 'react-hot-toast';
 import { api } from '../services/api';
 import { useTrafficStore } from '../store/trafficStore';
 import { wsService } from '../services/websocket';
+import { TelemetrySourceBadge } from '../components/TelemetrySourceBadge';
 
 type EmergencyType = 'AMBULANCE' | 'FIRE' | 'POLICE';
 
+// SN-012g: emergency_events carries only priority/vehicle_type/route/status/
+// started_at/ended_at (backend/app/models/alert.py::EmergencyEvent) — no GPS
+// speed, vehicle id, per-junction timestamps, ETA, or distance. The previous
+// version of this page invented all of those (a speed reset to a fixed value
+// every 2s, a scripted junction-status timer with hardcoded ETAs, a fake
+// vehicle id) to look like a live feed. Only `route` (the junction id list
+// returned by POST /emergency/activate) is real, so that's all this page
+// renders now — everything else stays an honest "not tracked" state instead.
 interface JunctionStatus {
   id: string;
   name: string;
-  status: 'CLEARED' | 'ACTIVE_GREEN' | 'PRE_EMPTING' | 'STANDARD';
-  time?: string;
-  eta?: string;
-  dist?: string;
 }
-
-const DEFAULT_ROUTE_JUNCTIONS: JunctionStatus[] = [
-  { id: 'DEL-CP-01', name: 'Connaught Place Outer Circle', status: 'ACTIVE_GREEN', eta: '45s', dist: '0.8km' },
-  { id: 'DEL-ITO-02', name: 'ITO Crossing - Vikas Marg', status: 'PRE_EMPTING', eta: '2m 10s', dist: '2.1km' },
-  { id: 'DEL-ASH-04', name: 'Ashram Chowk - Mathura Road', status: 'STANDARD', eta: '4m 30s', dist: '4.5km' },
-  { id: 'DEL-LAJ-06', name: 'Lajpat Nagar Ring Road', status: 'STANDARD', eta: '6m 15s', dist: '6.2km' },
-  { id: 'DEL-AIIMS-03', name: 'AIIMS Flyover - Ring Road', status: 'STANDARD', eta: '8m 40s', dist: '8.9km' },
-];
 
 export default function EmergencyPage() {
   const storeJunctions = useTrafficStore((state) => state.junctions);
   const [selectedType, setSelectedType] = useState<EmergencyType>('AMBULANCE');
   const [isActivated, setIsActivated] = useState(false);
   const [activeEventId, setActiveEventId] = useState<string | null>(null);
-  const [junctions, setJunctions] = useState<JunctionStatus[]>(DEFAULT_ROUTE_JUNCTIONS);
-  const [speed, setSpeed] = useState(68);
+  const [junctions, setJunctions] = useState<JunctionStatus[]>([]);
+  const [preemptedCount, setPreemptedCount] = useState<number | null>(null);
   const [origin, setOrigin] = useState("Connaught Place Outer Circle");
   const [destination, setDestination] = useState("AIIMS Flyover - Ring Road");
+
+  const routeToJunctions = (route: string[]): JunctionStatus[] =>
+    route.map(id => ({
+      id,
+      name: storeJunctions.find(j => j.id === id || j.name === id)?.name ?? id,
+    }));
 
   // Synchronize initial emergency state with backend on mount
   useEffect(() => {
@@ -42,6 +45,10 @@ export default function EmergencyPage() {
       if (Array.isArray(active) && active.length > 0) {
         setIsActivated(true);
         setActiveEventId(active[0].id);
+        if (Array.isArray(active[0].route)) {
+          setJunctions(routeToJunctions(active[0].route));
+          setPreemptedCount(active[0].route.length);
+        }
       }
     }).catch(() => {});
 
@@ -50,51 +57,22 @@ export default function EmergencyPage() {
       if (data && data.type === 'EMERGENCY_ACTIVATED') {
         setIsActivated(true);
         if (data.event_id) setActiveEventId(data.event_id);
+        if (Array.isArray(data.route)) {
+          setJunctions(routeToJunctions(data.route));
+        }
+        if (data.preempted_signals !== undefined) {
+          setPreemptedCount(data.preempted_signals);
+        }
       } else if (data && data.type === 'EMERGENCY_DEACTIVATED') {
         setIsActivated(false);
         setActiveEventId(null);
-        setJunctions(DEFAULT_ROUTE_JUNCTIONS);
+        setJunctions([]);
+        setPreemptedCount(null);
       }
     });
 
     return unsub;
   }, []);
-
-  // Speed and corridor progression
-  useEffect(() => {
-    if (!isActivated) return;
-
-    const speedInterval = setInterval(() => {
-      setSpeed(68);
-    }, 2000);
-
-    const progressionInterval = setInterval(() => {
-      setJunctions(prev => {
-        const next = [...prev];
-        const activeIdx = next.findIndex(j => j.status === 'ACTIVE_GREEN');
-        if (activeIdx !== -1) {
-          next[activeIdx] = {
-            ...next[activeIdx],
-            status: 'CLEARED',
-            time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
-          };
-
-          if (activeIdx + 1 < next.length) {
-            next[activeIdx + 1] = { ...next[activeIdx + 1], status: 'ACTIVE_GREEN', eta: '45s', dist: '0.8km' };
-          }
-          if (activeIdx + 2 < next.length) {
-            next[activeIdx + 2] = { ...next[activeIdx + 2], status: 'PRE_EMPTING', eta: '2m 10s', dist: '2.1km' };
-          }
-        }
-        return next;
-      });
-    }, 8000);
-
-    return () => {
-      clearInterval(speedInterval);
-      clearInterval(progressionInterval);
-    };
-  }, [isActivated]);
 
   const handleToggleCorridor = async () => {
     if (!isActivated) {
@@ -133,6 +111,8 @@ export default function EmergencyPage() {
       if (success) {
         setActiveEventId(eventId);
         setIsActivated(true);
+        setJunctions(routeToJunctions(corridorIds));
+        setPreemptedCount(corridorIds.length);
         toast.success("Green Wave Corridor Activated! SUMO signals pre-empted to Green.");
       } else {
         toast.error("Could not connect to backend server. Make sure containers are running.");
@@ -149,7 +129,8 @@ export default function EmergencyPage() {
       }
       setIsActivated(false);
       setActiveEventId(null);
-      setJunctions(DEFAULT_ROUTE_JUNCTIONS);
+      setJunctions([]);
+      setPreemptedCount(null);
       toast.success("Green Wave Corridor Deactivated. Signals restored to normal cycle.");
     }
   };
@@ -159,9 +140,6 @@ export default function EmergencyPage() {
     setOrigin(destination);
     setDestination(temp);
   };
-
-  const clearedCount = junctions.filter(j => j.status === 'CLEARED').length;
-  const totalCount = junctions.length;
 
   return (
     <div className="flex flex-col h-full space-y-6 p-6 animate-in fade-in duration-500">
@@ -243,25 +221,12 @@ export default function EmergencyPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 mt-6">
-              <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1 flex items-center gap-1">
-                  <Clock className="w-3 h-3" /> Std. Travel Time
-                </div>
-                <div className="text-lg font-mono font-medium text-slate-700">42:15</div>
-              </div>
-              <div className="bg-teal-50 rounded-lg p-3 border border-teal-100">
-                <div className="text-[10px] text-teal-600 font-bold uppercase tracking-wider mb-1 flex items-center gap-1">
-                  <Clock className="w-3 h-3" /> Green Corridor ETA
-                </div>
-                <div className="text-lg font-mono font-bold text-teal-700">16:30</div>
-              </div>
-            </div>
-
-            <div className="mt-3">
-              <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-teal-100 text-teal-700 uppercase tracking-wider inline-block">
-                -61% Transit Time Optimization
-              </span>
+            <div className="mt-4">
+              <TelemetrySourceBadge source={null} />
+              <p className="text-[11px] text-slate-400 mt-1.5">
+                Travel time and ETA are not computed by the backend yet — only
+                the corridor's junction list and activation status are real.
+              </p>
             </div>
           </div>
 
@@ -309,20 +274,18 @@ export default function EmergencyPage() {
 
           <div className="bg-slate-50/80 rounded-xl p-5 border border-slate-200/80 flex-1 flex flex-col justify-center space-y-4">
             <div className="flex justify-between items-center border-b border-slate-200/80 pb-3">
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Emergency Vehicle ID</span>
-              <span className="font-mono font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded border border-teal-200/60">AMB-DL-01-9421</span>
-            </div>
-            <div className="flex justify-between items-center border-b border-slate-200/80 pb-3">
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Current Velocity</span>
-              <span className="font-mono text-2xl font-bold text-emerald-600">{speed} km/h</span>
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Vehicle GPS Tracking</span>
+              <TelemetrySourceBadge source={null} showIcon={false} />
             </div>
             <div className="flex justify-between items-center border-b border-slate-200/80 pb-3">
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Preempted Intersections</span>
-              <span className="font-mono font-bold text-amber-700">{isActivated ? `${junctions.length} Signals Hold` : "None"}</span>
+              <span className="font-mono font-bold text-amber-700">
+                {isActivated && preemptedCount !== null ? `${preemptedCount} Signals Hold` : "None"}
+              </span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Route Distance</span>
-              <span className="font-mono font-bold text-slate-800">8.9 km</span>
+              <TelemetrySourceBadge source={null} showIcon={false} />
             </div>
           </div>
 
@@ -332,25 +295,29 @@ export default function EmergencyPage() {
           </div>
         </div>
 
-        {/* Right Column: Active Tracking Progression */}
+        {/* Right Column: Corridor junction list — real route from the activation
+            response. No per-junction live clearance status exists on the backend
+            (EmergencyEvent has no per-junction timestamps), so every entry in an
+            active corridor shows the same honest "Preemption requested" state
+            instead of a fabricated CLEARED/ACTIVE_GREEN/PRE_EMPTING timeline. */}
         <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-5 flex flex-col">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-sm font-semibold text-slate-800 uppercase tracking-wider">Signals Clearance</h3>
+            <h3 className="text-sm font-semibold text-slate-800 uppercase tracking-wider">Corridor Junctions</h3>
             <span className="text-xs font-mono font-bold text-teal-600">
-              {clearedCount} / {totalCount} Passed
+              {junctions.length} in route
             </span>
           </div>
 
           <div className="space-y-3 overflow-y-auto flex-1">
+            {junctions.length === 0 && (
+              <p className="text-xs text-slate-400 italic">No corridor active.</p>
+            )}
             {junctions.map((j) => (
               <div
                 key={j.id}
                 className={clsx(
                   "p-3 rounded-lg border transition-all flex items-center justify-between",
-                  j.status === 'CLEARED' && "bg-slate-50 border-slate-200 opacity-60",
-                  j.status === 'ACTIVE_GREEN' && "bg-teal-50 border-teal-300 ring-1 ring-teal-300",
-                  j.status === 'PRE_EMPTING' && "bg-amber-50 border-amber-300",
-                  j.status === 'STANDARD' && "bg-white border-slate-100"
+                  isActivated ? "bg-teal-50 border-teal-300" : "bg-white border-slate-100"
                 )}
               >
                 <div>
@@ -359,27 +326,11 @@ export default function EmergencyPage() {
                 </div>
 
                 <div className="text-right">
-                  {j.status === 'CLEARED' && (
-                    <span className="text-xs font-bold text-slate-500 flex items-center gap-1">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-slate-400" /> Cleared
+                  {isActivated && (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-teal-600 text-white uppercase flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3" /> Preemption Requested
                     </span>
                   )}
-                  {j.status === 'ACTIVE_GREEN' && (
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-teal-600 text-white uppercase animate-pulse">
-                      Active Green
-                    </span>
-                  )}
-                  {j.status === 'PRE_EMPTING' && (
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500 text-white uppercase">
-                      Pre-empting
-                    </span>
-                  )}
-                  {j.status === 'STANDARD' && (
-                    <span className="text-[11px] font-medium text-slate-400">
-                      Standby
-                    </span>
-                  )}
-                  {j.eta && <div className="text-[10px] font-mono text-slate-500 mt-0.5">ETA: {j.eta}</div>}
                 </div>
               </div>
             ))}

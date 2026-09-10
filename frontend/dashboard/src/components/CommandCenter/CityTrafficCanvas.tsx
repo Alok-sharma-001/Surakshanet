@@ -1,20 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 
+// SN-012g/§13.10: vehicles/speed/cycle and per-lane traffic% were previously
+// hardcoded here and rendered in IntersectionModal as if measured ("YOLOv8
+// Edge Tracking", "Radar Telemetry") — no camera, detector, or control
+// service feeds this component. Node id/name/position/lane ids stay as a
+// static illustrative layout for the canvas art; the numeric/status fields
+// that used to imply live measurement have been removed rather than badged,
+// since there is no real source to badge them with.
 export interface IntersectionData {
   id: string;
   name: string;
   x: number;
   y: number;
-  level: 'CRITICAL' | 'MODERATE' | 'SMOOTH';
-  vehicles: number;
-  speed: number;
-  cycle: number;
-  aiStatus: 'OPTIMIZING' | 'ACTIVE' | 'STANDBY';
-  lanes: {
-    id: string;
-    traffic: number;
-    signal: 'RED' | 'YELLOW' | 'GREEN';
-  }[];
+  lanes: { id: string }[];
 }
 
 export const INITIAL_INTERSECTIONS: IntersectionData[] = [
@@ -23,77 +21,35 @@ export const INITIAL_INTERSECTIONS: IntersectionData[] = [
     name: 'Intersection A-102 (Downtown Hub)',
     x: 350,
     y: 220,
-    level: 'CRITICAL',
-    vehicles: 1284,
-    speed: 18,
-    cycle: 120,
-    aiStatus: 'OPTIMIZING',
-    lanes: [
-      { id: 'Lane 01 (North)', traffic: 87, signal: 'RED' },
-      { id: 'Lane 02 (East)', traffic: 32, signal: 'GREEN' },
-      { id: 'Lane 03 (South)', traffic: 61, signal: 'YELLOW' },
-    ],
+    lanes: [{ id: 'Lane 01 (North)' }, { id: 'Lane 02 (East)' }, { id: 'Lane 03 (South)' }],
   },
   {
     id: 'B-007',
     name: 'Intersection 07 (Ring Road Expressway)',
     x: 680,
     y: 180,
-    level: 'MODERATE',
-    vehicles: 890,
-    speed: 34,
-    cycle: 90,
-    aiStatus: 'ACTIVE',
-    lanes: [
-      { id: 'Lane 01', traffic: 45, signal: 'GREEN' },
-      { id: 'Lane 02', traffic: 58, signal: 'GREEN' },
-      { id: 'Lane 03', traffic: 30, signal: 'RED' },
-    ],
+    lanes: [{ id: 'Lane 01' }, { id: 'Lane 02' }, { id: 'Lane 03' }],
   },
   {
     id: 'C-042',
     name: 'MG Boulevard - Cyber Junction',
     x: 480,
     y: 420,
-    level: 'SMOOTH',
-    vehicles: 620,
-    speed: 48,
-    cycle: 75,
-    aiStatus: 'ACTIVE',
-    lanes: [
-      { id: 'Lane 01', traffic: 22, signal: 'GREEN' },
-      { id: 'Lane 02', traffic: 28, signal: 'GREEN' },
-    ],
+    lanes: [{ id: 'Lane 01' }, { id: 'Lane 02' }],
   },
   {
     id: 'D-114',
     name: 'NH-52 Sarita Expressway Corridor',
     x: 820,
     y: 380,
-    level: 'CRITICAL',
-    vehicles: 1450,
-    speed: 14,
-    cycle: 135,
-    aiStatus: 'OPTIMIZING',
-    lanes: [
-      { id: 'Lane 01', traffic: 92, signal: 'RED' },
-      { id: 'Lane 02', traffic: 40, signal: 'GREEN' },
-    ],
+    lanes: [{ id: 'Lane 01' }, { id: 'Lane 02' }],
   },
   {
     id: 'E-019',
     name: 'Sector 4 Tech Corridor',
     x: 180,
     y: 360,
-    level: 'SMOOTH',
-    vehicles: 410,
-    speed: 52,
-    cycle: 60,
-    aiStatus: 'ACTIVE',
-    lanes: [
-      { id: 'Lane 01', traffic: 18, signal: 'GREEN' },
-      { id: 'Lane 02', traffic: 20, signal: 'GREEN' },
-    ],
+    lanes: [{ id: 'Lane 01' }, { id: 'Lane 02' }],
   },
 ];
 
@@ -244,9 +200,8 @@ export const CityTrafficCanvas: React.FC<Props> = ({
         const isSelected = node.id === selectedId;
         const isHovered = node.id === hoveredId;
 
-        let nodeColor = '#22C55E';
-        if (node.level === 'CRITICAL') nodeColor = isOptimized && node.id === 'A-102' ? '#22C55E' : '#E5584D';
-        else if (node.level === 'MODERATE') nodeColor = '#F59E0B';
+        // Static illustrative color — no per-node congestion measurement feeds this.
+        const nodeColor = '#5A4E4D';
 
         // Outer pulsing ring
         ctx.strokeStyle = nodeColor;
@@ -328,32 +283,28 @@ export const CityTrafficCanvas: React.FC<Props> = ({
         className="w-full h-full object-contain cursor-crosshair"
       />
 
-      {/* Map Legend Overlay in White Studio Glass */}
+      {/* Map Legend Overlay — this is a static illustrative network diagram,
+          not a live feed: no camera/detector/control-service data drives the
+          node or road colors below. Previously labeled "Live Network Grid"
+          with a false "150/150 ONLINE" node count. */}
       <div className="absolute top-4 left-4 bg-white/95 backdrop-blur-md rounded-2xl p-4 text-xs flex flex-col gap-2 pointer-events-none border border-studio-pink/40 shadow-sm">
-        <div className="flex items-center gap-2 font-mono text-studio-coral font-bold uppercase tracking-wider text-[10px]">
-          <span className="w-2 h-2 rounded-full bg-studio-coral animate-ping" />
-          Live Network Grid (City Scale)
+        <div className="flex items-center gap-2 font-mono text-studio-muted font-bold uppercase tracking-wider text-[10px]">
+          Illustrative Network Diagram
         </div>
         <div className="flex items-center gap-4 text-studio-text font-semibold pt-1">
           <div className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-full bg-studio-coral" />
-            <span>Heavy (Lane 1)</span>
+            <span>Heavy</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-            <span>Moderate (Lane 2)</span>
+            <span>Moderate</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-            <span>Smooth (Lane 3)</span>
+            <span>Smooth</span>
           </div>
         </div>
-      </div>
-
-      {/* Telemetry HUD corner */}
-      <div className="absolute bottom-4 right-4 bg-white/95 backdrop-blur-md px-4 py-2.5 rounded-xl text-xs font-mono text-studio-muted pointer-events-none border border-studio-pink/40 shadow-sm">
-        <div>COORDINATES: <span className="text-studio-coral font-bold">28.6139° N, 77.2090° E</span></div>
-        <div>CONNECTED NODES: <span className="text-emerald-700 font-bold">150/150 ONLINE</span></div>
       </div>
     </div>
   );

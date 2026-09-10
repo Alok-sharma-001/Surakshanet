@@ -17,25 +17,15 @@ import {
   Gauge
 } from 'lucide-react';
 
-const WAIT_TIME_TREND = [
-  { time: '08:00', beforeAI: 130, afterAI: 85 },
-  { time: '09:00', beforeAI: 168, afterAI: 92 },
-  { time: '10:00', beforeAI: 154, afterAI: 88 },
-  { time: '11:00', beforeAI: 120, afterAI: 72 },
-  { time: '12:00', beforeAI: 110, afterAI: 68 },
-  { time: '13:00', beforeAI: 125, afterAI: 74 },
-  { time: '14:00', beforeAI: 142, afterAI: 86 },
-];
-
-const HOURLY_THROUGHPUT = [
-  { hour: '08h', vehicles: 4200, capacity: 5000 },
-  { hour: '09h', vehicles: 5800, capacity: 5500 },
-  { hour: '10h', vehicles: 5100, capacity: 5500 },
-  { hour: '11h', vehicles: 3900, capacity: 5000 },
-  { hour: '12h', vehicles: 3400, capacity: 4800 },
-  { hour: '13h', vehicles: 4100, capacity: 5000 },
-  { hour: '14h', vehicles: 4950, capacity: 5200 },
-];
+// SN-012g: these two charts previously rendered hardcoded literal series
+// (WAIT_TIME_TREND, HOURLY_THROUGHPUT) captioned as a real Webster-vs-MARL
+// comparison and real hourly PCU throughput — the same fabrication pattern
+// the four KPI cards above were already fixed to avoid. Real Webster-vs-MARL
+// numbers exist in the `ab_runs` table (services/control_service/ab_runner.py)
+// but aren't fetched by this component yet, so both charts render empty
+// rather than inventing a curve.
+const WAIT_TIME_TREND: { time: string; beforeAI: number; afterAI: number }[] = [];
+const HOURLY_THROUGHPUT: { hour: string; vehicles: number; capacity: number }[] = [];
 
 export const AnalyticsDashboard: React.FC = () => {
   return (
@@ -125,7 +115,12 @@ export const AnalyticsDashboard: React.FC = () => {
             </div>
           </div>
 
-          <div className="h-72 w-full">
+          <div className="h-72 w-full relative">
+            {WAIT_TIME_TREND.length === 0 && (
+              <div className="absolute inset-0 flex items-center justify-center text-xs text-studio-muted font-mono z-10">
+                No comparison data yet
+              </div>
+            )}
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={WAIT_TIME_TREND} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
@@ -167,7 +162,12 @@ export const AnalyticsDashboard: React.FC = () => {
             </div>
           </div>
 
-          <div className="h-72 w-full">
+          <div className="h-72 w-full relative">
+            {HOURLY_THROUGHPUT.length === 0 && (
+              <div className="absolute inset-0 flex items-center justify-center text-xs text-studio-muted font-mono z-10">
+                No throughput data yet
+              </div>
+            )}
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={HOURLY_THROUGHPUT} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#F5DDD8" />

@@ -10,7 +10,12 @@ import {
 
 export interface IncidentItem {
   id: string;
-  type: 'ACCIDENT' | 'CONGESTION' | 'SLOW_TRAFFIC' | 'OBSTACLE';
+  // SN-012g/§13.10: 'ACCIDENT' was previously a real member of this union, and
+  // the seed data below used it. CLAUDE.md §8 documents that the (not yet
+  // built — Phase 6, SN-083) Incident model deliberately has no ACCIDENT
+  // value, "so the schema itself prevents the overclaim" a false positive
+  // would make. This frontend type stays consistent with that constraint.
+  type: 'POSSIBLE_INCIDENT' | 'CONGESTION' | 'SLOW_TRAFFIC' | 'OBSTACLE';
   severity: 'CRITICAL' | 'HIGH' | 'WARNING';
   title: string;
   location: string;
@@ -20,55 +25,14 @@ export interface IncidentItem {
   status: 'PENDING' | 'DISPATCHED' | 'RESOLVED';
 }
 
-const INITIAL_INCIDENTS: IncidentItem[] = [
-  {
-    id: 'INC-901',
-    type: 'ACCIDENT',
-    severity: 'CRITICAL',
-    title: 'ACCIDENT DETECTED',
-    location: 'NH-52 · Intersection 08 (Northbound)',
-    timestamp: 'Just now (14:42:10)',
-    confidence: 96.4,
-    action: 'Dispatch Ambulance & Activate Emergency Green Corridor on Links 4-8',
-    status: 'PENDING',
-  },
-  {
-    id: 'INC-884',
-    type: 'CONGESTION',
-    severity: 'HIGH',
-    title: 'HEAVY CONGESTION',
-    location: 'MG Road · Lane 03 (CBD Core)',
-    timestamp: '3m ago (14:39:15)',
-    confidence: 89.2,
-    action: 'Extend signal green phase by +18s and reroute to Sector 4 Bypass',
-    status: 'PENDING',
-  },
-  {
-    id: 'INC-872',
-    type: 'SLOW_TRAFFIC',
-    severity: 'WARNING',
-    title: 'SLOW TRAFFIC FLOW',
-    location: 'Ring Road · Sector 4 Flyover Underpass',
-    timestamp: '8m ago (14:34:02)',
-    confidence: 94.0,
-    action: 'Broadcast Variable Message Sign (VMS): "USE ALT ROUTE - BETA RING"',
-    status: 'DISPATCHED',
-  },
-  {
-    id: 'INC-850',
-    type: 'OBSTACLE',
-    severity: 'WARNING',
-    title: 'STALLED VEHICLE DETECTED',
-    location: 'Sarita Vihar Crossing · Lane 01',
-    timestamp: '15m ago (14:27:50)',
-    confidence: 98.1,
-    action: 'Traffic police patrol dispatched; Lane clearance advisory active',
-    status: 'RESOLVED',
-  },
-];
-
+// SN-012g: this component previously seeded four hardcoded incidents —
+// including one typed ACCIDENT with a fabricated confidence score and a
+// scripted "Dispatch Ambulance" action — rendered permanently as if live,
+// with no WS/API call anywhere in this file. Phase 6 (Incident System,
+// SN-083+) hasn't been built yet: there is no detector and no data model.
+// Starts empty; wire this to a real incidents feed once one exists.
 export const LiveIncidents: React.FC = () => {
-  const [incidents, setIncidents] = useState<IncidentItem[]>(INITIAL_INCIDENTS);
+  const [incidents, setIncidents] = useState<IncidentItem[]>([]);
   const [filter, setFilter] = useState<'ALL' | 'CRITICAL' | 'HIGH' | 'WARNING'>('ALL');
 
   const handleAction = (id: string) => {
@@ -117,6 +81,11 @@ export const LiveIncidents: React.FC = () => {
       </div>
 
       {/* Incidents Cards Grid */}
+      {filtered.length === 0 && (
+        <div className="my-6 py-8 text-center text-sm text-studio-muted font-grotesk">
+          No incident detection system connected yet.
+        </div>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-6 font-grotesk">
         {filtered.map((item) => {
           const isCritical = item.severity === 'CRITICAL';

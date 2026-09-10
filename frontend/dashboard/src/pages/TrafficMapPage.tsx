@@ -4,16 +4,32 @@ import { Car, Gauge, Activity, ArrowRightLeft, AlertTriangle, Search, Zap, Siren
 import clsx from 'clsx';
 import { useTrafficStore } from '../store/trafficStore';
 import { wsService } from '../services/websocket';
+import { TelemetrySourceBadge } from '../components/TelemetrySourceBadge';
 
-// Fallback Default Junctions for Delhi
+// Junction positions only (map pins need coordinates before any telemetry
+// arrives). pcu/speed/queue/status are intentionally absent here — a pin
+// renders no numbers until real WS telemetry supplies them (SN-012g).
 const DEFAULT_JUNCTIONS = [
-  { id: 'DEL-CP-01', name: 'Connaught Place Outer Circle', lat: 28.6315, lng: 77.2167, status: 'normal', isMarl: true, pcu: 342, speed: 31.5, queue: 14 },
-  { id: 'DEL-ITO-02', name: 'ITO Crossing - Vikas Marg', lat: 28.6295, lng: 77.2415, status: 'congested', isMarl: false, pcu: 512, speed: 16.2, queue: 68 },
-  { id: 'DEL-AIIMS-03', name: 'AIIMS Flyover - Ring Road', lat: 28.5672, lng: 77.2100, status: 'normal', isMarl: true, pcu: 289, speed: 36.8, queue: 11 },
-  { id: 'DEL-DHK-05', name: 'Dhaula Kuan Interchange', lat: 28.5918, lng: 77.1615, status: 'normal', isMarl: true, pcu: 198, speed: 44.1, queue: 6 },
-  { id: 'DEL-ASH-04', name: 'Ashram Chowk - Mathura Road', lat: 28.5714, lng: 77.2588, status: 'congested', isMarl: true, pcu: 645, speed: 11.4, queue: 95 },
-  { id: 'DEL-ISBT-07', name: 'Kashmere Gate ISBT', lat: 28.6665, lng: 77.2285, status: 'normal', isMarl: true, pcu: 267, speed: 33.2, queue: 18 },
+  { id: 'DEL-CP-01', name: 'Connaught Place Outer Circle', lat: 28.6315, lng: 77.2167 },
+  { id: 'DEL-ITO-02', name: 'ITO Crossing - Vikas Marg', lat: 28.6295, lng: 77.2415 },
+  { id: 'DEL-AIIMS-03', name: 'AIIMS Flyover - Ring Road', lat: 28.5672, lng: 77.2100 },
+  { id: 'DEL-DHK-05', name: 'Dhaula Kuan Interchange', lat: 28.5918, lng: 77.1615 },
+  { id: 'DEL-ASH-04', name: 'Ashram Chowk - Mathura Road', lat: 28.5714, lng: 77.2588 },
+  { id: 'DEL-ISBT-07', name: 'Kashmere Gate ISBT', lat: 28.6665, lng: 77.2285 },
 ];
+
+interface JunctionPin {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  status: 'normal' | 'congested' | null;
+  isMarl: boolean;
+  pcu: number | null;
+  speed: number | null;
+  queue: number | null;
+  source: string | null;
+}
 
 interface FeedEvent {
   id: string;
@@ -31,17 +47,23 @@ export default function TrafficMapPage() {
   const [time, setTime] = useState(new Date());
   const [isPlaying, setIsPlaying] = useState(true);
 
-  // Live Dynamic Stream State (Synchronized with SUMO / Micro-Sim)
-  const [totalVehicles, setTotalVehicles] = useState(1248);
-  const [avgSpeed, setAvgSpeed] = useState(31.8);
-  const [throughput, setThroughput] = useState(1185);
-  const [networkLos, setNetworkLos] = useState('C Fair Flow');
-  const [activeAlerts, setActiveAlerts] = useState(2);
+  // Live Dynamic Stream State (Synchronized with SUMO / Micro-Sim). Starts
+  // null/unavailable — SN-012g: no numeric panel renders a value it hasn't
+  // actually received from the backend.
+  const [totalVehicles, setTotalVehicles] = useState<number | null>(null);
+  const [avgSpeed, setAvgSpeed] = useState<number | null>(null);
+  const [throughput, setThroughput] = useState<number | null>(null);
+  const [networkLos, setNetworkLos] = useState<string | null>(null);
+  const [activeAlerts, setActiveAlerts] = useState<number | null>(null);
+  const [ribbonSource, setRibbonSource] = useState<string | null>(null);
   const [isTwinConnected, setIsTwinConnected] = useState(false);
   const [lastStepReceived, setLastStepReceived] = useState<number | null>(null);
 
-  // Junction-level live telemetry
-  const [junctionsData, setJunctionsData] = useState(DEFAULT_JUNCTIONS);
+  // Junction-level live telemetry — pcu/speed/queue/status/source stay null
+  // until a WS message actually supplies them for that pin.
+  const [junctionsData, setJunctionsData] = useState<JunctionPin[]>(
+    DEFAULT_JUNCTIONS.map(j => ({ ...j, status: null, isMarl: false, pcu: null, speed: null, queue: null, source: null }))
+  );
 
   // Live telemetry event feed, filled from the WebSocket channel below. It was
   // previously seeded with four invented events carrying relative timestamps
@@ -49,13 +71,21 @@ export default function TrafficMapPage() {
   // phase optimisation that no controller performed.
   const [feedEvents, setFeedEvents] = useState<FeedEvent[]>([]);
 
-  // Connect to live WebSockets from backend
+  // Connect to live WebSockets from backend. This ribbon reads the aggregate
+  // SIMULATION_TICK shape (total_vehicles, junctions: [...], etc.) that
+  // sumo_live_bridge.py publishes on REDIS_CHANNELS["simulation"] — it was
+  // previously subscribed to 'traffic', which only ever carries a single
+  // per-junction JunctionTelemetry object (no total_vehicles/junctions[]
+  // array field), so none of these handlers were firing on real data before.
   useEffect(() => {
-    wsService.connect('traffic');
+    wsService.connect('simulation');
     wsService.connect('signals');
 
-    const unsubscribeTraffic = wsService.onMessage('traffic', (data: any) => {
+    const unsubscribeTraffic = wsService.onMessage('simulation', (data: any) => {
       setIsTwinConnected(true);
+      if (data.source !== undefined) {
+        setRibbonSource(data.source);
+      }
       if (data.step !== undefined) {
         setLastStepReceived(data.step);
       }
@@ -86,6 +116,7 @@ export default function TrafficMapPage() {
               queue: sumoJ.queue,
               speed: sumoJ.speed,
               pcu: sumoJ.pcu,
+              source: data.source ?? null,
               status: sumoJ.is_congested ? 'congested' : 'normal',
             };
           })
@@ -139,8 +170,10 @@ export default function TrafficMapPage() {
     return () => clearInterval(timer);
   }, [isPlaying, isTwinConnected]);
 
-  // Merge store junctions with dynamic state
-  const baseJunctions = storeJunctions && storeJunctions.length > 0
+  // Merge store junctions (real names/coords from the DB) with whatever live
+  // telemetry has actually arrived over WS. No fabricated numeric fallback —
+  // a junction with no live match renders with status/pcu/speed/queue = null.
+  const baseJunctions: JunctionPin[] = storeJunctions && storeJunctions.length > 0
     ? storeJunctions.map((j, idx) => {
         const live = junctionsData[idx % junctionsData.length];
         return {
@@ -148,11 +181,12 @@ export default function TrafficMapPage() {
           name: j.name,
           lat: j.latitude,
           lng: j.longitude,
-          status: live ? live.status : (idx % 3 === 0 ? 'congested' : 'normal'),
-          isMarl: idx % 2 === 0,
-          pcu: live ? live.pcu : 320,
-          speed: live ? live.speed : 28.5,
-          queue: live ? live.queue : 18
+          status: live?.status ?? null,
+          isMarl: live?.isMarl ?? false,
+          pcu: live?.pcu ?? null,
+          speed: live?.speed ?? null,
+          queue: live?.queue ?? null,
+          source: live?.source ?? null,
         };
       })
     : junctionsData;
@@ -162,8 +196,9 @@ export default function TrafficMapPage() {
     j.id.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const getMarkerColor = (status: string, isMarl: boolean) => {
+  const getMarkerColor = (status: string | null, isMarl: boolean) => {
     if (status === 'congested') return '#EF4444'; // Red-500
+    if (status === null) return '#94A3B8'; // Slate-400 — no live status yet
     if (isMarl) return '#0D9488'; // Teal-600
     return '#10B981'; // Emerald-500
   };
@@ -202,27 +237,32 @@ export default function TrafficMapPage() {
                   <div className="mt-3 grid grid-cols-3 gap-1.5 text-center font-mono text-xs">
                     <div className="bg-slate-50 p-1.5 rounded border border-slate-100">
                       <div className="text-[9px] text-slate-400">FLOW</div>
-                      <div className="font-bold text-slate-800">{j.pcu}</div>
+                      <div className="font-bold text-slate-800">{j.pcu ?? '—'}</div>
                     </div>
                     <div className="bg-slate-50 p-1.5 rounded border border-slate-100">
                       <div className="text-[9px] text-slate-400">SPEED</div>
-                      <div className="font-bold text-teal-600">{j.speed}k</div>
+                      <div className="font-bold text-teal-600">{j.speed !== null ? `${j.speed}k` : '—'}</div>
                     </div>
                     <div className="bg-slate-50 p-1.5 rounded border border-slate-100">
                       <div className="text-[9px] text-slate-400">QUEUE</div>
-                      <div className={clsx("font-bold", j.queue > 40 ? "text-red-600" : "text-emerald-600")}>
-                        {j.queue}m
+                      <div className={clsx("font-bold", (j.queue ?? 0) > 40 ? "text-red-600" : "text-emerald-600")}>
+                        {j.queue !== null ? `${j.queue}m` : '—'}
                       </div>
                     </div>
                   </div>
 
                   <div className="mt-2.5 flex items-center justify-between pt-2 border-t border-slate-100">
-                    <span className={clsx(
-                      "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase",
-                      j.status === 'congested' ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"
-                    )}>
-                      {j.status}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      {j.status && (
+                        <span className={clsx(
+                          "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase",
+                          j.status === 'congested' ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"
+                        )}>
+                          {j.status}
+                        </span>
+                      )}
+                      <TelemetrySourceBadge source={j.source} showIcon={false} />
+                    </div>
                     {j.isMarl && (
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-teal-100 text-teal-700 flex items-center gap-1">
                         <span className="w-1.5 h-1.5 rounded-full bg-teal-600 animate-pulse" />
@@ -258,12 +298,12 @@ export default function TrafficMapPage() {
           </div>
         </div>
 
-        {/* Dynamic Metric Cards */}
+        {/* Dynamic Metric Cards — SN-012g: no fabricated value or trend, "—" until real data arrives */}
         {[
-          { label: 'Active Vehicles', value: totalVehicles.toLocaleString(), trend: '+2.4%', trendColor: 'text-emerald-500', icon: Car },
-          { label: 'Corridor Speed', value: `${avgSpeed} km/h`, icon: Gauge },
-          { label: 'Network LOS', value: networkLos, icon: Activity },
-          { label: 'Throughput', value: `${throughput.toLocaleString()} PCU/h`, icon: ArrowRightLeft },
+          { label: 'Active Vehicles', value: totalVehicles !== null ? totalVehicles.toLocaleString() : '—', icon: Car },
+          { label: 'Corridor Speed', value: avgSpeed !== null ? `${avgSpeed} km/h` : '—', icon: Gauge },
+          { label: 'Network LOS', value: networkLos ?? '—', icon: Activity },
+          { label: 'Throughput', value: throughput !== null ? `${throughput.toLocaleString()} PCU/h` : '—', icon: ArrowRightLeft },
         ].map((metric, i) => (
           <div key={i} className="bg-white/95 backdrop-blur-md rounded-xl border border-white/80 shadow-xl px-4 py-3 flex items-center space-x-3 transition-all">
             <metric.icon className="w-5 h-5 text-slate-400" />
@@ -271,17 +311,18 @@ export default function TrafficMapPage() {
               <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">{metric.label}</div>
               <div className="font-mono font-bold text-slate-900 text-sm flex items-center space-x-2">
                 <span className="tabular-nums">{metric.value}</span>
-                {metric.trend && <span className={`text-xs ${metric.trendColor}`}>{metric.trend}</span>}
               </div>
             </div>
           </div>
         ))}
 
+        <TelemetrySourceBadge source={ribbonSource} />
+
         <div className="bg-red-500/95 backdrop-blur-md rounded-xl border border-red-400 shadow-xl px-4 py-3 flex items-center space-x-3 text-white">
           <AlertTriangle className="w-5 h-5" />
           <div>
             <div className="text-[10px] font-semibold text-red-100 uppercase tracking-wider">Active Alerts</div>
-            <div className="font-mono font-bold text-white text-sm">{activeAlerts} Critical</div>
+            <div className="font-mono font-bold text-white text-sm">{activeAlerts !== null ? `${activeAlerts} Critical` : '—'}</div>
           </div>
         </div>
       </div>

@@ -4,6 +4,7 @@ import { toast } from 'react-hot-toast';
 import clsx from 'clsx';
 import { api } from '../services/api';
 import { useTrafficStore } from '../store/trafficStore';
+import { TelemetrySourceBadge } from '../components/TelemetrySourceBadge';
 
 interface BroadcastItem {
   id: string;
@@ -53,14 +54,11 @@ export default function RoutingPage() {
       setRouteResult(res.data);
       toast.success("Optimal corridor path calculated via A*");
     } catch (err) {
-      // Fallback response if coordinates are out of network
-      setRouteResult({
-        path: ["DEL-CP-01", "DEL-ITO-02", "DEL-ASH-04"],
-        distance: 8.9,
-        duration: 12.4,
-        congestion_level: "MODERATE"
-      });
-      toast.success("Corridor route calculated");
+      // SN-012g/§13.10: no fabricated route on failure — the previous version
+      // synthesised a fake path/distance/duration here and still reported
+      // success. Report the real failure instead.
+      setRouteResult(null);
+      toast.error("Could not calculate a route between these nodes.");
     } finally {
       setIsCalculating(false);
     }
@@ -93,17 +91,10 @@ export default function RoutingPage() {
       setBroadcasts([newBroadcast, ...broadcasts]);
       toast.success("VMS Message successfully broadcasted to LED Gantries!");
     } catch (err: any) {
-      const newBroadcast: BroadcastItem = {
-        id: `vms-${Date.now().toString().slice(-4)}`,
-        panel_cluster: cluster,
-        line1: line1.toUpperCase(),
-        line2: line2.toUpperCase(),
-        priority: priority,
-        status: "ACTIVE",
-        time: "Just now"
-      };
-      setBroadcasts([newBroadcast, ...broadcasts]);
-      toast.success("VMS Broadcasted to active panels");
+      // SN-012g/§13.10: a failed broadcast is not a successful one — the
+      // previous version added the same "ACTIVE" entry and success toast
+      // here as on the real success path above.
+      toast.error("Could not broadcast to LED gantries. Check backend connectivity.");
     }
   };
 
@@ -176,19 +167,28 @@ export default function RoutingPage() {
             <div className="bg-white rounded-xl border border-teal-200 bg-teal-50/20 shadow-sm p-4 space-y-3 animate-in fade-in duration-300">
               <div className="flex justify-between items-center">
                 <span className="text-xs font-bold text-teal-800 uppercase tracking-wider">A* Recommended Path</span>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">
-                  {routeResult.congestion_level || "OPTIMAL FLOW"}
-                </span>
+                <div className="flex items-center gap-1.5">
+                  {routeResult.congestion_level && (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">
+                      {routeResult.congestion_level}
+                    </span>
+                  )}
+                  <TelemetrySourceBadge source="heuristic" showIcon={false} />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div className="p-2 bg-white rounded-lg border border-slate-100">
                   <span className="text-slate-400 block text-[10px]">Distance</span>
-                  <span className="font-bold text-slate-800 font-mono text-base">{routeResult.distance || 8.9} km</span>
+                  <span className="font-bold text-slate-800 font-mono text-base">
+                    {routeResult.distance !== undefined ? `${routeResult.distance} km` : '—'}
+                  </span>
                 </div>
                 <div className="p-2 bg-white rounded-lg border border-slate-100">
                   <span className="text-slate-400 block text-[10px]">Estimated Duration</span>
-                  <span className="font-bold text-teal-700 font-mono text-base">{routeResult.duration || 12.4} mins</span>
+                  <span className="font-bold text-teal-700 font-mono text-base">
+                    {routeResult.duration !== undefined ? `${routeResult.duration} mins` : '—'}
+                  </span>
                 </div>
               </div>
 
