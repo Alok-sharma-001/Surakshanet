@@ -136,10 +136,29 @@ class MQTTTelemetryConsumer:
             else:
                 sensor_id = uuid.uuid5(junction_id, "north_sensor")
 
-            pcu = float(data.get("pcu_value", data.get("north_pcu", data.get("pcu", 28.0))))
-            speed = float(data.get("avg_speed", data.get("speed", 32.0)))
-            queue = float(data.get("queue_length", data.get("queue", 8.0)))
-            v_count = float(data.get("vehicle_count", data.get("total_vehicles", 22.0)))
+            # A field a device did not report is unknown, not a typical value.
+            # These previously defaulted to 28.0 pcu / 32.0 km-h / 8.0 queue /
+            # 22 vehicles, so a malformed or partial message was persisted as a
+            # plausible-looking reading. vehicle_count and pcu_value are NOT
+            # NULL, so a message missing either is rejected; avg_speed and
+            # queue_length are nullable and stay null when unreported.
+            def _optional(*keys):
+                for k in keys:
+                    if data.get(k) is not None:
+                        return float(data[k])
+                return None
+
+            pcu = _optional("pcu_value", "north_pcu", "pcu")
+            v_count = _optional("vehicle_count", "total_vehicles")
+            if pcu is None or v_count is None:
+                logger.warning(
+                    "Discarding telemetry for %s: missing pcu_value or "
+                    "vehicle_count, which are not nullable", junction_id
+                )
+                return
+
+            speed = _optional("avg_speed", "speed")
+            queue = _optional("queue_length", "queue")
 
             # SN-008: provenance must be a DataSource member. A message arriving
             # on the MQTT ingest path is 'mqtt' unless the payload declares a

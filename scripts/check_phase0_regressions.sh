@@ -101,6 +101,22 @@ check "no fabricated telemetry in the MQTT consumer" \
 check "no legacy source vocabulary in the backend" \
   bash -c "grep -rn \"'live'\|\\\"live\\\"\|'mock'\|\\\"mock\\\"\" backend/app/services/mqtt_consumer.py backend/app/schemas/traffic.py backend/app/models/traffic.py"
 
+# The vision worker derived avg_speed from PCU with a random jitter — the same
+# formula as the deleted MQTT ticker — and published it under source "vision".
+# A detector measures counts, not speed.
+check "no derived speed in the vision worker" \
+  grep -n "np.random\|avg_speed.*pcu\|52\.0 -" ml/vision/rtsp_stream_worker.py
+
+# Unreported fields must persist as null, never as a plausible-looking default.
+check "no invented defaults on the ingest path" \
+  bash -c 'grep -n "data.get(.*, *[0-9]" backend/app/services/mqtt_consumer.py | grep -v "^[0-9]*: *#"' 
+
+# SN-004's five hardcoded boxes at 88-96% confidence also lived server-side in
+# VehicleDetector._simulated_detections, returned whenever ultralytics was
+# missing or inference raised. Absence of a detection is reported, not filled in.
+check "no synthesised detections in the detector" \
+  bash -c 'grep -n "_simulated_detections\|0\.94\|0\.96\|0\.88\|0\.91" ml/vision/vehicle_detector.py'
+
 # A missing or unrecognised source must render UNAVAILABLE. Defaulting it to a
 # measured badge asserts the strongest claim on the weakest evidence.
 check "SN-009 provenance badge does not default to a measured source" \

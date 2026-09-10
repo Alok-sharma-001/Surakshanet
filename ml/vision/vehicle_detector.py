@@ -4,7 +4,12 @@ import numpy as np
 from typing import Dict, List, Optional
 import io
 
+from shared.exceptions import VisionUnavailable
+
 logger = logging.getLogger(__name__)
+
+# Re-exported so callers importing the detector can catch it from here too.
+__all__ = ["VehicleDetector", "VisionUnavailable"]
 
 try:
     from shared.constants import PCU_FACTORS
@@ -53,14 +58,24 @@ class VehicleDetector:
             else:
                 logger.warning(f"YOLO weights file {self.model_path} not found locally. Running in fallback mode.")
         except ImportError:
-            logger.warning("ultralytics not installed. VehicleDetector running in simulated mode.")
+            logger.warning(
+                "ultralytics not installed. Vehicle detection is UNAVAILABLE on this "
+                "worker; it does not fall back to synthesised detections."
+            )
         except Exception as e:
-            logger.warning(f"Failed to load YOLO model ({e}). Running in fallback mode.")
+            logger.warning(
+                f"Failed to load YOLO model ({e}). Vehicle detection is UNAVAILABLE; "
+                "there is no fallback detection mode."
+            )
             
     def detect_vehicles(self, frame: np.ndarray) -> List[Dict]:
         """Runs YOLOv8 inference on an OpenCV / NumPy image frame."""
         if not self.model_loaded or self.model is None:
-            return self._simulated_detections(frame)
+            raise VisionUnavailable(
+                "YOLO weights are not loaded; vehicle detection is unavailable. "
+                "Install ultralytics and provide weights, or treat this junction "
+                "as having no camera."
+            )
             
         try:
             results = self.model(frame, conf=self.confidence_threshold)[0]
@@ -89,21 +104,8 @@ class VehicleDetector:
             return detections
         except Exception as e:
             logger.error(f"Inference error: {e}")
-            return self._simulated_detections(frame)
+            raise VisionUnavailable(f"YOLO inference failed: {e}") from e
             
-    def _simulated_detections(self, frame: Optional[np.ndarray]) -> List[Dict]:
-        """Realistic fallback detections when model weights or GPU are unavailable."""
-        h = frame.shape[0] if frame is not None and hasattr(frame, 'shape') else 720
-        w = frame.shape[1] if frame is not None and hasattr(frame, 'shape') else 1280
-        
-        return [
-            {"bbox": [w * 0.15, h * 0.50, w * 0.35, h * 0.85], "class_name": "car", "confidence": 0.94},
-            {"bbox": [w * 0.40, h * 0.45, w * 0.52, h * 0.70], "class_name": "auto_rickshaw", "confidence": 0.88},
-            {"bbox": [w * 0.55, h * 0.55, w * 0.65, h * 0.80], "class_name": "motorcycle", "confidence": 0.91},
-            {"bbox": [w * 0.68, h * 0.35, w * 0.92, h * 0.88], "class_name": "bus", "confidence": 0.96},
-            {"bbox": [w * 0.30, h * 0.35, w * 0.45, h * 0.60], "class_name": "car", "confidence": 0.89},
-        ]
-        
     def detect_from_bytes(self, image_bytes: bytes) -> Dict:
         """Decode image bytes and run complete vehicle analysis."""
         frame = None

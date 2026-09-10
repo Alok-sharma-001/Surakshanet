@@ -6,15 +6,16 @@
 **Priority:** `P0` blocks the demo · `P1` required for the target score · `P2` valuable · `P3` optional
 **Rule:** a task is `DONE` only when all ten Definition-of-Done conditions in [23-final-acceptance.md §1](23-final-acceptance.md) hold.
 
-**Progress:** 16 / 154 DONE — **10%** *(Phase 0 complete, including the four gaps found when the SN-140 greps were first actually run; baseline at audit time was 42% overall project completion)*
+**Progress:** 17 / 157 DONE — **11%** *(Phase 0 complete, including the four gaps found when the SN-140 greps were first actually run; baseline at audit time was 42% overall project completion)*
 
 | Phase | Tasks | Done |
 |---|---|---|
-| 0 Cleanup | SN-001 … SN-012d | 16/16 |
+| 0 Cleanup | SN-001 … SN-012e | 17/17 |
 | 1 Infrastructure | SN-013 … SN-022 | 0/10 |
-| 2 Real AI control | SN-023 … SN-038 | 0/16 |
+| 2 Real AI control | SN-012f, SN-023 … SN-038 | 0/17 |
 | 3 Emergency corridor | SN-039 … SN-050 | 0/12 |
 | 4 Event + citizen | SN-051 … SN-068 | 0/18 |
+| — Frontend follow-up | SN-012g | 0/1 |
 | 5 Computer vision | SN-069 … SN-082 | 0/14 |
 | 6 Incident system | SN-083 … SN-096 | 0/14 |
 | 7 Governance | SN-097 … SN-110 | 0/14 |
@@ -153,6 +154,30 @@
 **Files** `scripts/check_phase0_regressions.sh`, `Makefile`, `.github/workflows/ci.yml`
 **API** none · **DB** none · **UI** none
 **Tests** is a test · **Acceptance** The job fails the build on any reintroduced fabrication · **Demo** none
+
+### SN-012e · Stop the vision pipeline fabricating measurements
+**Component** Computer vision · **Priority** **P0** · **Depends** SN-012a · **Status** `DONE`
+**Description** Found by sweeping for the SN-012a defect class rather than for named files. Three fabrications sat in the vision path, all published under `source: "vision"` — the measured family. (1) `rtsp_stream_worker.py:149` derived `avg_speed` as `52.0 - (pcu * 0.35) + np.random.uniform(-2, 2)`, the same formula and jitter as the SN-012a ticker; a detector on a single frame has no displacement and cannot measure speed. `queue_length` was derived the same way. (2) `vehicle_detector._simulated_detections` returned five hardcoded boxes at 0.88–0.96 confidence whenever ultralytics was absent *or inference raised* — SN-004's exact defect, server-side, where the frontend fix could not reach it. (3) The synthetic frame generator fed those detections onto the live MQTT telemetry topic, so nothing downstream could distinguish a generated frame from a camera. The ingest path compounded all three by defaulting unreported fields to 28.0 PCU / 32.0 km-h / 8.0 queue / 22 vehicles.
+**Implementation** `VisionUnavailable` moves to `shared/exceptions.py` so the API can catch it without importing the model modules and defeating the lazy loading. The detector raises it instead of synthesising; `POST /ml/detect` maps it to `503 {"status":"vision_unavailable"}`; `_DummyDetector` becomes `_UnavailableDetector` and raises rather than returning zeros, which would claim the camera saw an empty road. The worker reports `avg_speed: None` and `queue_length: None`, declares `source: "vision"` explicitly, and publishes nothing while no camera is connected. Ingest persists unreported nullable fields as null and discards messages missing the NOT NULL `pcu_value` or `vehicle_count`.
+**Files** `ml/vision/vehicle_detector.py`, `ml/vision/rtsp_stream_worker.py`, `backend/app/api/ml.py`, `backend/app/services/mqtt_consumer.py`, `shared/exceptions.py`, `backend/tests/test_rtsp_worker.py`
+**API** `POST /ml/detect` returns 503 when no weights are loaded · **DB** speed and queue are null on vision-sourced rows · **UI** vision panels show the unavailable state
+**Tests** `test_rtsp_worker_refuses_to_fabricate_without_a_model`, SN-140 guard · **Acceptance** With ultralytics absent, no code path emits a detection, a confidence or a speed · **Demo** D
+
+### SN-012f · Rebuild MARL training against SUMO
+**Component** MARL · **Priority** P0 · **Depends** SN-013, SN-014, SN-015 · **Status** `NOT_STARTED`
+**Description** `ml/marl/train_marl.py:60` draws its state from `np.random.uniform(5, 40, size=8)` and its transitions from `np.random.normal`. There is no SUMO anywhere in the loop, so the weights in `ml/marl/weights/*.pth` were fitted to a random number generator rather than to traffic. SN-001 removed the fabricated training *metrics*; the trainer underneath them is itself fabricated, which is the more serious half. Two aggravators: the loop is `for ep in range(150)` while the `episodes` argument is written into `hparams.json` as whatever the caller passed, so the recorded hyperparameters do not describe the run — the same defect SN-001 fixed at the API layer, still present at the source; and the agent is hardcoded to `junction_id="DEL-CP-01"`.
+**Implementation** Replace the synthetic rollout with a real `SumoEnvironment` episode loop reading the SN-015 lane-area detectors, seeded per SN-014. Honour the `episodes` argument. Take the junction from configuration. Until this lands, no claim about DQN performance is defensible and the Phase 2 A/B study (SN-034) would be measuring a policy trained on noise.
+**Files** `ml/marl/train_marl.py`, `simulation/sumo_env.py`
+**API** `/ml/train/*` reports a real run · **DB** `ab_runs` · **UI** training panel
+**Tests** SN-125 · **Acceptance** A training run consumes SUMO detector output; two runs at the same seed match; `hparams.json` describes the run that happened · **Demo** B, judge Q&A
+
+### SN-012g · Extend provenance badges to every numeric panel
+**Component** Frontend · **Priority** P1 · **Depends** SN-012b · **Status** `NOT_STARTED`
+**Description** SN-009 is marked `DONE` on the strength of the badge component existing, but `TelemetrySourceBadge` has exactly one consumer, `ForecastingPage.tsx:82`. Its stated acceptance — "no number renders without a source" — is therefore unmet across the rest of the dashboard, which is the condition rule R3 exists to prevent.
+**Implementation** Thread `source` through the stores and render the badge on every numeric panel: command centre tiles, traffic map, signal control, simulation, emergency and routing. A panel whose payload carries no `source` renders the unavailable state rather than the number.
+**Files** `frontend/dashboard/src/pages/*`, `frontend/dashboard/src/components/CommandCenter/*`, `frontend/dashboard/src/store/*`
+**API** consumes the `source` field added by SN-008 · **DB** none · **UI** badge on every numeric panel
+**Tests** SN-121 · **Acceptance** A reviewer finds no rendered number without a provenance badge · **Demo** all
 
 ---
 
@@ -1141,3 +1166,4 @@
 | — | — | 0% | Baseline at audit commit `84f8f6c` |
 | 2026-09-10 | SN-001 … SN-012 | 8% | Phase 0 committed to `phase0/complete` off `main` |
 | 2026-09-10 | SN-012a … SN-012d | 10% | Gaps found on first real run of the §3 greps; guard now blocking in CI |
+| 2026-09-10 | SN-012e | 11% | Vision pipeline fabrication removed; SN-012f and SN-012g logged as open |

@@ -12,6 +12,7 @@ import pandas as pd
 from app.database import get_db
 from app.models.traffic import TrafficReading
 from app.models.junction import Junction
+from shared.exceptions import VisionUnavailable
 from app.schemas.ml import (
     DetectionResult,
     PredictionResponse,
@@ -42,12 +43,20 @@ def get_vehicle_detector():
         except Exception as e:
             logger.warning(f"Could not initialize VehicleDetector: {e}")
 
-            class _DummyDetector:
+            class _UnavailableDetector:
+                """Stands in for a detector that could not be constructed.
+
+                It raises rather than returning zeros: an empty count is a
+                claim that the camera saw no vehicles, which is not what
+                happened.
+                """
                 model_loaded = False
 
                 def detect_from_bytes(self, b):
-                    return {"vehicle_counts": {}, "total_pcu": 0.0, "detections": [], "processing_time_ms": 0.0}
-            _detector = _DummyDetector()
+                    raise VisionUnavailable(
+                        "VehicleDetector could not be initialised on this worker"
+                    )
+            _detector = _UnavailableDetector()
     return _detector
 
 
@@ -129,9 +138,17 @@ async def detect_vehicles(
         return DetectionResult(
             vehicle_counts=analysis["counts"],
             total_pcu=analysis["total_pcu"],
-            density=analysis.get("density", 0.45),
+            density=analysis["density"],
             detections=analysis["detections"],
             processing_time_ms=elapsed_ms
+        )
+    except VisionUnavailable as e:
+        # The detector has no weights, or inference failed. Either way there is
+        # no detection to report; it previously returned five invented boxes.
+        logger.warning(f"Detection unavailable: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail={"status": "vision_unavailable", "reason": str(e)},
         )
     except Exception as e:
         logger.error(f"Detection failed: {e}")
