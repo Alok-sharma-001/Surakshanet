@@ -162,6 +162,8 @@ def train_and_save_marl(
             state_res = build_state_vector(telem, cfg)
             state = state_res.numpy_vector
 
+            prev_total_queue = sum(float(a.get("pcu", 0.0)) for a in j_state.get("approaches", {}).values())
+
             for sim_sec in range(5, episode_duration_s, step_interval):
                 phase_elapsed = max(0.0, sim_sec - phase_start_time)
                 state_info = {"phase_elapsed": phase_elapsed}
@@ -199,9 +201,10 @@ def train_and_save_marl(
                 reward_info = {
                     "queue_lengths": queues,
                     "delays": delays,
-                    "phase_switched": (safety_res.applied_phase != current_phase)
+                    "previous_total_queue": prev_total_queue,
                 }
                 reward = agent.calculate_reward(reward_info)
+                prev_total_queue = sum(queues)
                 ep_reward += reward
 
                 done = (sim_sec + step_interval >= episode_duration_s)

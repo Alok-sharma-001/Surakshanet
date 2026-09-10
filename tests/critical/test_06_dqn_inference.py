@@ -21,7 +21,7 @@ from services.control_service.reward import compute_reward, RewardTracker
 from shared.telemetry import ApproachTelemetry, JunctionTelemetry
 from shared.constants import DataSource
 
-EXPECTED_POLICY_SHA256 = "c3b9cb12517fa0b53bd02fcb51ba8a2087d36875fb811d67cf387dc441fc4931"
+EXPECTED_POLICY_SHA256 = "a3541fb57d7294017f11153226f9b098d3bbb94abb9072bbe6cdc4ee2d2acb79"
 WEIGHTS_PATH = "ml/marl/weights/marl_policy_downtown.pth"
 
 

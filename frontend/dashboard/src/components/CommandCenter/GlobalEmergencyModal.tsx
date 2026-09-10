@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { AlertTriangle, X, Siren, Radio, ShieldAlert } from 'lucide-react';
+import { toast } from 'react-hot-toast';
 import clsx from 'clsx';
+import { api } from '../../services/api';
 
 interface GlobalEmergencyModalProps {
   isOpen: boolean;
@@ -9,6 +11,15 @@ interface GlobalEmergencyModalProps {
 
 type EmergencyAction = 'green_corridor' | 'all_red' | null;
 
+// SN-012g/§13.10: "Confirm & Activate" previously did nothing but
+// `setTimeout(() => setIsActivated(true), 1500)` for either option, then
+// claimed "All 24 signals along the corridor have been pre-empted" or "All
+// intersections in the network are now holding red" — a global, header-level
+// emergency control that made zero API calls. Green Corridor now calls the
+// real POST /emergency/activate (the same endpoint EmergencyPage uses).
+// All-Red Hold has no backend endpoint anywhere in this project — there's no
+// citywide all-red action to call — so it's disabled with an honest reason
+// rather than faked.
 const GlobalEmergencyModal: React.FC<GlobalEmergencyModalProps> = ({ isOpen, onClose }) => {
   const [selectedAction, setSelectedAction] = useState<EmergencyAction>(null);
   const [isConfirming, setIsConfirming] = useState(false);
@@ -16,12 +27,22 @@ const GlobalEmergencyModal: React.FC<GlobalEmergencyModalProps> = ({ isOpen, onC
 
   if (!isOpen) return null;
 
-  const handleActivate = () => {
+  const handleActivate = async () => {
+    if (selectedAction !== 'green_corridor') return;
     setIsConfirming(true);
-    setTimeout(() => {
+    try {
+      await api.emergency.activate({
+        priority: 'CRITICAL',
+        vehicle_type: 'AMBULANCE',
+        route_junction_ids: ['J0', 'J1', 'J2', 'J3'],
+        corridor: ['J0', 'J1', 'J2', 'J3'],
+      });
       setIsActivated(true);
+    } catch (err) {
+      toast.error('Could not activate the green corridor — backend call failed.');
+    } finally {
       setIsConfirming(false);
-    }, 1500);
+    }
   };
 
   const handleReset = () => {
@@ -61,13 +82,9 @@ const GlobalEmergencyModal: React.FC<GlobalEmergencyModalProps> = ({ isOpen, onC
               <div className="w-16 h-16 mx-auto rounded-full bg-emerald-100 flex items-center justify-center">
                 <Radio className="w-8 h-8 text-emerald-600 animate-pulse" />
               </div>
-              <h3 className="text-lg font-bold text-emerald-700">
-                {selectedAction === 'green_corridor' ? 'Green Corridor Activated' : 'All-Red Hold Active'}
-              </h3>
+              <h3 className="text-lg font-bold text-emerald-700">Green Corridor Activated</h3>
               <p className="text-sm text-slate-500">
-                {selectedAction === 'green_corridor'
-                  ? 'All 24 signals along the corridor have been pre-empted. Emergency vehicle tracking is live.'
-                  : 'All intersections in the network are now holding red. Manual release required.'}
+                Preemption requested for junctions J0-J3. Check the Emergency page for corridor status.
               </p>
               <button
                 onClick={handleReset}
@@ -99,17 +116,13 @@ const GlobalEmergencyModal: React.FC<GlobalEmergencyModalProps> = ({ isOpen, onC
                 </button>
 
                 <button
-                  onClick={() => setSelectedAction('all_red')}
-                  className={clsx(
-                    'p-4 rounded-xl border-2 text-left transition-all',
-                    selectedAction === 'all_red'
-                      ? 'border-red-500 bg-red-50 shadow-sm'
-                      : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                  )}
+                  disabled
+                  title="No citywide all-red endpoint exists on the backend yet"
+                  className="p-4 rounded-xl border-2 text-left transition-all border-slate-100 bg-slate-50 cursor-not-allowed opacity-60"
                 >
-                  <AlertTriangle className={clsx('w-6 h-6 mb-2', selectedAction === 'all_red' ? 'text-red-600' : 'text-slate-400')} />
-                  <div className="text-sm font-bold text-slate-800">All-Red Hold</div>
-                  <div className="text-xs text-slate-500 mt-1">Immediately stop all traffic city-wide</div>
+                  <AlertTriangle className="w-6 h-6 mb-2 text-slate-300" />
+                  <div className="text-sm font-bold text-slate-400">All-Red Hold</div>
+                  <div className="text-xs text-slate-400 mt-1">Not implemented — no backend endpoint</div>
                 </button>
               </div>
 
@@ -118,9 +131,8 @@ const GlobalEmergencyModal: React.FC<GlobalEmergencyModalProps> = ({ isOpen, onC
                 <div className="flex items-start gap-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
                   <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
                   <p className="text-xs text-amber-800">
-                    <span className="font-bold">Caution:</span> This action will immediately override
-                    {selectedAction === 'green_corridor' ? ' 24+ signal controllers along the corridor.' : ' all signal controllers in the network.'}{' '}
-                    Requires ADMIN authorization.
+                    <span className="font-bold">Caution:</span> This action will call the real emergency
+                    preemption endpoint for junctions J0-J3. Requires ADMIN authorization.
                   </p>
                 </div>
               )}
@@ -135,10 +147,10 @@ const GlobalEmergencyModal: React.FC<GlobalEmergencyModalProps> = ({ isOpen, onC
                 </button>
                 <button
                   onClick={handleActivate}
-                  disabled={!selectedAction || isConfirming}
+                  disabled={selectedAction !== 'green_corridor' || isConfirming}
                   className={clsx(
                     'flex-1 px-4 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2',
-                    selectedAction
+                    selectedAction === 'green_corridor'
                       ? 'bg-red-500 hover:bg-red-600 text-white shadow-lg shadow-red-500/25'
                       : 'bg-slate-200 text-slate-400 cursor-not-allowed'
                   )}

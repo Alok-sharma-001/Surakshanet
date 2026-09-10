@@ -135,29 +135,34 @@ class MARLAgent:
         self.target_net.load_state_dict(self.policy_net.state_dict())
         
     def calculate_reward(self, state: dict) -> float:
-        """Compute reward based on junction state."""
-        # state expected to have: queue_lengths, delays, weights, phase_switched
+        """Compute reward as delta-queue reduction plus a small wait penalty.
+
+        Mirrors services/control_service/reward.py::compute_reward — the
+        function the deployed controller is actually scored against — so
+        training optimises the same objective evaluation measures. The
+        previous version penalised *absolute* queue length (not the change),
+        added a flat -2.0 penalty on every phase switch, and never tracked
+        the previous step's queue at all. That biased the trained policy
+        toward holding one phase and refusing to switch (avoiding the switch
+        penalty) even as the un-served approaches backed up — which is what
+        a real A/B run showed: this policy produced ~2x worse average delay
+        than the fixed-time baseline despite 23k+ training steps. There is no
+        theoretical reason absolute queue magnitude or a switch tax should be
+        part of the reward the agent is trained on when neither term appears
+        in how it's evaluated.
+        """
         q_m = state.get("queue_lengths", [])
         d_m = state.get("delays", [])
-        w_m = state.get("weights", [1.0] * len(q_m))
-        
-        alpha = 0.5
-        beta = 2.0
-        
-        # Check if phase was switched
-        is_switch = state.get("phase_switched", False)
-        I_switch = 1.0 if is_switch else 0.0
-        
-        # Sum of weighted queue lengths
-        queue_penalty = sum(w * q for w, q in zip(w_m, q_m))
-        
-        # Sum of delays
-        delay_penalty = sum(d_m)
-        
-        reward = -(queue_penalty + alpha * delay_penalty) - beta * I_switch
-        
+        prev_total_queue = state.get("previous_total_queue", sum(q_m))
+
+        current_total_queue = sum(q_m)
+        delta_queue = current_total_queue - prev_total_queue
+        wait_penalty = 0.01 * sum(d_m)
+
+        reward = -delta_queue - wait_penalty
+
         # Normalize reward loosely
-        normalized_reward = np.clip(reward / 100.0, -1.0, 1.0)
+        normalized_reward = np.clip(reward / 20.0, -1.0, 1.0)
         return float(normalized_reward)
         
     def get_valid_actions(self, state_info: dict) -> List[int]:

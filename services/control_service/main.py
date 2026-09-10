@@ -302,7 +302,12 @@ class ControlService:
         state_result = build_state_vector(telemetry, self.cfg, last_time)
 
         # 2. Select controller by SignalMode and availability (SN-030, SN-031, SN-033)
-        configured_mode = self.junction_modes.get(tl_id, SignalMode.MARL)
+        # Default WEBSTER when no signal_plans row exists for this junction yet,
+        # matching the DB column's own default (backend/app/models/signal.py) —
+        # this used to default to MARL here, so a junction auto-provisioned by
+        # _resolve_junction() with no SignalPlan row would silently run the
+        # unvetted/underperforming controller instead of the safe baseline.
+        configured_mode = self.junction_modes.get(tl_id, SignalMode.WEBSTER)
         controller_name = "webster"
         chosen_controller = self.webster_controller
 

@@ -30,7 +30,8 @@ execution surface is `docs/CHECKLIST.md` (SN-001…SN-150, grouped into Phases 0
   - Local `.venv` dependencies (`torch`, `sqlalchemy`, `pydantic`, etc.) installed.
   - All 24 critical tests in `tests/critical/` pass with zero errors.
   - MARL training rebuilt against real SUMO with lane-area detectors (SN-012f); policy weights
-    `ml/marl/weights/marl_policy_downtown.pth` trained and verified (SHA-256: `c3b9cb12...`).
+    `ml/marl/weights/marl_policy_downtown.pth` trained and verified (SHA-256: `a3541fb5...`,
+    retrained 2026-09-11 — see the 2026-09-11 addendum below for why the hash changed).
   - Pre-audit fabricated benchmark files purged and docs sanitized.
   - TraCI duration semantics and safety envelope ped cycles fixed in `ab_runner.py`; live 900s
     A/B evaluation executed via `POST /ab/run` and persisted to TimescaleDB table `ab_runs`
@@ -39,6 +40,48 @@ execution surface is `docs/CHECKLIST.md` (SN-001…SN-150, grouped into Phases 0
   - All SN items (SN-012f, SN-023…SN-038) individually verified; `docs/CHECKLIST.md` reconciled
     to 17/17 DONE (total progress: 48/161 DONE, 30%).
 - **Phases 3–10:** NOT_STARTED.
+
+**2026-09-11 addendum — Phase 2 re-audit findings, fixed, and one open limitation:**
+A deep re-verification (not just re-reading this file — actually exercising the running system)
+found that several Phase 2 items marked DONE were code-complete but not actually working
+end-to-end. All of the following are now fixed and verified live:
+- `control_decisions` was persisting **zero rows** against the real demo corridor: junction
+  identity resolution only matched a UUID or an exact DB name, and the SUMO corridor's tl_ids
+  (`J0`-`J3`) matched neither; a timezone mismatch (`tzinfo`-aware vs the model's naive
+  `DateTime` column) then rolled back every decision's INSERT whenever the reward-backfill
+  UPDATE for the *previous* step raised. Fixed in `services/control_service/main.py`
+  (`_resolve_junction` now auto-provisions a junction row; `decision_ts` is stored naive UTC).
+  Verified: thousands of real rows now persist with rewards backfilling correctly.
+- SN-037 (control-loop Prometheus metrics) was recording into a registry nothing scraped —
+  `control_service` runs as its own host process, not inside the backend's FastAPI app or any
+  compose service. Now starts its own `prometheus_client` HTTP server on `:9108`, scraped via
+  `host.docker.internal` (see `infra/prometheus/prometheus.yml`).
+- The MARL policy was undertrained (the original weights: 10 episodes / 139 total training
+  steps, target network updated once) and its training reward function didn't match the
+  reward the deployed controller and `ab_runner.py` are actually scored against (it penalised
+  *absolute* queue length plus a flat penalty on every phase switch, biasing the policy toward
+  never switching). Both fixed (`ml/marl/agent.py`, `ml/marl/train_marl.py`); retrained 400
+  episodes / 23,569 steps against real SUMO.
+- **Open limitation, not fixed**: even after both fixes, a fresh honest 900s A/B run still
+  shows MARL performing worse than Webster (avg delay +149.7%). Training is single-junction
+  (`J1`) while the trained policy is deployed identically across the coupled 4-junction
+  corridor with no cross-junction coordination signal — this looks like it needs joint/shared
+  multi-junction training, a bigger change than a hyperparameter or reward tweak, not attempted
+  here. `services/control_service/main.py`'s per-junction mode fallback was changed from
+  defaulting to `SignalMode.MARL` to `SignalMode.WEBSTER` (matching the DB column's own
+  default in `backend/app/models/signal.py`) specifically because of this: a junction with no
+  `signal_plans` row — like an auto-provisioned one — must not silently run the
+  known-to-underperform controller.
+- A related frontend sweep (SN-012g, "extend provenance badges to every numeric panel") found
+  several pages still rendering fabricated data outright rather than just missing a badge —
+  see git log on `frontend/dashboard/src` for the full list (TrafficMapPage, EmergencyPage,
+  JunctionDetailPage, AnalyticsDashboard, LiveIncidents, EdgeDevicesPage,
+  UserManagementPage, SettingsPage, and the CommandCenter "Primary Showcase" — CityTrafficCanvas
+  / IntersectionModal / SignalControlInteractive / GlobalEmergencyModal — were all fabricating
+  numbers, one incident had `type: 'ACCIDENT'` despite §8 documenting that value as deliberately
+  absent from the schema, and several buttons across SignalControlPage/EmergencyPage claimed
+  success even when the underlying API call had failed). All fixed to either show real data or
+  an honest unavailable state.
 **Pre-audit benchmark cleanup:** The fabricated pre-audit benchmark files (`ml/benchmarks/results/baseline_study_*.{md,json}`) have been deleted, and references in `docs/RESEARCH_DEFENSE.md` and `STATUS.md` purged per `docs/26-phase2-remediation-plan.md` item 6. Real benchmark results are produced live by `services/control_service/ab_runner.py` and stored in the `ab_runs` database table.
 
 ---
@@ -546,12 +589,10 @@ vision pipeline has no real detection to report.
 
 | Item | Location | Resolution Path |
 |---|---|---|
-| `.venv` missing `torch`/`sqlalchemy`, running 3.14 not 3.11 | local dev environment | `docs/26-phase2-remediation-plan.md` item 2 |
-| MARL trained on synthetic data, not SUMO | `ml/marl/train_marl.py` (SN-012f) | `docs/26-phase2-remediation-plan.md` item 4 |
-| A/B harness never executed | `services/control_service/ab_runner.py` (SN-038) | item 5, depends on item 4 |
-| Fabricated pre-audit benchmark artifacts | `ml/benchmarks/results/`, `docs/RESEARCH_DEFENSE.md`, `STATUS.md` | item 6 |
+| **MARL underperforms Webster** (avg delay +149.7% in a fresh 900s A/B run, 2026-09-11) even after fixing undertraining and a reward-function mismatch — looks like it needs joint/shared multi-junction training (currently trains on `J1` alone, deployed identically across the coupled J0-J3 corridor) | `ml/marl/train_marl.py`, `ml/marl/agent.py` | not attempted; bigger than a hyperparameter tweak — see the 2026-09-11 addendum in §1 |
+| Fabricated pre-audit benchmark artifacts | `ml/benchmarks/results/`, `docs/RESEARCH_DEFENSE.md`, `STATUS.md` | item 6 of `docs/26-phase2-remediation-plan.md` |
 | Checklist self-inconsistency (per-task `COMPLETE` vs. phase rollup `0/17`) | `docs/CHECKLIST.md` | item 1 |
-| Badge coverage incomplete (SN-012g) | most numeric UI panels have no `<TelemetrySourceBadge>` | P1, not yet scheduled |
+| Badge coverage (SN-012g) | DONE 2026-09-11 — see §1 addendum. Command centre tiles, traffic map, emergency, routing, and junction detail all now badge real data or show an honest unavailable state | closed |
 | ~34 mypy advisory errors | `backend/app/models/` | `Column[]` → `Mapped[]` refactor, later phase |
 | Frontend test scope | `src/store/authStore.test.js` | Vitest expansion planned |
 
