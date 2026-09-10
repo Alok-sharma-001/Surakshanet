@@ -7,7 +7,6 @@ from typing import Optional
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
-import pandas as pd
 
 from app.database import get_db
 from app.models.traffic import TrafficReading
@@ -88,7 +87,6 @@ def get_traffic_forecaster():
                 sequence_length = 12
 
                 def predict(self, *a, **kw): return []
-                def generate_synthetic_data(self, *a, **kw): return pd.DataFrame()
             _forecaster = _DummyForecaster()
     return _forecaster
 
@@ -193,20 +191,28 @@ async def get_prediction(
                         "timestamp": r.timestamp.isoformat(),
                         "pcu": float(r.pcu_value),
                         "pcu_value": float(r.pcu_value),
-                        "speed": float(r.avg_speed or 30.0),
-                        "queue": float(r.queue_length or 5.0),
+                        # Null means the sensor did not report it. Substituting
+                        # 30 km/h and a queue of 5 fed invented values straight
+                        # into the model's input window.
+                        "speed": float(r.avg_speed) if r.avg_speed is not None else None,
+                        "queue": float(r.queue_length) if r.queue_length is not None else None,
                         "junction_id": junction_id
                     }
                     for r in reversed(db_readings)
                 ]
 
         # 2. Check if forecaster has trained weights
-        if traffic_forecaster.is_lstm_trained and traffic_forecaster.is_xgb_trained:
+        if (
+            recent_readings
+            and traffic_forecaster.is_lstm_trained
+            and traffic_forecaster.is_xgb_trained
+        ):
             try:
-                if not recent_readings:
-                    df = traffic_forecaster.generate_synthetic_data(num_days=2, junctions=1)
-                    recent_readings = df.tail(traffic_forecaster.sequence_length).to_dict('records')
-
+                # A prediction is only about this junction if it was computed
+                # from this junction's observations. Feeding the model
+                # generate_synthetic_data() when the table was empty produced a
+                # curve about the data generator, returned under source="model"
+                # as though it described the road.
                 result = traffic_forecaster.predict(junction_id, recent_readings)
 
                 return PredictionResponse(
@@ -220,23 +226,44 @@ async def get_prediction(
             except Exception as ml_err:
                 logger.warning(f"Ensemble prediction error ({ml_err}), using dynamic flow model fallback.")
 
-        # 3. Dynamic heuristic prediction based on junction ID and time of day (SN-006)
-        hour = datetime.utcnow().hour + 5.5  # IST
-        base_pcu = 45.0 + (25.0 if 8 <= hour <= 11 or 17 <= hour <= 21 else 0.0)
-        hash_offset = sum(ord(c) for c in junction_id) % 15
+        # 3. Heuristic path (SN-006). Without observations there is nothing to
+        #    extrapolate from, so the endpoint reports that rather than
+        #    inventing a curve. The previous fallback derived its value from
+        #    `sum(ord(c) for c in junction_id) % 15` — deterministic noise off
+        #    the junction's name, which varies per junction and so reads as
+        #    junction-specific insight while carrying no information about it.
+        if not recent_readings:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "status": "forecast_unavailable",
+                    "reason": (
+                        "no recent traffic readings for this junction and no "
+                        "trained forecaster; a prediction would have no basis"
+                    ),
+                },
+            )
+
+        # Persistence baseline anchored on the last observed PCU, with a coarse
+        # peak-hour factor. Crude, but every input is measured.
+        last_pcu = float(recent_readings[-1]["pcu_value"])
+        hour_ist = (datetime.utcnow().hour + 5) % 24
+        peak = 1.15 if (8 <= hour_ist <= 11 or 17 <= hour_ist <= 21) else 1.0
 
         return PredictionResponse(
             junction_id=junction_id,
             predictions=[
-                PredictionItem(minutes=15, predicted_pcu=round(base_pcu + hash_offset, 1), confidence=None),
-                PredictionItem(minutes=30, predicted_pcu=round(base_pcu + hash_offset * 1.2 + 6.0, 1), confidence=None),
-                PredictionItem(minutes=60, predicted_pcu=round(base_pcu + hash_offset * 1.4 + 12.0, 1), confidence=None),
+                PredictionItem(minutes=15, predicted_pcu=round(last_pcu * peak, 1), confidence=None),
+                PredictionItem(minutes=30, predicted_pcu=round(last_pcu * peak * 1.05, 1), confidence=None),
+                PredictionItem(minutes=60, predicted_pcu=round(last_pcu * peak * 1.10, 1), confidence=None),
             ],
-            spillback_risk=round(min(0.95, (base_pcu + hash_offset) / 100.0), 2),
+            spillback_risk=round(min(0.95, (last_pcu * peak) / 100.0), 2),
             source=DataSource.HEURISTIC,
             training_data=None,
             generated_at=datetime.utcnow()
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Prediction failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

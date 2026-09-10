@@ -6,11 +6,11 @@
 **Priority:** `P0` blocks the demo · `P1` required for the target score · `P2` valuable · `P3` optional
 **Rule:** a task is `DONE` only when all ten Definition-of-Done conditions in [23-final-acceptance.md §1](23-final-acceptance.md) hold.
 
-**Progress:** 17 / 157 DONE — **11%** *(Phase 0 complete, including the four gaps found when the SN-140 greps were first actually run; baseline at audit time was 42% overall project completion)*
+**Progress:** 21 / 161 DONE — **13%** *(Phase 0 closed. SN-012a…SN-012k were added as the SN-140 greps were run for the first time and then extended into a systematic sweep; every one of them found a live fabrication. SN-012f is blocked on Phase 1 and SN-012g is a P1 completeness gap. Baseline at audit time was 42% overall project completion.)*
 
 | Phase | Tasks | Done |
 |---|---|---|
-| 0 Cleanup | SN-001 … SN-012e | 17/17 |
+| 0 Cleanup | SN-001 … SN-012k (less SN-012f/g) | 21/21 |
 | 1 Infrastructure | SN-013 … SN-022 | 0/10 |
 | 2 Real AI control | SN-012f, SN-023 … SN-038 | 0/17 |
 | 3 Emergency corridor | SN-039 … SN-050 | 0/12 |
@@ -173,11 +173,43 @@
 
 ### SN-012g · Extend provenance badges to every numeric panel
 **Component** Frontend · **Priority** P1 · **Depends** SN-012b · **Status** `NOT_STARTED`
-**Description** SN-009 is marked `DONE` on the strength of the badge component existing, but `TelemetrySourceBadge` has exactly one consumer, `ForecastingPage.tsx:82`. Its stated acceptance — "no number renders without a source" — is therefore unmet across the rest of the dashboard, which is the condition rule R3 exists to prevent.
+**Description** SN-009 is marked `DONE` on the strength of the badge component existing, but it had exactly one consumer. SN-012h added it to the simulation and signal-control panels; the remaining numeric surfaces — traffic map, emergency, routing, junction detail, the command-centre tiles — still render figures without one. They no longer render *fabricated* figures, so this is now a completeness gap rather than a truthfulness one, which is why it is P1 and not P0.
 **Implementation** Thread `source` through the stores and render the badge on every numeric panel: command centre tiles, traffic map, signal control, simulation, emergency and routing. A panel whose payload carries no `source` renders the unavailable state rather than the number.
 **Files** `frontend/dashboard/src/pages/*`, `frontend/dashboard/src/components/CommandCenter/*`, `frontend/dashboard/src/store/*`
 **API** consumes the `source` field added by SN-008 · **DB** none · **UI** badge on every numeric panel
 **Tests** SN-121 · **Acceptance** A reviewer finds no rendered number without a provenance badge · **Demo** all
+
+### SN-012h · Remove fabricated results from every dashboard surface
+**Component** Frontend · **Priority** **P0** · **Depends** SN-012b · **Status** `DONE`
+**Description** SN-004 removed the fake bounding boxes and SN-012b fixed the badge, but a systematic sweep of the dashboard found fabricated *results* on almost every page — the class of claim a judge reads first. `AnalyticsDashboard` reported a 39.4% wait-time improvement, a 73.6% speed gain, 1,492 AI interventions "TODAY" at 12 ms latency and 100% conflict-free operation, and a 54.2% accident-risk reduction. `SignalControlPage` displayed an instantaneous reward, an episode reward over "DQN Policy 500 eps" and a delay reduction versus Webster, and seeded its decision feed with five invented entries — one carrying the same reward figure SN-001 deleted from the backend, another a Q-value and a confidence for a policy that has never run. `SimulationPage` rendered six fixed metrics and plotted a generated sine wave under the heading "Real-time Throughput" while never calling the API at all. `ForecastingPage` seeded a spillback risk and a seven-point curve before any request, derived its "actual" history by scaling its own forecast, and published ensemble weights and per-horizon MAPE figures as validation results. `TrafficMapPage` seeded a live event feed with relative timestamps so it always looked current. `EmissionsPage`, `JunctionsPage`, `StudioHomePage`, `LandingPage` and `ComputerVisionFeed` carried further fixed percentages, including a detector mAP.
+**Implementation** Every fabricated figure is replaced by an em-dash with a caption naming why it is absent. `SimulationPage` polls `/simulation/state` and `/simulation/metrics`, renders the 503 payload as an unavailable banner, accumulates throughput history from measured samples only, and drives its run control through the API. `ForecastingPage` starts empty, plots only the horizons the API returned, and surfaces the 503 reason. The seeded feeds start empty and fill from their WebSocket channels.
+**Files** `frontend/dashboard/src/pages/{Simulation,Forecasting,SignalControl,TrafficMap,Emissions,Junctions,StudioHome,Landing}Page.tsx`, `frontend/dashboard/src/components/CommandCenter/{AnalyticsDashboard,SignalControlInteractive,ComputerVisionFeed}.tsx`
+**API** consumes `/simulation/*` and `/ml/predict` including their 503 payloads · **DB** none · **UI** no panel renders a result no run produced
+**Tests** SN-140 guard · **Acceptance** No rendered figure asserts a measurement or a comparison that no run produced · **Demo** all
+
+### SN-012i · Remove remaining invented values on the API paths
+**Component** Backend · **Priority** P0 · **Depends** SN-012a · **Status** `DONE`
+**Description** Three further substitutions on live paths. `GET /ml/predict` fed the forecaster `generate_synthetic_data()` when the readings table was empty and returned the result under `source="model"`, so the curve described the data generator rather than the road; it also substituted 30 km/h and a queue of 5 for null sensor fields before building the model's input window, and its heuristic fallback derived its value from `sum(ord(c) for c in junction_id) % 15` — deterministic noise off the junction's name, which varies per junction and so reads as junction-specific insight while carrying none. `traffic_service.create_reading` minted a fresh UUID for the NOT NULL `junction_id` when the sensor was unknown, defaulted `vehicle_count` to zero, computed PCU as `vehicle_count * 1.0` (counting a bus and a bicycle as one car each), and relabelled an unrecognised source as `heuristic`.
+**Implementation** The model path requires real readings; without them the endpoint returns `503 forecast_unavailable`. Nulls pass through as null. The heuristic is a persistence baseline anchored on the last measured PCU with a coarse peak-hour factor, so every input is measured. `create_reading` raises rather than inventing a junction, requires the NOT NULL fields, derives PCU from the class breakdown using the IRC factors in `shared/constants.py`, and rejects unrecognised sources; `POST /traffic/readings` maps the rejection to `422`.
+**Files** `backend/app/api/ml.py`, `backend/app/services/traffic_service.py`, `backend/app/api/traffic.py`
+**API** `/ml/predict` returns 503 without data; `/traffic/readings` returns 422 on an unattributable reading · **DB** no orphan junction rows, PCU computed correctly · **UI** unavailable states
+**Tests** SN-140 guard · **Acceptance** No endpoint completes a partial reading with a plausible default · **Demo** B
+
+### SN-012j · Make the E2E assertions test something
+**Component** Testing · **Priority** P0 · **Depends** — · **Status** `DONE`
+**Description** Brought forward from Phase 8. Eight tests asserted `status_code in (200, 401)`, which passes whether or not the endpoint works — the `authed_client` fixture they needed already existed and was simply unused. Separately, `conftest.py` carried the leaked administrator credentials as defaults for `ADMIN_EMAIL` and `ADMIN_PASSWORD`, and `backend/scripts/seed_admin.py` printed the password to stdout.
+**Implementation** A new `authed_client` fixture attaches an operator token; the seven genuinely decorative assertions now require `200`. The eighth, a repeated logout, legitimately admits both outcomes and is expressed as a named `IDEMPOTENT_LOGOUT_STATUSES` constant with the contract stated. The credential defaults are gone — the admin fixture skips when the environment does not supply them — and the seed script reports the email from settings and never echoes the password.
+**Files** `tests/e2e/conftest.py`, `tests/e2e/tier{1,3,4}/*`, `backend/scripts/seed_admin.py`
+**API** none · **DB** none · **UI** none
+**Tests** are the tests · **Acceptance** No assertion passes irrespective of whether authentication works; no credential is committed · **Demo** none
+
+### SN-012k · Make the SN-140 guard blocking and complete
+**Component** CI · **Priority** P0 · **Depends** SN-012e…SN-012j · **Status** `DONE`
+**Description** The guard added in SN-012d carried two non-blocking `WARN` checks and did not cover the defect classes found since. Every check it has ever reported has caught something, including three fabrications discovered only because it was run.
+**Implementation** Eighteen blocking checks. The decorative-test greps are promoted from `WARN`. New checks cover generated chart series (`Math.sin`/`Math.cos`, which the original `Math.random` grep missed), fabricated result percentages in the UI, synthesised detections, derived speed in the vision worker, invented ingest defaults, and committed admin credentials. The guard deliberately has no comment-exclusion heuristic: explanatory comments are worded so they do not reproduce the literals they describe.
+**Files** `scripts/check_phase0_regressions.sh`, `.github/workflows/ci.yml`, `Makefile`
+**API** none · **DB** none · **UI** none
+**Tests** is the test · **Acceptance** `make check-phase0` passes and fails the build on any reintroduced fabrication · **Demo** none
 
 ---
 
@@ -1167,3 +1199,4 @@
 | 2026-09-10 | SN-001 … SN-012 | 8% | Phase 0 committed to `phase0/complete` off `main` |
 | 2026-09-10 | SN-012a … SN-012d | 10% | Gaps found on first real run of the §3 greps; guard now blocking in CI |
 | 2026-09-10 | SN-012e | 11% | Vision pipeline fabrication removed; SN-012f and SN-012g logged as open |
+| 2026-09-10 | SN-012h … SN-012k | 13% | Dashboard, API and test-suite fabrication removed; guard blocking with 18 checks. Phase 0 closed; SN-012f blocked on Phase 1, SN-012g is P1 |

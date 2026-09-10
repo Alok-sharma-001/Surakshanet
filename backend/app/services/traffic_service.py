@@ -14,7 +14,7 @@ from app.schemas.traffic import (
     SensorCreate,
     TrafficReadingCreate,
 )
-from shared.constants import DataSource
+from shared.constants import DataSource, PCU_FACTORS
 
 
 def _get_dialect_name(db: AsyncSession) -> str:
@@ -145,15 +145,38 @@ async def create_reading(
         if sensor:
             j_id = sensor.junction_id
         else:
-            j_id = uuid.uuid4()
+            # junction_id is a NOT NULL foreign key. Minting a fresh UUID here
+            # attached the reading to a junction that does not exist.
+            raise ValueError(
+                f"Cannot resolve a junction for sensor {data.sensor_id}: "
+                "the sensor is unknown and no junction_id was supplied"
+            )
 
     speed = reading_dict.get("avg_speed")
     if speed is None:
         speed = reading_dict.get("average_speed")
 
+    # pcu_value and vehicle_count are NOT NULL. Neither may be defaulted: a
+    # count of 0 is a claim that the sensor saw an empty road.
+    v_count = reading_dict.get("vehicle_count")
+    if v_count is None:
+        raise ValueError("vehicle_count is required and cannot be defaulted")
+
     pcu = reading_dict.get("pcu_value")
     if pcu is None:
-        pcu = float(reading_dict.get("vehicle_count", 0.0)) * 1.0
+        # Derive from the class breakdown using the IRC factors. The previous
+        # `vehicle_count * 1.0` counted a bus and a bicycle as one car each,
+        # producing a PCU that looked computed but was just the raw count.
+        breakdown = reading_dict.get("vehicle_breakdown")
+        if not breakdown:
+            raise ValueError(
+                "pcu_value is required when no vehicle_breakdown is supplied; "
+                "it cannot be inferred from the raw vehicle count"
+            )
+        pcu = sum(
+            float(n) * PCU_FACTORS.get(cls, 1.0)
+            for cls, n in breakdown.items()
+        )
 
     ts = reading_dict.get("timestamp")
     if ts is None:
@@ -169,21 +192,27 @@ async def create_reading(
         if raw_str in [s.value for s in DataSource]:
             resolved_source = raw_str
         elif raw_str == "sim":
+            # Migration shim for rows written before SN-008.
             resolved_source = DataSource.SUMO.value
-        elif raw_str == "mock":
-            resolved_source = DataSource.HEURISTIC.value
         else:
-            resolved_source = DataSource.MQTT.value
+            # "mock" previously mapped to HEURISTIC, which relabelled invented
+            # data as a formula-based estimate. Its emitters are gone (SN-012a);
+            # anything unrecognised is rejected rather than relabelled.
+            raise ValueError(
+                f"Unrecognised data source {raw_str!r}; "
+                f"expected one of {[s.value for s in DataSource]}"
+            )
 
     reading = TrafficReading(
         id=uuid.uuid4(),
         sensor_id=data.sensor_id,
         junction_id=j_id,
-        vehicle_count=reading_dict.get("vehicle_count", 0.0),
+        vehicle_count=v_count,
         pcu_value=pcu,
         avg_speed=speed,
-        queue_length=reading_dict.get("queue_length") or 0.0,
-        vehicle_breakdown=reading_dict.get("vehicle_breakdown") or {},
+        # Nullable. An unreported queue is unknown, not empty.
+        queue_length=reading_dict.get("queue_length"),
+        vehicle_breakdown=reading_dict.get("vehicle_breakdown"),
         source=resolved_source,
         timestamp=ts,
     )

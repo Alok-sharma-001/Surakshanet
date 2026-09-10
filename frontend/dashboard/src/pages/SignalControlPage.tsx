@@ -5,12 +5,8 @@ import { toast } from 'react-hot-toast';
 import { clsx } from 'clsx';
 import { api } from '../services/api';
 import { useTrafficStore } from '../store/trafficStore';
+import { TelemetrySourceBadge } from '../components/TelemetrySourceBadge';
 import { wsService } from '../services/websocket';
-
-const mockRewardData = Array.from({ length: 20 }).map((_, i) => ({
-  time: i,
-  reward: 5 + Math.sin(i / 2) * 5,
-}));
 
 export default function SignalControlPage() {
   const storeJunctions = useTrafficStore((state) => state.junctions);
@@ -18,13 +14,13 @@ export default function SignalControlPage() {
   const [activePlan, setActivePlan] = useState<any>(null);
   const [activeControl, setActiveControl] = useState<'marl' | 'webster' | 'manual'>('marl');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [telemetry, setTelemetry] = useState<string[]>([
-    "[SUMO/TraCI] Dynamic Bridge: Real-time signal actuator connected",
-    "[T-15.2s] State Evaluated Queue: 38veh\n→ ACTION: Maintain Phase 1",
-    "[T-12.0s] Reward Calculated    Prev Action: Ph1+2s\nΣ REWARD: +14.2 (Delay Reduced)",
-    "[T-4.5s] Phase Transition Current: Ph1\n⏱ ACTION: Trigger Amber (3.0s)\nConstraint: MinGreen Met",
-    "[T-0.1s] State Evaluated Queue: 42veh\n→ ACTION: Extend Phase 2 (N-S Straight) by 5.0s\nQ-Value: 0.892  Conf: 92%"
-  ]);
+  // The feed starts empty and fills from the live WebSocket channel. It was
+  // previously seeded with five invented decisions — including
+  // "Σ REWARD: +14.2", the same figure SN-001 deleted from the backend, and a
+  // "Q-Value: 0.892  Conf: 92%" for a policy that had never run.
+  const [telemetry, setTelemetry] = useState<string[]>([]);
+  // Real reward history arrives with the control service in Phase 2 (SN-030).
+  const rewardData: { time: number; reward: number }[] = [];
 
   // Initialize selected junction from store or API
   useEffect(() => {
@@ -229,13 +225,15 @@ export default function SignalControlPage() {
             <div>
               <div className="flex justify-between items-start mb-2">
                 <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">Instantaneous Reward</span>
-                <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">↗ 14% vs baseline</span>
+                <TelemetrySourceBadge source={null} />
               </div>
-              <div className="text-3xl font-mono font-bold text-teal-600">+14.2</div>
+              {/* No control policy is running, so there is no reward to show.
+                  This previously read "+14.2" with "↗ 14% vs baseline". */}
+              <div className="text-3xl font-mono font-bold text-slate-300">—</div>
             </div>
             <div className="h-44 w-full mt-4">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={mockRewardData}>
+                <AreaChart data={rewardData}>
                   <defs>
                     <linearGradient id="rewardGrad" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#0d9488" stopOpacity={0.3} />
@@ -252,13 +250,15 @@ export default function SignalControlPage() {
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-4">
               <div className="text-xs font-medium text-slate-500 uppercase tracking-wider">Episode Reward</div>
-              <div className="text-2xl font-mono font-bold text-slate-900 mt-1">1,248</div>
-              <div className="text-[11px] text-slate-400 mt-0.5">DQN Policy 500 eps</div>
+              <div className="text-2xl font-mono font-bold text-slate-300 mt-1">—</div>
+              <div className="text-[11px] text-slate-400 mt-0.5">No training run recorded</div>
             </div>
             <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-4">
+              {/* The A/B study that would produce this number is SN-034. It
+                  previously read "-24.5%" with "Avg Delay: 18.2s". */}
               <div className="text-xs font-medium text-slate-500 uppercase tracking-wider">Delay vs Webster</div>
-              <div className="text-2xl font-mono font-bold text-teal-600 mt-1">-24.5%</div>
-              <div className="text-[11px] text-slate-400 mt-0.5">Avg Delay: 18.2s</div>
+              <div className="text-2xl font-mono font-bold text-slate-300 mt-1">—</div>
+              <div className="text-[11px] text-slate-400 mt-0.5">No A/B run recorded</div>
             </div>
           </div>
         </div>
@@ -271,18 +271,18 @@ export default function SignalControlPage() {
               Safety Guardrails (NEMA/IRC)
             </h3>
             <div className="space-y-3">
+              {/* These are the constraints the controller must satisfy, not
+                  measurements of it. They previously rendered a green "VALID"
+                  and an "ONLINE" conflict monitor with nothing checking either. */}
               {[
-                { label: "Min Green Time (12s)", status: "VALID", ok: true },
-                { label: "Amber Clearance (3.0s)", status: "VALID", ok: true },
-                { label: "All-Red Clearance (2.0s)", status: "VALID", ok: true },
-                { label: "Conflict Monitor (NEMA Interlock)", status: "ONLINE", ok: true },
+                { label: "Min Green Time", value: "12s" },
+                { label: "Amber Clearance", value: "3.0s" },
+                { label: "All-Red Clearance", value: "2.0s" },
+                { label: "Conflict Monitor (NEMA Interlock)", value: "not monitored" },
               ].map((g, idx) => (
                 <div key={idx} className="flex justify-between items-center text-xs p-2.5 rounded-lg bg-slate-50 border border-slate-100">
                   <span className="font-medium text-slate-700">{g.label}</span>
-                  <span className="font-bold text-emerald-600 font-mono flex items-center">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5" />
-                    {g.status}
-                  </span>
+                  <span className="font-bold text-slate-500 font-mono">{g.value}</span>
                 </div>
               ))}
             </div>

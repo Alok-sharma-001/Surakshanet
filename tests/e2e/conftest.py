@@ -90,10 +90,27 @@ def operator_token(http_client: E2EHttpClient, unique_email: str) -> str:
 
 
 @pytest.fixture
+def authed_client(http_client: E2EHttpClient, operator_token: str) -> E2EHttpClient:
+    """An http_client carrying a valid operator Bearer token.
+
+    Tests that assert on protected endpoints must use this. Accepting 401
+    alongside 200 makes an assertion that passes whether or not the endpoint
+    works, which is the decorative-test pattern SN-140 forbids.
+    """
+    http_client.set_auth_token(operator_token)
+    yield http_client
+    http_client.clear_auth_token()
+
+
+@pytest.fixture
 def admin_token(http_client: E2EHttpClient) -> str:
     """Attempts login as seed admin; if not found, creates/promotes test admin."""
-    admin_email = os.environ.get("ADMIN_EMAIL", "aloks92440@gmail.com")
-    admin_password = os.environ.get("ADMIN_PASSWORD", "Alok@2005")
+    # No default credentials. A password committed to the repository is a
+    # password in the repository, regardless of the variable it sits in.
+    admin_email = os.environ.get("ADMIN_EMAIL")
+    admin_password = os.environ.get("ADMIN_PASSWORD")
+    if not admin_email or not admin_password:
+        pytest.skip("ADMIN_EMAIL and ADMIN_PASSWORD must be set for admin tests")
     login_res, token = http_client.login_user(email=admin_email, password=admin_password)
     if login_res.status_code == 200 and token:
         return token

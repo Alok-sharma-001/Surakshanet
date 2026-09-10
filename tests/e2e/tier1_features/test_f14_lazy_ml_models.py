@@ -34,23 +34,23 @@ sys.exit(0)
 @pytest.mark.tier1
 @pytest.mark.m3
 @pytest.mark.feature(14)
-def test_ml_detection_endpoint_responds(http_client: E2EHttpClient):
+def test_ml_detection_endpoint_responds(authed_client: E2EHttpClient):
     """TC-F14-02: Verify vehicle detection endpoint is reachable on demand."""
-    res = http_client.get("/api/v1/ml/models")
+    res = authed_client.get("/api/v1/ml/models")
     assert res.status_code in (200, 401, 404)
 
 
 @pytest.mark.tier1
 @pytest.mark.m3
 @pytest.mark.feature(14)
-def test_ml_forecast_endpoint_schema_check(http_client: E2EHttpClient):
+def test_ml_forecast_endpoint_schema_check(authed_client: E2EHttpClient):
     """TC-F14-03: Verify POST /api/v1/ml/forecast handles traffic prediction requests."""
     payload = {
         "junction_id": "J1",
         "horizon_steps": 6,
         "historical_readings": [10, 15, 20, 25, 30]
     }
-    res = http_client.post("/api/v1/ml/forecast", json_data=payload)
+    res = authed_client.post("/api/v1/ml/forecast", json_data=payload)
     assert res.status_code in (200, 401, 404, 422)
 
 
@@ -66,7 +66,7 @@ def test_ml_weights_exist_in_repository():
 @pytest.mark.tier1
 @pytest.mark.m3
 @pytest.mark.feature(14)
-def test_ml_training_status_endpoint(http_client: E2EHttpClient):
+def test_ml_training_status_endpoint(authed_client: E2EHttpClient):
     """TC-F14-05: Verify GET /api/v1/ml/train/status returns current training metadata."""
-    res = http_client.get("/api/v1/ml/train/status")
-    assert res.status_code in (200, 401)
+    res = authed_client.get("/api/v1/ml/train/status")
+    assert res.status_code == 200, f"Expected 200 for an authenticated request, got {res.status_code}: {res.text}"

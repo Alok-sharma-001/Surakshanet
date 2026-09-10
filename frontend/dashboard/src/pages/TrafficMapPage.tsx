@@ -43,13 +43,11 @@ export default function TrafficMapPage() {
   // Junction-level live telemetry
   const [junctionsData, setJunctionsData] = useState(DEFAULT_JUNCTIONS);
 
-  // Live Telemetry Event Feed
-  const [feedEvents, setFeedEvents] = useState<FeedEvent[]>([
-    { id: '1', title: 'MARL Phase Optimization', time: 'Just now', desc: 'Corridor cycle adjusted: +4.5s Green to Northbound', icon: Zap, color: 'text-teal-600', bg: 'bg-teal-50' },
-    { id: '2', title: 'SUMO Twin Ingestion', time: '2s ago', desc: 'Ingested 1,248 active TraCI vehicle vectors', icon: Activity, color: 'text-sky-600', bg: 'bg-sky-50' },
-    { id: '3', title: 'Congestion Threshold Alert', time: '1m ago', desc: 'Ashram Chowk queue reached 85m capacity', icon: AlertTriangle, color: 'text-amber-600', bg: 'bg-amber-50' },
-    { id: '4', title: 'Telemetry Sync Nominal', time: '3m ago', desc: 'All 12 Delhi edge nodes streaming at 10Hz', icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-  ]);
+  // Live telemetry event feed, filled from the WebSocket channel below. It was
+  // previously seeded with four invented events carrying relative timestamps
+  // ("Just now", "2s ago"), so the feed always looked live — including a MARL
+  // phase optimisation that no controller performed.
+  const [feedEvents, setFeedEvents] = useState<FeedEvent[]>([]);
 
   // Connect to live WebSockets from backend
   useEffect(() => {

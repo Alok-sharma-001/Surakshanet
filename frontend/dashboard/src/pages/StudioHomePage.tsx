@@ -14,7 +14,7 @@ const PROJECTS = [
     title: 'Discover Our\nNew Projects\nfrom ©2025',
     concept: 'Validation of Autonomous Ideas\nFrom Concept to POC,\nRapidly',
     tag: '* Exclusive Prototyping\n   bringing visions to life in record time',
-    stats: '39.4% Delay Reduction',
+    stats: 'Adaptive Signal Control',
   },
   {
     numLeft: '01',
@@ -22,7 +22,7 @@ const PROJECTS = [
     title: 'Edge Vision\nInfrastructure\nfrom ©2025',
     concept: 'Neural Vision Pipeline\nFor Connected Metropolitan\nCorridors',
     tag: '* Sub-20ms Detection\n   real-time multi-lane classification',
-    stats: '99.2% Detection Precision',
+    stats: 'Multi-lane Vehicle Classification',
   },
   {
     numLeft: '03',

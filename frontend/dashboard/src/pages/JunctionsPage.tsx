@@ -188,8 +188,8 @@ const JunctionsPage: React.FC = () => {
         </div>
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
           <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Edge Sensor Uplink</div>
-          <div className="text-2xl font-bold font-mono text-emerald-600">100%</div>
-          <p className="text-[11px] text-emerald-600 font-medium mt-1">All Jetson Fleets Nominal</p>
+          <div className="text-2xl font-bold font-mono text-slate-300">—</div>
+          <p className="text-[11px] text-slate-400 font-medium mt-1">Uplink health is not monitored</p>
         </div>
       </div>
 

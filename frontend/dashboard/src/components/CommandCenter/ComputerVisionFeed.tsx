@@ -204,7 +204,9 @@ export const ComputerVisionFeed: React.FC = () => {
       <div className="flex flex-wrap items-center justify-between text-xs text-studio-muted font-mono pt-2">
         <div className="flex items-center gap-2">
           <ShieldCheck className="w-4 h-4 text-emerald-600" />
-          <span>Edge Precision: <strong className="text-studio-text font-bold">{hasVideoSource ? '99.2% mAP@0.5' : 'STANDBY'}</strong></span>
+          {/* No validation run has measured this detector's mAP. A fixed
+              figure was previously shown whenever a video source attached. */}
+          <span>Edge Precision: <strong className="text-studio-text font-bold">NOT MEASURED</strong></span>
         </div>
         <div>
           LOCATION: <span className="text-studio-text font-semibold">New Delhi Central Operations Matrix</span>

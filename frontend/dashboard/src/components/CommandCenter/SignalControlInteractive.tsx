@@ -242,10 +242,9 @@ export const SignalControlInteractive: React.FC<Props> = ({ onOptimizedStateChan
                     <p className="text-base font-extrabold text-studio-text mt-1 font-syne">
                       “Extend green phase for Lane 01 by 18 seconds.”
                     </p>
-                    <div className="mt-3 flex items-center gap-4 text-xs font-mono text-studio-muted">
-                      <div>EST. QUEUE CLEAR: <span className="text-emerald-600 font-bold">-63%</span></div>
-                      <div>CONFIDENCE: <span className="text-studio-coral font-bold">96.4%</span></div>
-                    </div>
+                    {/* No policy produced this intervention, so there is no
+                        confidence to report and no predicted queue clearance.
+                        Both previously rendered fixed percentages. */}
                   </div>
                 </>
               ) : (

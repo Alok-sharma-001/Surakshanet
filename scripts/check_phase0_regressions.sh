@@ -80,12 +80,12 @@ check "SN-004 no client-side data fabrication" \
     | grep -v "components/Studio/" \
     | grep -v "services/websocket.ts"'
 
-# Non-blocking until Phase 8. Rewriting these needs each test's real intent;
-# see SN-111…SN-126. They must be zero before SN-140 sign-off.
-warn "no decorative length assertions in tests" \
+check "no decorative length assertions in tests" \
   grep -rn 'assert len("' tests/
 
-warn "no decorative status-code assertions in tests" \
+# An assertion that passes whether or not auth works tests nothing. These now
+# use the `authed_client` fixture and assert the real status.
+check "no decorative status-code assertions in tests" \
   grep -rn "status_code in (200, 401)" tests/
 
 # --- Gaps found after Phase 0 was declared complete -------------------------
@@ -116,6 +116,22 @@ check "no invented defaults on the ingest path" \
 # missing or inference raised. Absence of a detection is reported, not filled in.
 check "no synthesised detections in the detector" \
   bash -c 'grep -n "_simulated_detections\|0\.94\|0\.96\|0\.88\|0\.91" ml/vision/vehicle_detector.py'
+
+# Generated series plotted as measured history. The frontend check above only
+# catches Math.random; SimulationPage used Math.sin for a throughput curve and
+# SignalControlPage for a MARL reward curve.
+check "no generated series in dashboard charts" \
+  bash -c 'grep -rn "Math\.\(sin\|cos\)(" frontend/dashboard/src --include=*.tsx \
+    | grep -v "components/Studio/"'
+
+# Headline result claims that no run produced.
+check "no fabricated result claims in the UI" \
+  bash -c 'grep -rn "24\.5%\|39\.4%\|73\.6%\|54\.2%\|96\.4%\|99\.2%\|1,492\|1,248" \
+    frontend/dashboard/src --include=*.tsx | grep -v "previously read\|previously rendered\|previously seeded\|previously carried"'
+
+# Credentials must come from the environment, never from a committed default.
+check "no committed admin credentials" \
+  bash -c 'grep -rn "Alok@2005\|aloks92440" backend/scripts/ tests/e2e/conftest.py'
 
 # A missing or unrecognised source must render UNAVAILABLE. Defaulting it to a
 # measured badge asserts the strongest claim on the weakest evidence.

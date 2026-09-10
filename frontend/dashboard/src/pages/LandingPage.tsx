@@ -107,7 +107,10 @@ export const LandingPage: React.FC = () => {
           </div>
         </section>
 
-        {/* Live Network Telemetry KPIs Banner */}
+        {/* Design targets, not measured results. These previously carried
+            fixed percentages presented as live network telemetry — delay
+            reduction, detection accuracy and corridor response — none of
+            which has ever been measured. */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 my-16">
           <div className="glass-card p-6 border border-blue-500/20 text-center">
             <div className="text-3xl sm:text-4xl font-black text-white font-mono">150+</div>
@@ -115,18 +118,18 @@ export const LandingPage: React.FC = () => {
           </div>
 
           <div className="glass-card p-6 border border-cyan-500/30 text-center shadow-cyan-sm">
-            <div className="text-3xl sm:text-4xl font-black text-cyan font-mono">39.4%</div>
-            <div className="text-xs font-mono text-slate-300 uppercase mt-1">Average Delay Reduction</div>
+            <div className="text-3xl sm:text-4xl font-black text-cyan font-mono">—</div>
+            <div className="text-xs font-mono text-slate-300 uppercase mt-1">Delay Reduction (target 20%)</div>
           </div>
 
           <div className="glass-card p-6 border border-blue-500/20 text-center">
-            <div className="text-3xl sm:text-4xl font-black text-white font-mono">99.2%</div>
-            <div className="text-xs font-mono text-cyan uppercase mt-1">YOLOv8 Detection Accuracy</div>
+            <div className="text-3xl sm:text-4xl font-black text-white font-mono">—</div>
+            <div className="text-xs font-mono text-cyan uppercase mt-1">Detection Accuracy (not measured)</div>
           </div>
 
           <div className="glass-card p-6 border border-blue-500/20 text-center">
-            <div className="text-3xl sm:text-4xl font-black text-emerald-400 font-mono">18.4s</div>
-            <div className="text-xs font-mono text-slate-300 uppercase mt-1">Green Corridor Response</div>
+            <div className="text-3xl sm:text-4xl font-black text-emerald-400 font-mono">—</div>
+            <div className="text-xs font-mono text-slate-300 uppercase mt-1">Corridor Response (not measured)</div>
           </div>
         </div>
 

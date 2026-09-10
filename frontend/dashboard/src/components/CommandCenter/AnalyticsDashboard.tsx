@@ -11,8 +11,6 @@ import {
   ResponsiveContainer 
 } from 'recharts';
 import { 
-  TrendingDown, 
-  TrendingUp, 
   Clock, 
   Zap, 
   ShieldCheck, 
@@ -51,15 +49,11 @@ export const AnalyticsDashboard: React.FC = () => {
             <Clock className="w-4 h-4 text-studio-coral" />
           </div>
           <div className="my-3 flex items-baseline gap-2">
-            <span className="text-3xl font-black text-studio-text font-syne">86</span>
+            <span className="text-3xl font-black text-slate-300 font-syne">—</span>
             <span className="text-xs text-studio-muted font-mono">SEC / VEHICLE</span>
           </div>
           <div className="pt-2 border-t border-studio-pink/30 flex items-center justify-between text-xs font-mono">
-            <span className="text-studio-muted line-through">142s Before AI</span>
-            <span className="text-emerald-700 font-bold flex items-center gap-1">
-              <TrendingDown className="w-3.5 h-3.5" />
-              39.4% IMPROVEMENT
-            </span>
+            <span className="text-studio-muted">No measured baseline</span>
           </div>
         </div>
 
@@ -70,15 +64,11 @@ export const AnalyticsDashboard: React.FC = () => {
             <Gauge className="w-4 h-4 text-studio-coral" />
           </div>
           <div className="my-3 flex items-baseline gap-2">
-            <span className="text-3xl font-black text-studio-coralDark font-syne">38.2</span>
+            <span className="text-3xl font-black text-slate-300 font-syne">—</span>
             <span className="text-xs text-studio-muted font-mono">KM/H</span>
           </div>
           <div className="pt-2 border-t border-studio-pink/30 flex items-center justify-between text-xs font-mono">
-            <span className="text-studio-muted">22 km/h Baseline</span>
-            <span className="text-emerald-700 font-bold flex items-center gap-1">
-              <TrendingUp className="w-3.5 h-3.5" />
-              +73.6% SPEED
-            </span>
+            <span className="text-studio-muted">No measured baseline</span>
           </div>
         </div>
 
@@ -89,12 +79,11 @@ export const AnalyticsDashboard: React.FC = () => {
             <Zap className="w-4 h-4 text-amber-500" />
           </div>
           <div className="my-3 flex items-baseline gap-2">
-            <span className="text-3xl font-black text-studio-text font-syne">1,492</span>
+            <span className="text-3xl font-black text-slate-300 font-syne">—</span>
             <span className="text-xs text-studio-muted font-mono">TODAY</span>
           </div>
           <div className="pt-2 border-t border-studio-pink/30 flex items-center justify-between text-xs font-mono">
-            <span className="text-studio-muted">100% Conflict-Free</span>
-            <span className="text-studio-coral font-bold">12ms LATENCY</span>
+            <span className="text-studio-muted">No control service running</span>
           </div>
         </div>
 
@@ -105,8 +94,8 @@ export const AnalyticsDashboard: React.FC = () => {
             <ShieldCheck className="w-4 h-4 text-emerald-600" />
           </div>
           <div className="my-3 flex items-baseline gap-2">
-            <span className="text-3xl font-black text-emerald-600 font-syne">-54.2%</span>
-            <span className="text-xs text-studio-muted font-mono">Q3 ESTIMATE</span>
+            <span className="text-3xl font-black text-slate-300 font-syne">—</span>
+            <span className="text-xs text-studio-muted font-mono">NOT MEASURED</span>
           </div>
           <div className="pt-2 border-t border-studio-pink/30 flex items-center justify-between text-xs font-mono">
             <span className="text-studio-muted">Green Corridors</span>
