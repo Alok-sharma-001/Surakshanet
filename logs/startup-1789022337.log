@@ -1,6 +1,0 @@
-[1/10] Check dependencies             ... OK
-[2/10] Start infrastructure           ... 
-[2/10] Start infrastructure           FAILED
-       cause:  docker compose up failed
-       detail: Check docker daemon permissions or port conflicts
-       fix:    docs/04-environment-setup.md §7
