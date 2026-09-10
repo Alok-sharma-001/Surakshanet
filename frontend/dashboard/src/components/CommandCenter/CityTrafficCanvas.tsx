@@ -141,13 +141,13 @@ export const CityTrafficCanvas: React.FC<Props> = ({
     for (let i = 0; i < 48; i++) {
       const roadIdx = i % roads.length;
       const road = roads[roadIdx];
-      const p = Math.random();
+      const p = ((i * 7) % 48) / 48.0;
       list.push({
         x: road.from[0] + (road.to[0] - road.from[0]) * p,
         y: road.from[1] + (road.to[1] - road.from[1]) * p,
         targetX: road.to[0],
         targetY: road.to[1],
-        speed: (roadIdx === 0 && !isOptimized) ? 0.002 : (0.004 + Math.random() * 0.005),
+        speed: (roadIdx === 0 && !isOptimized) ? 0.002 : (0.004 + (i % 5) * 0.001),
         color: (roadIdx === 0 && !isOptimized) ? '#EF4444' : '#00D9FF',
         progress: p,
         roadIndex: roadIdx,

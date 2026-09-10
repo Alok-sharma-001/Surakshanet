@@ -4,6 +4,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { clsx } from 'clsx';
 import { api } from '../services/api';
 import { useTrafficStore } from '../store/trafficStore';
+import { TelemetrySourceBadge } from '../components/TelemetrySourceBadge';
 
 export default function ForecastingPage() {
   const storeJunctions = useTrafficStore((state) => state.junctions);
@@ -12,6 +13,9 @@ export default function ForecastingPage() {
   const [acknowledged, setAcknowledged] = useState(false);
   const [loading, setLoading] = useState(false);
   const [spillbackRisk, setSpillbackRisk] = useState<number>(0.44);
+  const [forecastSource, setForecastSource] = useState<string>('heuristic');
+  const [trainingData, setTrainingData] = useState<string | null>(null);
+  const [confidence, setConfidence] = useState<number | null>(null);
   const [predictionData, setPredictionData] = useState<any[]>([
     { name: 'T-45', actual: 48, predicted: null },
     { name: 'T-30', actual: 54, predicted: null },
@@ -36,8 +40,12 @@ export default function ForecastingPage() {
       const data = res.data;
       if (data && data.spillback_risk !== undefined) {
         setSpillbackRisk(data.spillback_risk);
+        setForecastSource(data.source || 'heuristic');
+        setTrainingData(data.training_data || null);
 
-        const p15 = data.predictions?.find((p: any) => p.minutes === 15)?.predicted_pcu || 72;
+        const p15Obj = data.predictions?.find((p: any) => p.minutes === 15);
+        setConfidence(p15Obj?.confidence ?? null);
+        const p15 = p15Obj?.predicted_pcu || 72;
         const p30 = data.predictions?.find((p: any) => p.minutes === 30)?.predicted_pcu || 76;
         const p60 = data.predictions?.find((p: any) => p.minutes === 60)?.predicted_pcu || 65;
 
@@ -69,8 +77,20 @@ export default function ForecastingPage() {
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-syne font-bold text-slate-900">Traffic Forecasting</h1>
-          <p className="text-sm text-slate-500 mt-1">Spillback Prediction & Flow Telemetry Model (LSTM + XGBoost)</p>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-syne font-bold text-slate-900">Traffic Forecasting</h1>
+            <TelemetrySourceBadge source={forecastSource} />
+            {trainingData && (
+              <span className="text-[10px] font-mono font-bold bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-md uppercase tracking-wider">
+                DATA: {trainingData.toUpperCase()}
+              </span>
+            )}
+          </div>
+          <p className="text-sm text-slate-500 mt-1">
+            {forecastSource === 'model'
+              ? 'Spillback Prediction & Flow Telemetry Model (LSTM + XGBoost)'
+              : 'Dynamic Flow Heuristic Fallback (Estimated, No Trained Model Online)'}
+          </p>
         </div>
 
         <div className="flex items-center gap-3">
@@ -214,8 +234,12 @@ export default function ForecastingPage() {
               <span className="font-bold text-slate-700 font-mono">0.75 Limit</span>
             </div>
             <div className="flex justify-between p-2 rounded bg-slate-50 border border-slate-100">
-              <span className="text-slate-500">Ensemble Confidence</span>
-              <span className="font-bold text-emerald-600 font-mono">88%</span>
+              <span className="text-slate-500">Model Confidence</span>
+              {confidence !== null && forecastSource === 'model' ? (
+                <span className="font-bold text-emerald-600 font-mono">{(confidence * 100).toFixed(0)}%</span>
+              ) : (
+                <span className="font-semibold text-amber-600 text-xs">N/A (Heuristic Fallback)</span>
+              )}
             </div>
           </div>
         </div>

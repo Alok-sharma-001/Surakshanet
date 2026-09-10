@@ -136,31 +136,6 @@ export default function TrafficMapPage() {
     if (isPlaying) {
       timer = window.setInterval(() => {
         setTime(new Date());
-
-        // When not connected to SUMO bridge, simulate realistic micro-fluctuations
-        if (!isTwinConnected) {
-          setTotalVehicles(prev => Math.max(800, prev + Math.floor(Math.random() * 9) - 4));
-          setAvgSpeed(prev => +(Math.max(12.0, Math.min(48.0, prev + (Math.random() * 1.2 - 0.6)))).toFixed(1));
-          setThroughput(prev => Math.max(600, Math.min(1800, prev + Math.floor(Math.random() * 15) - 7)));
-
-          setJunctionsData(prev =>
-            prev.map((j) => {
-              const speedDelta = (Math.random() * 2 - 1);
-              const queueDelta = (Math.random() * 4 - 2);
-              const newSpeed = Math.max(8.0, Math.min(55.0, +(j.speed + speedDelta).toFixed(1)));
-              const newQueue = Math.max(2, Math.min(130, Math.round(j.queue + queueDelta)));
-              const isCongested = newQueue > 50 || newSpeed < 18;
-
-              return {
-                ...j,
-                speed: newSpeed,
-                queue: newQueue,
-                pcu: Math.round(newQueue * 5.5 + newSpeed * 8),
-                status: isCongested ? 'congested' : 'normal'
-              };
-            })
-          );
-        }
       }, 1000);
     }
     return () => clearInterval(timer);

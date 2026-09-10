@@ -2,6 +2,7 @@ from pydantic import BaseModel, ConfigDict
 from typing import Optional, Dict, Any
 from uuid import UUID
 from datetime import datetime
+from shared.constants import DataSource
 
 
 class JunctionCreate(BaseModel):
@@ -61,6 +62,7 @@ class TrafficReadingCreate(BaseModel):
     average_speed: Optional[float] = None
     queue_length: Optional[float] = None
     vehicle_breakdown: Optional[Dict[str, Any]] = None
+    source: Optional[DataSource] = DataSource.MQTT
     timestamp: Optional[datetime] = None
 
 
@@ -74,6 +76,7 @@ class TrafficReadingResponse(BaseModel):
     avg_speed: Optional[float]
     queue_length: Optional[float]
     vehicle_breakdown: Optional[Dict[str, Any]]
+    source: DataSource = DataSource.MQTT
 
     model_config = ConfigDict(from_attributes=True)
 

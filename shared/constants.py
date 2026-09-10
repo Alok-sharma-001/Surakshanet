@@ -1,4 +1,15 @@
 from typing import Dict, Any
+import enum
+
+
+class DataSource(str, enum.Enum):
+    SUMO = "sumo"          # measured from microsimulation via TraCI
+    VISION = "vision"      # derived from camera frames by the detector
+    MQTT = "mqtt"          # reported by a physical/simulated edge device
+    MODEL = "model"        # produced by a trained model (forecaster, DQN)
+    HEURISTIC = "heuristic"  # produced by a formula, NOT a trained model
+    MANUAL = "manual"      # entered or seeded by a human
+
 
 PCU_FACTORS: Dict[str, float] = {
     'car': 1.0,

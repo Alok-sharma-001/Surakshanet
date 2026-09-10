@@ -5,7 +5,7 @@ import clsx from 'clsx';
 
 const mockChartData = Array.from({ length: 20 }).map((_, i) => ({
   step: 3900 + i * 10,
-  throughput: 800 + Math.random() * 200 - 100
+  throughput: Math.round(800 + Math.sin(i / 2) * 80)
 }));
 
 export default function SimulationPage() {

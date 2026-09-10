@@ -9,7 +9,7 @@ import { wsService } from '../services/websocket';
 
 const mockRewardData = Array.from({ length: 20 }).map((_, i) => ({
   time: i,
-  reward: 5 + Math.random() * 10 + Math.sin(i / 2) * 5,
+  reward: 5 + Math.sin(i / 2) * 5,
 }));
 
 export default function SignalControlPage() {
@@ -80,20 +80,6 @@ export default function SignalControlPage() {
       });
   }, [selectedJunctionId]);
 
-  // Periodic synthetic telemetry when running in MARL mode
-  useEffect(() => {
-    if (activeControl !== 'marl') return;
-
-    const interval = setInterval(() => {
-      const q = Math.floor(Math.random() * 30) + 5;
-      const act = Math.random() > 0.5 ? 'Maintain Phase 1 (N-S Straight)' : 'Trigger Amber Clearance (3.0s)';
-      const newEntry = `[MARL Edge] State Evaluated Queue: ${q}veh\n→ ACTION: ${act}\nQ-Value: ${(Math.random()*0.9+0.1).toFixed(3)} Conf: ${Math.floor(Math.random()*15+85)}%`;
-
-      setTelemetry(prev => [newEntry, ...prev.slice(0, 25)]);
-    }, 4000);
-
-    return () => clearInterval(interval);
-  }, [activeControl]);
 
   const handleModeChange = async (mode: 'marl' | 'webster' | 'manual') => {
     setActiveControl(mode);

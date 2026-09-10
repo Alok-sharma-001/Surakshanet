@@ -65,10 +65,7 @@ export default function EmergencyPage() {
     if (!isActivated) return;
 
     const speedInterval = setInterval(() => {
-      setSpeed(prev => {
-        const variation = Math.floor(Math.random() * 5) - 2;
-        return Math.max(50, Math.min(95, prev + variation));
-      });
+      setSpeed(68);
     }, 2000);
 
     const progressionInterval = setInterval(() => {
