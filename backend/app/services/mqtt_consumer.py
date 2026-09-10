@@ -1,23 +1,38 @@
 import asyncio
 import json
 import logging
-import random
 import uuid
 from datetime import datetime
 from typing import Optional
 import paho.mqtt.client as mqtt
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import select
 import redis.asyncio as aioredis
 
+from sqlalchemy import select
 from app.config import get_settings
 from app.models.traffic import TrafficReading
-from app.models.junction import Junction
-from shared.constants import MQTT_SENSOR_TELEMETRY_TOPIC, MQTT_JUNCTION_TELEMETRY_TOPIC
+from app.models.junction import Junction, TrafficSensor, SensorType, ApproachDirection
+from shared.constants import (
+    REDIS_CHANNELS,
+    MQTT_SENSOR_TELEMETRY_TOPIC,
+    MQTT_JUNCTION_TELEMETRY_TOPIC,
+    DataSource,
+)
+from shared.telemetry import (
+    validate_telemetry,
+    resolve_junction_uuid,
+    TelemetryValidationError,
+    JunctionTelemetry,
+)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+# Measured provenance a device or bridge may legitimately declare on ingest.
+_MEASURED_SOURCES = frozenset(
+    {DataSource.MQTT.value, DataSource.SUMO.value, DataSource.VISION.value}
+)
 
 
 class MQTTTelemetryConsumer:
@@ -33,7 +48,6 @@ class MQTTTelemetryConsumer:
         self.async_session = None
         self.redis_client = None
         self.loop: Optional[asyncio.AbstractEventLoop] = None
-        self._ticker_task: Optional[asyncio.Task] = None
 
     def start(self):
         """Start the MQTT consumer and background live telemetry loop."""
@@ -63,15 +77,9 @@ class MQTTTelemetryConsumer:
         except Exception as e:
             logger.warning(f"Could not connect to MQTT broker ({e}). Telemetry ingestion will run in standalone mode.")
 
-        # Start continuous telemetry ticker
-        if self.loop and self.loop.is_running():
-            self._ticker_task = self.loop.create_task(self._live_telemetry_loop())
-
     def stop(self):
         """Stop the MQTT consumer cleanly."""
         self.is_running = False
-        if self._ticker_task:
-            self._ticker_task.cancel()
         if self.client:
             try:
                 self.client.loop_stop()
@@ -107,125 +115,104 @@ class MQTTTelemetryConsumer:
             elif "sensors" in msg.topic and len(topic_parts) >= 3 and not payload.get("sensor_id"):
                 payload["sensor_id"] = topic_parts[2]
 
+            # Stamp source=MQTT at ingress if not already explicitly declared
+            if "source" not in payload:
+                payload["source"] = DataSource.MQTT.value
+
             if self.loop and self.loop.is_running():
                 asyncio.run_coroutine_threadsafe(self._process_telemetry(payload), self.loop)
         except Exception as e:
             logger.error(f"Error parsing MQTT message on {msg.topic}: {e}")
 
     async def _process_telemetry(self, data: dict):
-        """Store reading in TimescaleDB and forward to Redis channel."""
+        """Validate against canonical JunctionTelemetry schema, store in TimescaleDB, and forward to Redis."""
         try:
-            junction_id_raw = data.get("junction_id")
-            sensor_id_raw = data.get("sensor_id")
-
-            if not junction_id_raw and not sensor_id_raw:
+            # Validate schema and provenance
+            try:
+                telemetry = validate_telemetry(data)
+            except TelemetryValidationError as e:
+                logger.warning("Rejecting malformed telemetry: %s", e)
                 return
 
-            if junction_id_raw:
-                try:
-                    junction_id = uuid.UUID(str(junction_id_raw))
-                except ValueError:
-                    junction_id = uuid.uuid5(uuid.NAMESPACE_DNS, str(junction_id_raw))
-            else:
-                junction_id = uuid.uuid4()
-
-            if sensor_id_raw:
-                try:
-                    sensor_id = uuid.UUID(str(sensor_id_raw))
-                except ValueError:
-                    sensor_id = uuid.uuid5(uuid.NAMESPACE_DNS, str(sensor_id_raw))
-            else:
-                sensor_id = uuid.uuid5(junction_id, "north_sensor")
-
-            pcu = float(data.get("pcu_value", data.get("north_pcu", data.get("pcu", 28.0))))
-            speed = float(data.get("avg_speed", data.get("speed", 32.0)))
-            queue = float(data.get("queue_length", data.get("queue", 8.0)))
-            v_count = float(data.get("vehicle_count", data.get("total_vehicles", 22.0)))
-
-            source = data.get("source", "live")
-            if source not in ("live", "sim", "mock"):
-                source = "live"
-
-            reading = TrafficReading(
-                id=uuid.uuid4(),
-                timestamp=datetime.utcnow(),
-                sensor_id=sensor_id,
-                junction_id=junction_id,
-                vehicle_count=v_count,
-                pcu_value=pcu,
-                avg_speed=speed,
-                queue_length=queue,
-                vehicle_breakdown=data.get("vehicle_breakdown", data.get("vehicle_counts", {"car": 12, "motorcycle": 8, "bus": 2})),
-                source=source
-            )
-
-            # 1. Insert into database
             async with self.async_session() as db:
+                # Resolve junction
+                j_uuid = resolve_junction_uuid(telemetry.junction_id)
+                if j_uuid:
+                    result = await db.execute(select(Junction).where(Junction.id == j_uuid))
+                    j = result.scalars().first()
+                else:
+                    result = await db.execute(select(Junction).where(Junction.name.ilike(telemetry.junction_id)))
+                    j = result.scalars().first()
+
+                if not j:
+                    logger.warning("Rejecting telemetry: unresolvable junction_id %r", telemetry.junction_id)
+                    return
+
+                # Resolve sensor
+                sensor_id_raw = data.get("sensor_id")
+                sensor = None
+                if sensor_id_raw:
+                    s_uuid = resolve_junction_uuid(str(sensor_id_raw))
+                    if s_uuid:
+                        s_res = await db.execute(select(TrafficSensor).where(TrafficSensor.id == s_uuid))
+                        sensor = s_res.scalars().first()
+                if not sensor:
+                    s_res = await db.execute(select(TrafficSensor).where(TrafficSensor.junction_id == j.id))
+                    sensor = s_res.scalars().first()
+                if not sensor:
+                    sensor = TrafficSensor(
+                        id=uuid.uuid4(),
+                        junction_id=j.id,
+                        sensor_type=SensorType.RADAR,
+                        approach_direction=ApproachDirection.NORTH,
+                        is_active=True
+                    )
+                    db.add(sensor)
+                    await db.flush()
+
+                # Aggregate approach statistics
+                v_count = sum(a.vehicle_count for a in telemetry.approaches)
+                pcu = telemetry.total_pcu if telemetry.total_pcu > 0 else sum(a.pcu for a in telemetry.approaches)
+                speeds = [a.mean_speed_kmh for a in telemetry.approaches if a.mean_speed_kmh is not None and a.mean_speed_kmh > 0]
+                avg_speed = (sum(speeds) / len(speeds)) if speeds else None
+                queue_lengths = [a.queue_length_m for a in telemetry.approaches if a.queue_length_m is not None]
+                max_queue = max(queue_lengths) if queue_lengths else None
+
+                breakdown = {}
+                for a in telemetry.approaches:
+                    for k, v in a.vehicle_breakdown.items():
+                        breakdown[k] = breakdown.get(k, 0) + int(v)
+
+                try:
+                    ts = datetime.fromisoformat(telemetry.timestamp.replace("Z", "+00:00"))
+                except Exception:
+                    ts = datetime.utcnow()
+
+                reading = TrafficReading(
+                    id=uuid.uuid4(),
+                    timestamp=ts,
+                    sensor_id=sensor.id,
+                    junction_id=j.id,
+                    vehicle_count=v_count,
+                    pcu_value=pcu,
+                    avg_speed=avg_speed,
+                    queue_length=max_queue,
+                    vehicle_breakdown=breakdown if breakdown else None,
+                    source=telemetry.source.value
+                )
                 db.add(reading)
                 await db.commit()
 
-            # 2. Publish to Redis for live WebSocket streaming
+            # Publish to Redis
             try:
                 if not self.redis_client:
                     self.redis_client = aioredis.from_url(settings.REDIS_URL)
-                event_payload = {
-                    "type": "TELEMETRY_UPDATE",
-                    "source": source,
-                    "junction_id": str(junction_id),
-                    "sensor_id": str(sensor_id),
-                    "pcu": reading.pcu_value,
-                    "speed": reading.avg_speed,
-                    "queue": reading.queue_length,
-                    "timestamp": reading.timestamp.isoformat()
-                }
-                await self.redis_client.publish("traffic_updates", json.dumps(event_payload))
-            except Exception:
-                pass
+                await self.redis_client.publish(REDIS_CHANNELS["traffic"], telemetry.to_json())
+            except Exception as e:
+                logger.warning("Failed to publish telemetry to Redis: %s", e)
 
         except Exception as e:
             logger.error(f"Error persisting MQTT telemetry: {e}")
-
-    async def _live_telemetry_loop(self):
-        """
-        Background live ticker: Emits periodic telemetry pulses across city junctions
-        to ensure the command center and dashboards always have fresh live streams.
-        """
-        await asyncio.sleep(5)  # Initial grace delay
-        while self.is_running:
-            try:
-                async with self.async_session() as db:
-                    result = await db.execute(select(Junction.id, Junction.name).where(Junction.is_active == True).limit(12))
-                    active_juncs = result.all()
-
-                if active_juncs:
-                    if not self.redis_client:
-                        self.redis_client = aioredis.from_url(settings.REDIS_URL)
-
-                    # Pick 2-3 junctions per tick
-                    sampled = random.sample(active_juncs, min(len(active_juncs), 3))
-                    for j_id, j_name in sampled:
-                        pcu = round(random.uniform(25.0, 85.0), 1)
-                        spd = round(max(12.0, 48.0 - (pcu * 0.35) + random.uniform(-2, 2)), 1)
-                        q_len = round(max(0.0, (pcu - 20) * 0.8), 1)
-
-                        tick_payload = {
-                            "type": "TELEMETRY_UPDATE",
-                            "source": "mock",
-                            "junction_id": str(j_id),
-                            "junction_name": j_name,
-                            "pcu": pcu,
-                            "speed": spd,
-                            "queue": q_len,
-                            "timestamp": datetime.utcnow().isoformat()
-                        }
-                        await self.redis_client.publish("traffic_updates", json.dumps(tick_payload))
-
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.debug(f"Telemetry loop tick exception: {e}")
-
-            await asyncio.sleep(5)
 
 
 # Global daemon instance

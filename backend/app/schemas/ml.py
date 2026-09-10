@@ -1,6 +1,7 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+from shared.constants import DataSource
 
 
 class DetectionRequest(BaseModel):
@@ -19,25 +20,48 @@ class DetectionResult(BaseModel):
 class PredictionItem(BaseModel):
     minutes: int
     predicted_pcu: float
-    confidence: float
+    confidence: Optional[float] = None
 
 
 class PredictionResponse(BaseModel):
     junction_id: str
     predictions: List[PredictionItem]
     spillback_risk: float
+    source: DataSource = DataSource.HEURISTIC
+    training_data: Optional[str] = None
     generated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    @model_validator(mode="after")
+    def validate_confidence_provenance(self):
+        if self.source != DataSource.MODEL:
+            for p in self.predictions:
+                if p.confidence is not None:
+                    raise ValueError(
+                        f"confidence is forbidden when source is '{self.source.value}'; "
+                        "confidence may only accompany source='model'"
+                    )
+        return self
 
 
 class TrainingStatus(BaseModel):
-    is_training: bool
-    episode: int
-    total_episodes: int
-    current_reward: float
-    avg_reward_100: float
-    epsilon: float
-    best_reward: float
-    last_trained: Optional[str] = "2026-09-04T10:00:00Z"
+    """
+    MARL training state.
+
+    SN-001/SN-003: every metric is optional and defaults to None. The previous
+    shape required them and defaulted `last_trained` to a hardcoded timestamp,
+    which meant the endpoint could not express "no training data" -- it had to
+    return numbers whether or not any existed.
+    """
+    status: str = "unavailable"          # "unavailable" | "running" | "complete"
+    reason: Optional[str] = None         # why, when status is "unavailable"
+    is_training: bool = False
+    episode: Optional[int] = None
+    total_episodes: Optional[int] = None
+    current_reward: Optional[float] = None
+    avg_reward_100: Optional[float] = None
+    epsilon: Optional[float] = None
+    best_reward: Optional[float] = None
+    last_trained: Optional[str] = None
 
 
 class TrainingStartRequest(BaseModel):
@@ -57,6 +81,7 @@ class ModelHealth(BaseModel):
     forecaster_model: bool
     marl_agent: bool
     sumo_available: bool
+    training_data: Optional[str] = "synthetic"
 
 
 class ForecastTrainRequest(BaseModel):

@@ -51,9 +51,9 @@ def test_time_bucket_query_capability(db_client: E2EDatabaseClient):
 @pytest.mark.tier1
 @pytest.mark.m2
 @pytest.mark.feature(9)
-def test_traffic_history_api_time_filtering(http_client: E2EHttpClient):
+def test_traffic_history_api_time_filtering(authed_client: E2EHttpClient):
     """TC-F09-04: Verify GET /api/v1/traffic/history handles time interval queries."""
-    res = http_client.get(
+    res = authed_client.get(
         "/api/v1/traffic/history",
         params={
             "start_time": "2026-09-01T00:00:00Z",
@@ -61,7 +61,7 @@ def test_traffic_history_api_time_filtering(http_client: E2EHttpClient):
             "limit": 10
         }
     )
-    assert res.status_code in (200, 401), f"Unexpected status: {res.status_code}"
+    assert res.status_code == 200, f"Expected 200 for an authenticated request, got {res.status_code}: {res.text}"
 
 
 @pytest.mark.tier1

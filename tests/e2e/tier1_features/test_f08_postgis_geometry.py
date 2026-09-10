@@ -28,10 +28,10 @@ def test_junction_location_column_exists(db_client: E2EDatabaseClient):
 @pytest.mark.tier1
 @pytest.mark.m2
 @pytest.mark.feature(8)
-def test_spatial_query_nearby_junctions_endpoint(http_client: E2EHttpClient):
+def test_spatial_query_nearby_junctions_endpoint(authed_client: E2EHttpClient):
     """TC-F08-02: Verify GET /api/v1/junctions/nearby returns matching junctions."""
     # Test query near central coordinates (e.g. 12.9716, 77.5946 - Bangalore or test coords)
-    res = http_client.get(
+    res = authed_client.get(
         "/api/v1/junctions/nearby",
         params={"latitude": 12.9716, "longitude": 77.5946, "radius": 5000}
     )
@@ -41,8 +41,8 @@ def test_spatial_query_nearby_junctions_endpoint(http_client: E2EHttpClient):
         assert isinstance(data, list)
     else:
         # Check standard junctions list endpoint fallback
-        fallback = http_client.get("/api/v1/junctions")
-        assert fallback.status_code in (200, 401), f"Unexpected junctions response: {fallback.status_code}"
+        fallback = authed_client.get("/api/v1/junctions")
+        assert fallback.status_code == 200, f"Expected 200 for an authenticated request, got {fallback.status_code}: {fallback.text}"
 
 
 @pytest.mark.tier1
@@ -88,7 +88,7 @@ def test_gist_index_on_spatial_geometry(db_client: E2EDatabaseClient):
 @pytest.mark.tier1
 @pytest.mark.m2
 @pytest.mark.feature(8)
-def test_create_junction_with_coordinates(http_client: E2EHttpClient, admin_token: str):
+def test_create_junction_with_coordinates(authed_client: E2EHttpClient, admin_token: str):
     """TC-F08-05: Verify creating a junction accepts valid lat/long coordinates."""
     payload = {
         "name": "E2E Test Junction",
@@ -98,5 +98,5 @@ def test_create_junction_with_coordinates(http_client: E2EHttpClient, admin_toke
         "status": "ACTIVE"
     }
     headers = {"Authorization": f"Bearer {admin_token}"}
-    res = http_client.post("/api/v1/junctions", json_data=payload, headers=headers)
+    res = authed_client.post("/api/v1/junctions", json_data=payload, headers=headers)
     assert res.status_code in (200, 201, 403), f"Create junction status: {res.status_code}"

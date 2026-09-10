@@ -2,17 +2,16 @@ import os
 import time
 import uuid
 import logging
-import asyncio
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, Depends, UploadFile, File, BackgroundTasks, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
-import pandas as pd
 
 from app.database import get_db
 from app.models.traffic import TrafficReading
 from app.models.junction import Junction
+from shared.exceptions import VisionUnavailable
 from app.schemas.ml import (
     DetectionResult,
     PredictionResponse,
@@ -23,6 +22,7 @@ from app.schemas.ml import (
 )
 from app.services.auth_service import get_current_user
 from app.models.user import User
+from shared.constants import DataSource
 
 
 logger = logging.getLogger(__name__)
@@ -42,12 +42,20 @@ def get_vehicle_detector():
         except Exception as e:
             logger.warning(f"Could not initialize VehicleDetector: {e}")
 
-            class _DummyDetector:
+            class _UnavailableDetector:
+                """Stands in for a detector that could not be constructed.
+
+                It raises rather than returning zeros: an empty count is a
+                claim that the camera saw no vehicles, which is not what
+                happened.
+                """
                 model_loaded = False
 
                 def detect_from_bytes(self, b):
-                    return {"vehicle_counts": {}, "total_pcu": 0.0, "detections": [], "processing_time_ms": 0.0}
-            _detector = _DummyDetector()
+                    raise VisionUnavailable(
+                        "VehicleDetector could not be initialised on this worker"
+                    )
+            _detector = _UnavailableDetector()
     return _detector
 
 
@@ -79,7 +87,6 @@ def get_traffic_forecaster():
                 sequence_length = 12
 
                 def predict(self, *a, **kw): return []
-                def generate_synthetic_data(self, *a, **kw): return pd.DataFrame()
             _forecaster = _DummyForecaster()
     return _forecaster
 
@@ -98,37 +105,17 @@ class _LazyModelProxy:
 vehicle_detector = _LazyModelProxy(get_vehicle_detector)
 traffic_forecaster = _LazyModelProxy(get_traffic_forecaster)
 
-# Global state for MARL training status
-_training_status = {
-    "is_training": False,
-    "episode": 420,
-    "total_episodes": 500,
-    "current_reward": 14.2,
-    "avg_reward_100": 11.8,
-    "epsilon": 0.05,
-    "best_reward": 22.4,
-    "last_trained": "2026-09-04T10:00:00Z"
-}
-
-
-async def run_marl_training_task(episodes: int, scenario: str):
-    """Background task to simulate / execute MARL training steps."""
-    global _training_status
-    _training_status["is_training"] = True
-    _training_status["total_episodes"] = episodes
-    _training_status["episode"] = 0
-
-    try:
-        for ep in range(1, min(episodes + 1, 20)):
-            if not _training_status["is_training"]:
-                break
-            await asyncio.sleep(0.5)
-            _training_status["episode"] = ep
-            _training_status["current_reward"] = round(10.0 + (ep * 0.4) + (ep % 3), 2)
-            _training_status["avg_reward_100"] = round(8.0 + (ep * 0.3), 2)
-            _training_status["epsilon"] = max(0.01, round(1.0 - (ep / max(1, episodes)), 3))
-    finally:
-        _training_status["is_training"] = False
+# MARL training state.
+#
+# SN-001: this was previously seeded with invented metrics and advanced by an
+# arithmetic loop without ever running a gradient step. Both are removed.
+# `10.0 + ep*0.4 + ep%3` without ever running a gradient step, producing a
+# learning curve from arithmetic. Both are removed.
+#
+# Training is an offline activity (see ml/marl/train_marl.py); the API does not
+# run it. This stays None until a real run reports into it, and the status
+# endpoint reports `unavailable` rather than inventing progress.
+_training_status: Optional[dict] = None
 
 
 @router.post("/detect", response_model=DetectionResult)
@@ -149,9 +136,17 @@ async def detect_vehicles(
         return DetectionResult(
             vehicle_counts=analysis["counts"],
             total_pcu=analysis["total_pcu"],
-            density=analysis.get("density", 0.45),
+            density=analysis["density"],
             detections=analysis["detections"],
             processing_time_ms=elapsed_ms
+        )
+    except VisionUnavailable as e:
+        # The detector has no weights, or inference failed. Either way there is
+        # no detection to report; it previously returned five invented boxes.
+        logger.warning(f"Detection unavailable: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail={"status": "vision_unavailable", "reason": str(e)},
         )
     except Exception as e:
         logger.error(f"Detection failed: {e}")
@@ -196,78 +191,133 @@ async def get_prediction(
                         "timestamp": r.timestamp.isoformat(),
                         "pcu": float(r.pcu_value),
                         "pcu_value": float(r.pcu_value),
-                        "speed": float(r.avg_speed or 30.0),
-                        "queue": float(r.queue_length or 5.0),
+                        # Null means the sensor did not report it. Substituting
+                        # 30 km/h and a queue of 5 fed invented values straight
+                        # into the model's input window.
+                        "speed": float(r.avg_speed) if r.avg_speed is not None else None,
+                        "queue": float(r.queue_length) if r.queue_length is not None else None,
                         "junction_id": junction_id
                     }
                     for r in reversed(db_readings)
                 ]
 
         # 2. Check if forecaster has trained weights
-        if traffic_forecaster.is_lstm_trained and traffic_forecaster.is_xgb_trained:
+        if (
+            recent_readings
+            and traffic_forecaster.is_lstm_trained
+            and traffic_forecaster.is_xgb_trained
+        ):
             try:
-                if not recent_readings:
-                    df = traffic_forecaster.generate_synthetic_data(num_days=2, junctions=1)
-                    recent_readings = df.tail(traffic_forecaster.sequence_length).to_dict('records')
-
+                # A prediction is only about this junction if it was computed
+                # from this junction's observations. Feeding the model
+                # generate_synthetic_data() when the table was empty produced a
+                # curve about the data generator, returned under source="model"
+                # as though it described the road.
                 result = traffic_forecaster.predict(junction_id, recent_readings)
 
                 return PredictionResponse(
                     junction_id=junction_id,
                     predictions=[PredictionItem(**p) for p in result['horizons']],
                     spillback_risk=round(result['spillback_risk'], 2),
+                    source=DataSource.MODEL,
+                    training_data="synthetic",
                     generated_at=datetime.utcnow()
                 )
             except Exception as ml_err:
                 logger.warning(f"Ensemble prediction error ({ml_err}), using dynamic flow model fallback.")
 
-        # 3. Dynamic heuristic prediction based on junction ID and time of day
-        hour = datetime.utcnow().hour + 5.5  # IST
-        base_pcu = 45.0 + (25.0 if 8 <= hour <= 11 or 17 <= hour <= 21 else 0.0)
-        hash_offset = sum(ord(c) for c in junction_id) % 15
+        # 3. Heuristic path (SN-006). Without observations there is nothing to
+        #    extrapolate from, so the endpoint reports that rather than
+        #    inventing a curve. The previous fallback derived its value from
+        #    `sum(ord(c) for c in junction_id) % 15` — deterministic noise off
+        #    the junction's name, which varies per junction and so reads as
+        #    junction-specific insight while carrying no information about it.
+        if not recent_readings:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "status": "forecast_unavailable",
+                    "reason": (
+                        "no recent traffic readings for this junction and no "
+                        "trained forecaster; a prediction would have no basis"
+                    ),
+                },
+            )
+
+        # Persistence baseline anchored on the last observed PCU, with a coarse
+        # peak-hour factor. Crude, but every input is measured.
+        last_pcu = float(recent_readings[-1]["pcu_value"])
+        hour_ist = (datetime.utcnow().hour + 5) % 24
+        peak = 1.15 if (8 <= hour_ist <= 11 or 17 <= hour_ist <= 21) else 1.0
 
         return PredictionResponse(
             junction_id=junction_id,
             predictions=[
-                PredictionItem(minutes=15, predicted_pcu=round(base_pcu + hash_offset, 1), confidence=0.92),
-                PredictionItem(minutes=30, predicted_pcu=round(base_pcu + hash_offset * 1.2 + 6.0, 1), confidence=0.86),
-                PredictionItem(minutes=60, predicted_pcu=round(base_pcu + hash_offset * 1.4 + 12.0, 1), confidence=0.78),
+                PredictionItem(minutes=15, predicted_pcu=round(last_pcu * peak, 1), confidence=None),
+                PredictionItem(minutes=30, predicted_pcu=round(last_pcu * peak * 1.05, 1), confidence=None),
+                PredictionItem(minutes=60, predicted_pcu=round(last_pcu * peak * 1.10, 1), confidence=None),
             ],
-            spillback_risk=round(min(0.95, (base_pcu + hash_offset) / 100.0), 2),
+            spillback_risk=round(min(0.95, (last_pcu * peak) / 100.0), 2),
+            source=DataSource.HEURISTIC,
+            training_data=None,
             generated_at=datetime.utcnow()
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Prediction failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/train/start")
+@router.post("/train/start", status_code=status.HTTP_501_NOT_IMPLEMENTED)
 async def start_training(
     req: TrainingStartRequest,
-    background_tasks: BackgroundTasks,
     current_user: Optional[User] = Depends(get_current_user)
 ):
-    """Trigger background MARL training episode runner."""
-    global _training_status
-    if _training_status["is_training"]:
-        raise HTTPException(status_code=400, detail="Training already in progress")
+    """
+    Not implemented. MARL training is an offline activity.
 
-    background_tasks.add_task(run_marl_training_task, req.num_episodes, req.scenario)
-    return {"message": "MARL training initiated", "scenario": req.scenario, "episodes": req.num_episodes}
+    Training runs via `python -m ml.marl.train_marl`, which writes real episode
+    metrics and a policy checkpoint to ml/marl/weights/. The API deliberately
+    does not expose a trigger for it: a request-scoped background task cannot
+    produce a reproducible training run, and the previous implementation of this
+    endpoint synthesised progress instead of training anything (SN-001).
+    """
+    raise HTTPException(
+        status_code=501,
+        detail=(
+            "Training is not available through the API. Run it offline with "
+            "`python -m ml.marl.train_marl`; the resulting metrics and checkpoint "
+            "are what this service reports."
+        ),
+    )
 
 
-@router.post("/train/stop")
+@router.post("/train/stop", status_code=status.HTTP_501_NOT_IMPLEMENTED)
 async def stop_training(current_user: Optional[User] = Depends(get_current_user)):
-    """Stop active MARL training."""
-    global _training_status
-    _training_status["is_training"] = False
-    return {"message": "MARL training stopped"}
+    """Not implemented. See start_training."""
+    raise HTTPException(
+        status_code=501,
+        detail="Training is not available through the API, so there is nothing to stop.",
+    )
 
 
 @router.get("/train/status", response_model=TrainingStatus)
 async def get_training_status(current_user: Optional[User] = Depends(get_current_user)):
-    """Get real-time status of the MARL training process."""
-    global _training_status
+    """
+    Report real training state, or state plainly that none is available.
+
+    Returns `status: "unavailable"` when no run has reported metrics. It does not
+    substitute placeholder values for absent ones.
+    """
+    if _training_status is None:
+        return TrainingStatus(
+            status="unavailable",
+            reason=(
+                "No training run has reported metrics. Training runs offline via "
+                "ml/marl/train_marl.py."
+            ),
+        )
     return TrainingStatus(**_training_status)
 
 
@@ -283,5 +333,6 @@ async def get_models_health(current_user: Optional[User] = Depends(get_current_u
         vision_model=vehicle_detector.model_loaded,
         forecaster_model=traffic_forecaster.is_lstm_trained and traffic_forecaster.is_xgb_trained,
         marl_agent=True,
-        sumo_available=has_sumo
+        sumo_available=has_sumo,
+        training_data="synthetic"
     )

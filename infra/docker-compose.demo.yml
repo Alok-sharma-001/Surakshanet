@@ -1,0 +1,147 @@
+services:
+  timescaledb:
+    image: timescale/timescaledb-ha:pg15
+    container_name: surakshanet-timescaledb
+    ports:
+      - "127.0.0.1:5433:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-surakshanet}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-surakshanet_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-surakshanet}
+    volumes:
+      - timescale_data:/home/postgres/pgdata/data
+    networks:
+      surakshanet-network:
+        aliases:
+          - postgres
+          - timescaledb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-surakshanet} -d ${POSTGRES_DB:-surakshanet}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  redis:
+    image: redis:7-alpine
+    container_name: surakshanet-redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - surakshanet-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 2s
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: surakshanet-mosquitto
+    ports:
+      - "127.0.0.1:1883:1883"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    networks:
+      - surakshanet-network
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 mosquitto_sub -t '$$SYS/broker/version' -C 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  backend:
+    image: surakshanet/surakshanet-backend:latest
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    container_name: surakshanet-backend
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ../backend/app:/app/app
+      - ../backend/alembic:/app/alembic
+      - ../backend/alembic.ini:/app/alembic.ini
+      - ../shared:/app/shared
+      - ../ml:/app/ml
+      - ../simulation:/app/simulation
+      - ../services:/app/services
+      - ../tests:/app/tests
+    environment:
+      - ENVIRONMENT=demo
+      - DATABASE_URL=postgresql+asyncpg://surakshanet:surakshanet_dev@timescaledb:5432/surakshanet
+      - REDIS_URL=redis://redis:6379/0
+      - MQTT_BROKER_HOST=mosquitto
+      - MQTT_BROKER_PORT=1883
+      - JWT_SECRET_KEY=your-super-secret-key-change-in-production
+      - CORS_ORIGINS=["http://localhost:3000","http://localhost:5173"]
+    networks:
+      - surakshanet-network
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mosquitto:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: surakshanet-prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - surakshanet-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --tries=1 -O- http://localhost:9090/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: surakshanet-grafana
+    ports:
+      - "127.0.0.1:3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - surakshanet-network
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --tries=1 -O- http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+networks:
+  surakshanet-network:
+    driver: bridge
+
+volumes:
+  timescale_data:
+  redis_data:
+  mosquitto_data:
+  mosquitto_log:
+  prometheus_data:
+  grafana_data:

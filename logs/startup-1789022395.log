@@ -1,0 +1,69 @@
++ COMPOSE_FILE=infra/docker-compose.demo.yml
++ [[ demo == dev ]]
++ PYTHON_BIN=python3
++ [[ -f .venv/bin/python3 ]]
++ PYTHON_BIN=.venv/bin/python3
++ report_step 1 'Check dependencies'
++ local step_num=1
++ local 'step_name=Check dependencies'
++ printf '[%s/10] %-30s ... ' 1 'Check dependencies'
+[1/10] Check dependencies             ... + command -v docker
++ .venv/bin/python3 --version
++ command -v node
++ command -v sumo
++ .venv/bin/python3 -c 'import traci'
++ [[ ! -f .env ]]
++ report_step_ok
++ echo OK
+OK
++ report_step 2 'Start infrastructure'
++ local step_num=2
++ local 'step_name=Start infrastructure'
++ printf '[%s/10] %-30s ... ' 2 'Start infrastructure'
+[2/10] Start infrastructure           ... + docker compose -f infra/docker-compose.demo.yml up -d timescaledb redis mosquitto prometheus grafana
++ report_step_ok
++ echo OK
+OK
++ report_step 3 'Wait for health'
++ local step_num=3
++ local 'step_name=Wait for health'
++ printf '[%s/10] %-30s ... ' 3 'Wait for health'
+[3/10] Wait for health                ... + CONTAINERS=("surakshanet-timescaledb" "surakshanet-redis" "surakshanet-mosquitto")
++ for c in "${CONTAINERS[@]}"
++ elapsed=0
+++ docker inspect --format '{{.State.Health.Status}}' surakshanet-timescaledb
++ [[ healthy == healthy ]]
++ for c in "${CONTAINERS[@]}"
++ elapsed=0
+++ docker inspect --format '{{.State.Health.Status}}' surakshanet-redis
++ [[ healthy == healthy ]]
++ for c in "${CONTAINERS[@]}"
++ elapsed=0
+++ docker inspect --format '{{.State.Health.Status}}' surakshanet-mosquitto
++ [[ healthy == healthy ]]
++ report_step_ok
++ echo OK
+OK
++ report_step 4 'Start backend'
++ local step_num=4
++ local 'step_name=Start backend'
++ printf '[%s/10] %-30s ... ' 4 'Start backend'
+[4/10] Start backend                  ... + docker compose -f infra/docker-compose.demo.yml up -d backend
++ docker exec surakshanet-backend alembic upgrade head
++ report_failure 4 'Start backend' 'alembic upgrade head exited with non-zero status' 'database migration failed' 'docs/04-environment-setup.md §7'
++ local step_num=4
++ local 'step_name=Start backend'
++ local 'cause=alembic upgrade head exited with non-zero status'
++ local 'detail=database migration failed'
++ local 'fix=docs/04-environment-setup.md §7'
++ echo ''
+
++ printf '[%s/10] %-30s FAILED\n' 4 'Start backend'
+[4/10] Start backend                  FAILED
++ printf '       cause:  %s\n' 'alembic upgrade head exited with non-zero status'
+       cause:  alembic upgrade head exited with non-zero status
++ printf '       detail: %s\n' 'database migration failed'
+       detail: database migration failed
++ printf '       fix:    %s\n' 'docs/04-environment-setup.md §7'
+       fix:    docs/04-environment-setup.md §7
++ exit 1

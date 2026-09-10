@@ -1,6 +1,8 @@
 # SurakshaNet E2E Test Infrastructure & Architectural Guide
 
-## 1. Executive Summary
+> [!IMPORTANT]
+> **TEST REBUILD ROADMAP NOTICE**:
+> For the authoritative test architecture, coverage philosophy, and critical path tests, refer to [`docs/19-testing.md`](docs/19-testing.md).
 
 This document specifies the architecture, operational design, execution environment, and quality assurance framework for the SurakshaNet End-to-End (E2E) Test Suite.
 

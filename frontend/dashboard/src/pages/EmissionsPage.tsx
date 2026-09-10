@@ -47,10 +47,10 @@ export default function EmissionsPage() {
             <div className="text-4xl font-bold text-slate-900">12.4t</div>
             <div className="flex items-center text-sm font-medium text-emerald-600">
               <ArrowUp className="w-4 h-4 mr-1" />
-              18%
+              —
             </div>
           </div>
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mt-2">vs baseline</p>
+          <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mt-2">no baseline measured</p>
         </div>
 
         <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm px-6 py-5">
@@ -59,10 +59,10 @@ export default function EmissionsPage() {
             <h3 className="text-sm font-semibold text-slate-800">NOx Reduction</h3>
           </div>
           <div className="flex items-baseline gap-2">
-            <div className="text-4xl font-bold text-slate-900">22%</div>
-            <div className="text-sm font-medium text-emerald-600">Target: 20%</div>
+            <div className="text-4xl font-bold text-slate-300">—</div>
+            <div className="text-sm font-medium text-slate-500">Target: 20%</div>
           </div>
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mt-2">Monthly Average</p>
+          <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mt-2">not measured</p>
         </div>
 
         <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm px-6 py-5">
@@ -71,13 +71,9 @@ export default function EmissionsPage() {
             <h3 className="text-sm font-semibold text-slate-800">Fleet Efficiency</h3>
           </div>
           <div className="flex items-baseline gap-2">
-            <div className="text-4xl font-bold text-slate-900">87%</div>
-            <div className="flex items-center text-sm font-medium text-emerald-600">
-              <ArrowUp className="w-4 h-4 mr-1" />
-              Improving
-            </div>
+            <div className="text-4xl font-bold text-slate-300">—</div>
           </div>
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mt-2">Index Score</p>
+          <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mt-2">not measured</p>
         </div>
 
         <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm px-6 py-5">
@@ -86,10 +82,10 @@ export default function EmissionsPage() {
             <h3 className="text-sm font-semibold text-slate-800">Green Zone Coverage</h3>
           </div>
           <div className="flex items-baseline gap-2">
-            <div className="text-4xl font-bold text-slate-900">34</div>
+            <div className="text-4xl font-bold text-slate-300">—</div>
             <div className="text-sm font-medium text-slate-500">junctions</div>
           </div>
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mt-2">Active Zones</p>
+          <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mt-2">not measured</p>
         </div>
       </div>
 

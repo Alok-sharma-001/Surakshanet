@@ -195,7 +195,12 @@ async def create_reading(
             source = body.get("source")
     except Exception:
         pass
-    return await traffic_service.create_reading(db, data=reading_in, source=source)
+    try:
+        return await traffic_service.create_reading(db, data=reading_in, source=source)
+    except ValueError as e:
+        # A reading that cannot be attributed to a junction, or that is missing
+        # a NOT NULL field, is rejected rather than completed with defaults.
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 @router.post("/reading", response_model=TrafficReadingResponse, status_code=status.HTTP_201_CREATED)

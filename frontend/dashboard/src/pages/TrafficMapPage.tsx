@@ -43,13 +43,11 @@ export default function TrafficMapPage() {
   // Junction-level live telemetry
   const [junctionsData, setJunctionsData] = useState(DEFAULT_JUNCTIONS);
 
-  // Live Telemetry Event Feed
-  const [feedEvents, setFeedEvents] = useState<FeedEvent[]>([
-    { id: '1', title: 'MARL Phase Optimization', time: 'Just now', desc: 'Corridor cycle adjusted: +4.5s Green to Northbound', icon: Zap, color: 'text-teal-600', bg: 'bg-teal-50' },
-    { id: '2', title: 'SUMO Twin Ingestion', time: '2s ago', desc: 'Ingested 1,248 active TraCI vehicle vectors', icon: Activity, color: 'text-sky-600', bg: 'bg-sky-50' },
-    { id: '3', title: 'Congestion Threshold Alert', time: '1m ago', desc: 'Ashram Chowk queue reached 85m capacity', icon: AlertTriangle, color: 'text-amber-600', bg: 'bg-amber-50' },
-    { id: '4', title: 'Telemetry Sync Nominal', time: '3m ago', desc: 'All 12 Delhi edge nodes streaming at 10Hz', icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-  ]);
+  // Live telemetry event feed, filled from the WebSocket channel below. It was
+  // previously seeded with four invented events carrying relative timestamps
+  // ("Just now", "2s ago"), so the feed always looked live — including a MARL
+  // phase optimisation that no controller performed.
+  const [feedEvents, setFeedEvents] = useState<FeedEvent[]>([]);
 
   // Connect to live WebSockets from backend
   useEffect(() => {
@@ -136,31 +134,6 @@ export default function TrafficMapPage() {
     if (isPlaying) {
       timer = window.setInterval(() => {
         setTime(new Date());
-
-        // When not connected to SUMO bridge, simulate realistic micro-fluctuations
-        if (!isTwinConnected) {
-          setTotalVehicles(prev => Math.max(800, prev + Math.floor(Math.random() * 9) - 4));
-          setAvgSpeed(prev => +(Math.max(12.0, Math.min(48.0, prev + (Math.random() * 1.2 - 0.6)))).toFixed(1));
-          setThroughput(prev => Math.max(600, Math.min(1800, prev + Math.floor(Math.random() * 15) - 7)));
-
-          setJunctionsData(prev =>
-            prev.map((j) => {
-              const speedDelta = (Math.random() * 2 - 1);
-              const queueDelta = (Math.random() * 4 - 2);
-              const newSpeed = Math.max(8.0, Math.min(55.0, +(j.speed + speedDelta).toFixed(1)));
-              const newQueue = Math.max(2, Math.min(130, Math.round(j.queue + queueDelta)));
-              const isCongested = newQueue > 50 || newSpeed < 18;
-
-              return {
-                ...j,
-                speed: newSpeed,
-                queue: newQueue,
-                pcu: Math.round(newQueue * 5.5 + newSpeed * 8),
-                status: isCongested ? 'congested' : 'normal'
-              };
-            })
-          );
-        }
       }, 1000);
     }
     return () => clearInterval(timer);

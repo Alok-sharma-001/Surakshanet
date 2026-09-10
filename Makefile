@@ -40,6 +40,9 @@ test-frontend:
 test-e2e:
 	docker exec -e PYTHONPATH=/app -e PROJECT_ROOT=/app -e E2E_BACKEND_URL=http://127.0.0.1:8000 surakshanet-backend python tests/e2e/run_e2e_tests.py --tier all
 
+check-phase0:
+	./scripts/check_phase0_regressions.sh
+
 lint:
 	docker exec surakshanet-backend ruff check app/
 	npm --prefix frontend/dashboard run build

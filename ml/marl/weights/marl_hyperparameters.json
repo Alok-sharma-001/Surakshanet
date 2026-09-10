@@ -1,0 +1,18 @@
+{
+  "lr": 0.001,
+  "batch_size": 32,
+  "gamma": 0.95,
+  "epsilon": 1.0,
+  "epsilon_decay": 0.98,
+  "epsilon_min": 0.05,
+  "seed": 42,
+  "episodes": 10,
+  "episode_duration_s": 90,
+  "state_dim": 8,
+  "action_dim": 2,
+  "junction_id": "J1",
+  "simulation_network": "corridor.net.xml",
+  "final_epsilon": 0.0603,
+  "total_training_steps": 139,
+  "mean_episode_reward": -4.116
+}

@@ -17,7 +17,7 @@ class TrafficReading(Base):
     avg_speed = Column(Float, nullable=True)
     queue_length = Column(Float, nullable=True)
     vehicle_breakdown = Column(JSON, nullable=True)
-    source = Column(String, default="live", nullable=True)
+    source = Column(String, default="mqtt", nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     __table_args__ = (

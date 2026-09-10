@@ -1,0 +1,25 @@
+<additional xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/additional_file.xsd">
+    <!-- Junction J0 Detectors -->
+    <laneAreaDetector id="det_J0_N_0" lane="E_N0_to_J0_0" pos="4.60" length="84.50" freq="1" file="/dev/null"/>
+    <laneAreaDetector id="det_J0_S_0" lane="E_S0_to_J0_0" pos="4.60" length="84.50" freq="1" file="/dev/null"/>
+    <laneAreaDetector id="det_J0_E_0" lane="E_J1_to_J0_0" pos="200.00" length="84.50" freq="1" file="/dev/null"/>
+    <laneAreaDetector id="det_J0_W_0" lane="E_W_to_J0_0" pos="7.80" length="84.50" freq="1" file="/dev/null"/>
+
+    <!-- Junction J1 Detectors -->
+    <laneAreaDetector id="det_J1_N_0" lane="E_N1_to_J1_0" pos="4.60" length="84.50" freq="1" file="/dev/null"/>
+    <laneAreaDetector id="det_J1_S_0" lane="E_S1_to_J1_0" pos="4.60" length="84.50" freq="1" file="/dev/null"/>
+    <laneAreaDetector id="det_J1_E_0" lane="E_J2_to_J1_0" pos="200.00" length="84.50" freq="1" file="/dev/null"/>
+    <laneAreaDetector id="det_J1_W_0" lane="E_J0_to_J1_0" pos="200.00" length="84.50" freq="1" file="/dev/null"/>
+
+    <!-- Junction J2 Detectors -->
+    <laneAreaDetector id="det_J2_N_0" lane="E_N2_to_J2_0" pos="4.60" length="84.50" freq="1" file="/dev/null"/>
+    <laneAreaDetector id="det_J2_S_0" lane="E_S2_to_J2_0" pos="4.60" length="84.50" freq="1" file="/dev/null"/>
+    <laneAreaDetector id="det_J2_E_0" lane="E_J3_to_J2_0" pos="200.00" length="84.50" freq="1" file="/dev/null"/>
+    <laneAreaDetector id="det_J2_W_0" lane="E_J1_to_J2_0" pos="200.00" length="84.50" freq="1" file="/dev/null"/>
+
+    <!-- Junction J3 Detectors -->
+    <laneAreaDetector id="det_J3_N_0" lane="E_N3_to_J3_0" pos="4.60" length="84.50" freq="1" file="/dev/null"/>
+    <laneAreaDetector id="det_J3_S_0" lane="E_S3_to_J3_0" pos="4.60" length="84.50" freq="1" file="/dev/null"/>
+    <laneAreaDetector id="det_J3_E_0" lane="E_E_to_J3_0" pos="7.80" length="84.50" freq="1" file="/dev/null"/>
+    <laneAreaDetector id="det_J3_W_0" lane="E_J2_to_J3_0" pos="200.00" length="84.50" freq="1" file="/dev/null"/>
+</additional>

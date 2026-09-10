@@ -4,6 +4,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { clsx } from 'clsx';
 import { api } from '../services/api';
 import { useTrafficStore } from '../store/trafficStore';
+import { TelemetrySourceBadge } from '../components/TelemetrySourceBadge';
 
 export default function ForecastingPage() {
   const storeJunctions = useTrafficStore((state) => state.junctions);
@@ -11,16 +12,15 @@ export default function ForecastingPage() {
   const [horizon, setHorizon] = useState<'15' | '30' | '60'>('15');
   const [acknowledged, setAcknowledged] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [spillbackRisk, setSpillbackRisk] = useState<number>(0.44);
-  const [predictionData, setPredictionData] = useState<any[]>([
-    { name: 'T-45', actual: 48, predicted: null },
-    { name: 'T-30', actual: 54, predicted: null },
-    { name: 'T-15', actual: 62, predicted: null },
-    { name: 'Now', actual: 71, predicted: 71 },
-    { name: 'T+15', actual: null, predicted: 78 },
-    { name: 'T+30', actual: null, predicted: 84 },
-    { name: 'T+60', actual: null, predicted: 68 },
-  ]);
+  // Nothing is known until the API answers. These previously carried a seeded
+  // risk of 0.44 and a full seven-point curve, which rendered as a real
+  // forecast before any request had been made and persisted when one failed.
+  const [spillbackRisk, setSpillbackRisk] = useState<number | null>(null);
+  const [forecastSource, setForecastSource] = useState<string | null>(null);
+  const [trainingData, setTrainingData] = useState<string | null>(null);
+  const [confidence, setConfidence] = useState<number | null>(null);
+  const [unavailableReason, setUnavailableReason] = useState<string | null>(null);
+  const [predictionData, setPredictionData] = useState<any[]>([]);
 
   useEffect(() => {
     if (storeJunctions.length > 0 && selectedJunctionId === 'DEL-CP-01') {
@@ -36,23 +36,36 @@ export default function ForecastingPage() {
       const data = res.data;
       if (data && data.spillback_risk !== undefined) {
         setSpillbackRisk(data.spillback_risk);
+        setForecastSource(data.source || 'heuristic');
+        setTrainingData(data.training_data || null);
 
-        const p15 = data.predictions?.find((p: any) => p.minutes === 15)?.predicted_pcu || 72;
-        const p30 = data.predictions?.find((p: any) => p.minutes === 30)?.predicted_pcu || 76;
-        const p60 = data.predictions?.find((p: any) => p.minutes === 60)?.predicted_pcu || 65;
+        const p15Obj = data.predictions?.find((p: any) => p.minutes === 15);
+        setConfidence(p15Obj?.confidence ?? null);
+        setUnavailableReason(null);
 
-        setPredictionData([
-          { name: 'T-45', actual: Math.round(p15 * 0.75), predicted: null },
-          { name: 'T-30', actual: Math.round(p15 * 0.85), predicted: null },
-          { name: 'T-15', actual: Math.round(p15 * 0.95), predicted: null },
-          { name: 'Now', actual: Math.round(p15), predicted: Math.round(p15) },
-          { name: 'T+15', actual: null, predicted: p15 },
-          { name: 'T+30', actual: null, predicted: p30 },
-          { name: 'T+60', actual: null, predicted: p60 },
-        ]);
+        // Only the horizons the API actually returned. The `actual` series was
+        // previously manufactured from the forecast itself — T-45 rendered as
+        // `p15 * 0.75` and plotted as measured history, so the chart's past was
+        // derived from its own future. Real history needs a readings query.
+        setPredictionData(
+          (data.predictions ?? []).map((pt: any) => ({
+            name: `T+${pt.minutes}`,
+            predicted: pt.predicted_pcu,
+          }))
+        );
       }
-    } catch (err) {
-      console.error("Forecast prediction fetch error:", err);
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail;
+      setUnavailableReason(
+        typeof detail === 'object' && detail?.reason
+          ? detail.reason
+          : 'Forecast unavailable for this junction.'
+      );
+      setSpillbackRisk(null);
+      setForecastSource(null);
+      setTrainingData(null);
+      setConfidence(null);
+      setPredictionData([]);
     } finally {
       setLoading(false);
     }
@@ -62,15 +75,29 @@ export default function ForecastingPage() {
     fetchForecast();
   }, [selectedJunctionId, horizon]);
 
-  const selectedName = storeJunctions.find(j => j.id === selectedJunctionId)?.name || "Connaught Place Outer Circle";
+  const selectedName = storeJunctions.find(j => j.id === selectedJunctionId)?.name ?? null;
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 p-6">
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-syne font-bold text-slate-900">Traffic Forecasting</h1>
-          <p className="text-sm text-slate-500 mt-1">Spillback Prediction & Flow Telemetry Model (LSTM + XGBoost)</p>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-syne font-bold text-slate-900">Traffic Forecasting</h1>
+            <TelemetrySourceBadge source={forecastSource} />
+            {trainingData && (
+              <span className="text-[10px] font-mono font-bold bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-md uppercase tracking-wider">
+                DATA: {trainingData.toUpperCase()}
+              </span>
+            )}
+          </div>
+          <p className="text-sm text-slate-500 mt-1">
+            {forecastSource === 'model'
+              ? 'Spillback Prediction & Flow Telemetry Model (LSTM + XGBoost)'
+              : forecastSource === 'heuristic'
+              ? 'Persistence baseline from the latest measured readings (estimated)'
+              : 'No forecast loaded'}
+          </p>
         </div>
 
         <div className="flex items-center gap-3">
@@ -113,16 +140,16 @@ export default function ForecastingPage() {
       </div>
 
       {/* Alert Banner for High Spillback Risk */}
-      {spillbackRisk > 0.70 && !acknowledged && (
+      {spillbackRisk !== null && spillbackRisk > 0.70 && !acknowledged && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start justify-between shadow-sm">
           <div className="flex items-start space-x-3">
             <AlertCircle className="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" />
             <div>
               <h3 className="text-sm font-bold text-amber-800">
-                High Spillback Risk Detected - {selectedName}
+                High Spillback Risk Detected{selectedName ? ` - ${selectedName}` : ''}
               </h3>
               <p className="text-sm text-amber-700 mt-1">
-                Predicted queue exceeds 75% capacity within the next {horizon}-minute horizon. Spillback index: {(spillbackRisk * 100).toFixed(0)}%.
+                Predicted queue exceeds 75% capacity within the next {horizon}-minute horizon. Spillback index: {((spillbackRisk ?? 0) * 100).toFixed(0)}%.
               </p>
             </div>
           </div>
@@ -135,6 +162,16 @@ export default function ForecastingPage() {
         </div>
       )}
 
+      {unavailableReason && (
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-start space-x-3">
+          <AlertCircle className="w-5 h-5 text-slate-400 mt-0.5 flex-shrink-0" />
+          <div>
+            <h3 className="text-sm font-bold text-slate-700">Forecast unavailable</h3>
+            <p className="text-sm text-slate-500 mt-1">{unavailableReason}</p>
+          </div>
+        </div>
+      )}
+
       {/* Main Content (2-column grid) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
@@ -143,7 +180,7 @@ export default function ForecastingPage() {
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-sm font-semibold text-slate-800 flex items-center">
               <TrendingUp className="w-4 h-4 mr-2 text-teal-600" />
-              Actual vs Predicted PCU Flow — {selectedName}
+              Predicted PCU Flow{selectedName ? ` — ${selectedName}` : ''}
             </h3>
             <span className="text-xs font-mono font-bold text-teal-600 bg-teal-50 px-2.5 py-1 rounded">
               Horizon: {horizon} Mins
@@ -194,17 +231,28 @@ export default function ForecastingPage() {
                 </linearGradient>
               </defs>
               <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="#e2e8f0" strokeWidth="8" strokeLinecap="round" />
-              <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="url(#gaugeGrad)" strokeWidth="8" strokeDasharray="125.6" strokeDashoffset={125.6 * (1 - spillbackRisk)} strokeLinecap="round" />
+              <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="url(#gaugeGrad)" strokeWidth="8" strokeDasharray="125.6" strokeDashoffset={125.6 * (1 - (spillbackRisk ?? 0))} strokeLinecap="round" />
             </svg>
 
             <div className="absolute bottom-1 text-center">
-              <div className="text-2xl font-bold font-mono text-slate-900">{spillbackRisk.toFixed(2)}</div>
-              <div className={clsx(
-                "text-[10px] font-bold uppercase tracking-wider",
-                spillbackRisk < 0.5 ? "text-emerald-600" : spillbackRisk < 0.75 ? "text-amber-600" : "text-red-600"
-              )}>
-                {spillbackRisk < 0.5 ? "Nominal Flow" : spillbackRisk < 0.75 ? "Moderate Spillback" : "Critical Spillback"}
-              </div>
+              {spillbackRisk === null ? (
+                <>
+                  <div className="text-2xl font-bold font-mono text-slate-300">—</div>
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    No Forecast
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="text-2xl font-bold font-mono text-slate-900">{spillbackRisk.toFixed(2)}</div>
+                  <div className={clsx(
+                    "text-[10px] font-bold uppercase tracking-wider",
+                    spillbackRisk < 0.5 ? "text-emerald-600" : spillbackRisk < 0.75 ? "text-amber-600" : "text-red-600"
+                  )}>
+                    {spillbackRisk < 0.5 ? "Nominal Flow" : spillbackRisk < 0.75 ? "Moderate Spillback" : "Critical Spillback"}
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -214,72 +262,23 @@ export default function ForecastingPage() {
               <span className="font-bold text-slate-700 font-mono">0.75 Limit</span>
             </div>
             <div className="flex justify-between p-2 rounded bg-slate-50 border border-slate-100">
-              <span className="text-slate-500">Ensemble Confidence</span>
-              <span className="font-bold text-emerald-600 font-mono">88%</span>
+              <span className="text-slate-500">Model Confidence</span>
+              {confidence !== null && forecastSource === 'model' ? (
+                <span className="font-bold text-emerald-600 font-mono">{(confidence * 100).toFixed(0)}%</span>
+              ) : (
+                <span className="font-semibold text-amber-600 text-xs">N/A (Heuristic Fallback)</span>
+              )}
             </div>
           </div>
         </div>
 
       </div>
 
-      {/* Bottom Row: Model Contribution & MAPE */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-5">
-          <h4 className="text-sm font-semibold text-slate-800 mb-4">Model Weight Contribution (Ensemble)</h4>
-          <div className="space-y-4">
-            <div>
-              <div className="flex justify-between text-xs font-semibold text-slate-700 mb-1">
-                <span>LSTM Deep Neural Network (Temporal Flow)</span>
-                <span>55%</span>
-              </div>
-              <div className="w-full bg-slate-100 rounded-full h-2">
-                <div className="bg-teal-600 h-2 rounded-full" style={{ width: '55%' }}></div>
-              </div>
-            </div>
-
-            <div>
-              <div className="flex justify-between text-xs font-semibold text-slate-700 mb-1">
-                <span>XGBoost Regressor (Multi-horizon Features)</span>
-                <span>35%</span>
-              </div>
-              <div className="w-full bg-slate-100 rounded-full h-2">
-                <div className="bg-teal-500 h-2 rounded-full" style={{ width: '35%' }}></div>
-              </div>
-            </div>
-
-            <div>
-              <div className="flex justify-between text-xs font-semibold text-slate-700 mb-1">
-                <span>IRC PCU Dynamic Heuristic Calibration</span>
-                <span>10%</span>
-              </div>
-              <div className="w-full bg-slate-100 rounded-full h-2">
-                <div className="bg-teal-400 h-2 rounded-full" style={{ width: '10%' }}></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-5">
-          <h4 className="text-sm font-semibold text-slate-800 mb-4">Horizon MAPE Validation Errors</h4>
-          <div className="grid grid-cols-3 gap-4">
-            <div className="bg-slate-50 border border-slate-100 rounded-lg p-3 text-center">
-              <div className="text-xs text-slate-500 font-semibold uppercase">15 Min</div>
-              <div className="text-xl font-bold font-mono text-teal-600 mt-1">4.2%</div>
-              <div className="text-[10px] text-emerald-600 mt-0.5">↓ 0.5% vs avg</div>
-            </div>
-            <div className="bg-slate-50 border border-slate-100 rounded-lg p-3 text-center">
-              <div className="text-xs text-slate-500 font-semibold uppercase">30 Min</div>
-              <div className="text-xl font-bold font-mono text-teal-600 mt-1">7.8%</div>
-              <div className="text-[10px] text-slate-400 mt-0.5">Nominal</div>
-            </div>
-            <div className="bg-slate-50 border border-slate-100 rounded-lg p-3 text-center">
-              <div className="text-xs text-slate-500 font-semibold uppercase">60 Min</div>
-              <div className="text-xl font-bold font-mono text-teal-600 mt-1">11.4%</div>
-              <div className="text-[10px] text-amber-600 mt-0.5">↑ 1.2% Drift</div>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* The ensemble weight split (55/35/10) and the MAPE figures
+          (4.2%, 7.8%, 11.4% with "↓ 0.5% vs avg" and "↑ 1.2% Drift") were
+          fixed values presented as validation results. No validation run
+          produced them. Restore this section when SN-034 reports real
+          per-horizon errors. */}
     </div>
   );
 }

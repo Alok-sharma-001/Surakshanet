@@ -18,6 +18,8 @@ except ImportError:
     mqtt = None
 
 from ml.vision.vehicle_detector import VehicleDetector
+from shared.constants import DataSource
+from shared.exceptions import VisionUnavailable
 
 logger = logging.getLogger("surakshanet.rtsp")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -139,23 +141,30 @@ class RTSPStreamWorker:
 
     def process_frame(self, frame: np.ndarray) -> Dict[str, Any]:
         """Runs vehicle detection on a single frame and formats standard telemetry."""
+        # Propagates VisionUnavailable when the detector has no weights or
+        # inference fails. The inference loop reports that; it does not fill in
+        # a plausible PCU. The former defaults (25.0 PCU, 15 vehicles) meant a
+        # detector that had never run still produced a reading.
         analysis = self.detector.detect_and_analyze(frame)
-        
-        pcu = analysis.get("total_pcu", 25.0)
-        counts = analysis.get("counts", {})
-        total_veh = sum(counts.values()) if isinstance(counts, dict) else int(analysis.get("vehicle_count", 15))
 
-        # Speed and queue estimation derived from density and link capacity
-        speed = round(max(10.0, 52.0 - (pcu * 0.35) + np.random.uniform(-2, 2)), 1)
-        queue = round(max(0.0, (pcu - 20.0) * 1.3), 1)
+        pcu = analysis["total_pcu"]
+        counts = analysis["counts"]
+        total_veh = sum(counts.values())
 
+        # A detector run against a single frame measures what is in that frame:
+        # vehicle counts, and the PCU derived from them. It does not measure
+        # speed — that needs displacement between frames — and it does not
+        # measure queue length. Both were previously derived from PCU with a
+        # formula and a random jitter, then published under source "vision",
+        # which presented a guess as a camera measurement. They are omitted.
         payload = {
             "sensor_id": self.sensor_id,
             "junction_id": self.junction_id,
             "timestamp": time.time(),
+            "source": DataSource.VISION.value,
             "pcu_value": round(pcu, 1),
-            "avg_speed": speed,
-            "queue_length": queue,
+            "avg_speed": None,
+            "queue_length": None,
             "vehicle_count": total_veh,
             "vehicle_breakdown": counts,
             "stream_source": "RTSP_LIVE" if self._connected else "RTSP_EMULATED",
@@ -178,16 +187,32 @@ class RTSPStreamWorker:
                     self._last_telemetry = telemetry
                     self._telemetry_count += 1
 
-                    # Publish to MQTT topic
+                    # The synthetic fallback generates frames so the worker can
+                    # run headless in CI. Detections made on a generated frame
+                    # are not observations of a road, so they stay local: they
+                    # populate _last_telemetry for tests but are never published
+                    # onto the telemetry topic, where nothing downstream could
+                    # distinguish them from a real camera.
                     topic = f"surakshanet/sensors/{self.sensor_id}/telemetry"
-                    if self.mqtt_client is not None:
+                    if self.mqtt_client is not None and self._connected:
                         self.mqtt_client.publish(topic, json.dumps(telemetry))
+                    elif not self._connected and self._telemetry_count % 50 == 1:
+                        logger.warning(
+                            "[%s] No camera connected; detections run on generated "
+                            "frames and are not published.", self.junction_id
+                        )
 
                     if self._telemetry_count % 10 == 0:
                         logger.info(
                             f"[{self.junction_id}] Processed frame #{self._telemetry_count} -> "
-                            f"{telemetry['pcu_value']} PCU, Speed: {telemetry['avg_speed']} km/h, "
+                            f"{telemetry['pcu_value']} PCU, "
                             f"Vehicles: {telemetry['vehicle_count']}"
+                        )
+                except VisionUnavailable as e:
+                    if self._telemetry_count % 50 == 0:
+                        logger.warning(
+                            "[%s] Vision unavailable, no telemetry published: %s",
+                            self.junction_id, e
                         )
                 except Exception as e:
                     logger.error(f"Inference error in RTSP worker: {e}")

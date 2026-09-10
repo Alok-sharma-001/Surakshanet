@@ -1,5 +1,9 @@
 # Surakshanet — Production-Grade Roadmap
 
+> [!IMPORTANT]
+> **SUPERSEDED BY CANONICAL 10-PHASE ROADMAP**:
+> This document is retained for historical audit context. The authoritative, execution-ready 10-phase development plan is located in [`docs/03-development-roadmap.md`](docs/03-development-roadmap.md) and tracked task-by-task in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (`SN-001` through `SN-150`).
+
 **Goal:** Transform the current ITS MVP into a secure, scalable, defensible, production-ready system.
 
 > Based on a full code audit of the repository. Each item is grounded in a specific file/line and is actionable. Suggested execution order is provided at the end.

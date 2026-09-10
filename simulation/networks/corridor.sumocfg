@@ -3,11 +3,16 @@
     <input>
         <net-file value="corridor.net.xml"/>
         <route-files value="corridor.rou.xml"/>
+        <additional-files value="corridor.det.xml"/>
     </input>
     <time>
         <begin value="0"/>
         <end value="86400"/>
     </time>
+    <processing>
+        <seed value="42"/>
+        <random value="false"/>
+    </processing>
     <gui_only>
         <gui-settings-file value="gui-settings.xml"/>
     </gui_only>

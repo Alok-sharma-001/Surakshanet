@@ -15,11 +15,12 @@ from tests.e2e.client import (
     E2ERedisClient,
     E2EMqttClient,
 )
+from shared.constants import REDIS_CHANNELS
 
 
 @pytest.mark.tier4
 def test_scenario_corridor_peak_hour_congestion_workflow(
-    http_client: E2EHttpClient,
+    authed_client: E2EHttpClient,
     mqtt_client: E2EMqttClient,
     redis_client: E2ERedisClient
 ):
@@ -54,12 +55,12 @@ def test_scenario_corridor_peak_hour_congestion_workflow(
         assert published is True, f"Failed publishing telemetry for {junction_id}"
 
         # Post reading via HTTP REST API
-        http_res = http_client.post("/api/v1/traffic/readings", json_data=telemetry_payload)
+        http_res = authed_client.post("/api/v1/traffic/readings", json_data=telemetry_payload)
         assert http_res.status_code in (200, 201, 401, 404, 422)
 
     # Step 2: Query corridor traffic readings
-    readings_res = http_client.get("/api/v1/traffic/readings")
-    assert readings_res.status_code in (200, 401)
+    readings_res = authed_client.get("/api/v1/traffic/readings")
+    assert readings_res.status_code == 200, f"Expected 200 for an authenticated request, got {readings_res.status_code}"
 
     # Step 3: Publish adaptive timing adjustment via Redis WebSocket fanout
     timing_event = json.dumps({
@@ -69,17 +70,17 @@ def test_scenario_corridor_peak_hour_congestion_workflow(
         "arterial_split_ratio": 0.70,
         "source": "sim"
     })
-    subscribers = redis_client.publish("surakshanet:events:signals", timing_event)
+    subscribers = redis_client.publish(REDIS_CHANNELS["signals"], timing_event)
     assert isinstance(subscribers, int)
 
     # Step 4: Verify Prometheus metrics respond
-    metrics_res = http_client.get("/metrics")
+    metrics_res = authed_client.get("/metrics")
     assert metrics_res.status_code == 200
 
 
 @pytest.mark.tier4
 def test_scenario_emergency_vehicle_green_wave_preemption_workflow(
-    http_client: E2EHttpClient,
+    authed_client: E2EHttpClient,
     mqtt_client: E2EMqttClient,
     redis_client: E2ERedisClient
 ):
@@ -102,7 +103,7 @@ def test_scenario_emergency_vehicle_green_wave_preemption_workflow(
         "priority": "CRITICAL",
         "vehicle_type": "AMBULANCE"
     }
-    preempt_res = http_client.post("/api/v1/emergency/activate", json_data=preemption_payload)
+    preempt_res = authed_client.post("/api/v1/emergency/activate", json_data=preemption_payload)
     assert preempt_res.status_code in (200, 201, 401, 404, 422)
 
     # Step 2: Cascading signal override along corridor (green-wave)
@@ -126,7 +127,7 @@ def test_scenario_emergency_vehicle_green_wave_preemption_workflow(
     redis_client.publish("surakshanet:events:alerts", alert_broadcast)
 
     # Step 4: Release preemption when vehicle clears corridor
-    release_res = http_client.post(
+    release_res = authed_client.post(
         f"/api/v1/emergency/deactivate/{ambulance_id}"
     )
     assert release_res.status_code in (200, 401, 404, 422)
@@ -134,7 +135,7 @@ def test_scenario_emergency_vehicle_green_wave_preemption_workflow(
 
 @pytest.mark.tier4
 def test_scenario_major_incident_and_dynamic_rerouting_workflow(
-    http_client: E2EHttpClient,
+    authed_client: E2EHttpClient,
     redis_client: E2ERedisClient
 ):
     """
@@ -155,7 +156,7 @@ def test_scenario_major_incident_and_dynamic_rerouting_workflow(
         "line2": "USE DETOUR VIA ARTERIAL NORTH",
         "priority": "HIGH"
     }
-    vms_res = http_client.post(
+    vms_res = authed_client.post(
         "/api/v1/routing/vms/broadcast",
         json_data=vms_payload,
         headers={"X-Request-ID": corr_id}
@@ -163,14 +164,14 @@ def test_scenario_major_incident_and_dynamic_rerouting_workflow(
     assert vms_res.status_code in (200, 201, 401, 404, 422)
 
     # Step 2: Query spatial perimeter around accident location
-    nearby_res = http_client.get(
+    nearby_res = authed_client.get(
         "/api/v1/junctions/nearby",
         params={"latitude": 12.9720, "longitude": 77.5950, "radius": 500}
     )
     assert nearby_res.status_code in (200, 401, 404)
 
     # Step 3: Compute alternate detour paths
-    alt_res = http_client.post(
+    alt_res = authed_client.post(
         "/api/v1/routing/alternatives",
         json_data={"origin": [12.9716, 77.5946], "destination": [12.9850, 77.6050]}
     )
@@ -189,7 +190,7 @@ def test_scenario_major_incident_and_dynamic_rerouting_workflow(
 @pytest.mark.tier4
 def test_scenario_telemetry_stream_failover_and_reconciliation_workflow(
     mqtt_client: E2EMqttClient,
-    http_client: E2EHttpClient
+    authed_client: E2EHttpClient
 ):
     """
     Scenario 4: Telemetry Stream Failover & Multi-Source Reconciliation
@@ -222,7 +223,7 @@ def test_scenario_telemetry_stream_failover_and_reconciliation_workflow(
     assert mqtt_client.publish(f"surakshanet/sensors/{sensor_id}/telemetry", sim_fallback_payload) is True
 
     # Step 3: Send reading to traffic service with fallback tag
-    http_res = http_client.post(
+    http_res = authed_client.post(
         "/api/v1/traffic/readings",
         json_data={
             "junction_id": "J1",

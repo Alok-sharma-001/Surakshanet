@@ -28,45 +28,45 @@ from tests.e2e.client import (
 
 @pytest.mark.tier3
 def test_combo_f01_f05_auth_lifecycle_and_revocation(
-    http_client: E2EHttpClient, redis_client: E2ERedisClient
+    authed_client: E2EHttpClient, redis_client: E2ERedisClient
 ):
     """TC-C01: Pairwise - F1 (Operator Registration) + F5 (Token Revocation & Logout)."""
     # 1. Register as operator
     email = f"combo_auth_{uuid.uuid4().hex[:8]}@test.com"
     pwd = "AuthPassword123!"
-    reg_res = http_client.register_user(email=email, password=pwd, name="Lifecycle User")
+    reg_res = authed_client.register_user(email=email, password=pwd, name="Lifecycle User")
     assert reg_res.status_code in (200, 201)
     assert str(reg_res.json().get("role", "")).lower() == "operator"
 
     # 2. Login to receive access token
-    login_res, token = http_client.login_user(email=email, password=pwd)
+    login_res, token = authed_client.login_user(email=email, password=pwd)
     assert login_res.status_code == 200 and token is not None
 
     # 3. Call protected endpoint with valid token
     headers = {"Authorization": f"Bearer {token}"}
-    me_res = http_client.get("/api/v1/auth/me", headers=headers)
+    me_res = authed_client.get("/api/v1/auth/me", headers=headers)
     assert me_res.status_code == 200
 
     # 4. Logout to revoke token
-    logout_res = http_client.post("/api/v1/auth/logout", headers=headers)
+    logout_res = authed_client.post("/api/v1/auth/logout", headers=headers)
     assert logout_res.status_code == 200
 
     # 5. Verify token is revoked and subsequently rejected
-    revoked_res = http_client.get("/api/v1/auth/me", headers=headers)
+    revoked_res = authed_client.get("/api/v1/auth/me", headers=headers)
     assert revoked_res.status_code == 401, "Revoked token was still accepted"
 
 
 @pytest.mark.tier3
 def test_combo_f01_f08_role_promotion_and_spatial_query(
-    http_client: E2EHttpClient, admin_token: str
+    authed_client: E2EHttpClient, admin_token: str
 ):
     """TC-C02: Pairwise - F1 (Role Promotion) + F8 (PostGIS Spatial Queries)."""
     # 1. Register new unprivileged operator
     email = f"combo_spatial_{uuid.uuid4().hex[:8]}@test.com"
     pwd = "SpatialPassword123!"
-    reg_res = http_client.register_user(email=email, password=pwd, name="Spatial Op")
+    reg_res = authed_client.register_user(email=email, password=pwd, name="Spatial Op")
     user_id = reg_res.json().get("id")
-    _, op_token = http_client.login_user(email=email, password=pwd)
+    _, op_token = authed_client.login_user(email=email, password=pwd)
 
     # 2. Operator attempts admin junction creation (should be forbidden or restricted)
     junction_payload = {
@@ -77,12 +77,12 @@ def test_combo_f01_f08_role_promotion_and_spatial_query(
         "status": "ACTIVE"
     }
     op_headers = {"Authorization": f"Bearer {op_token}"}
-    res_unauth = http_client.post("/api/v1/junctions", json_data=junction_payload, headers=op_headers)
+    res_unauth = authed_client.post("/api/v1/junctions", json_data=junction_payload, headers=op_headers)
     # Admin required for junction modification
     if res_unauth.status_code == 403:
         # 3. Admin elevates operator to ADMIN
         admin_headers = {"Authorization": f"Bearer {admin_token}"}
-        promote_res = http_client.patch(
+        promote_res = authed_client.patch(
             f"/api/v1/users/{user_id}/role",
             json_data={"role": "ADMIN"},
             headers=admin_headers
@@ -90,13 +90,13 @@ def test_combo_f01_f08_role_promotion_and_spatial_query(
         assert promote_res.status_code in (200, 204)
 
         # 4. Elevated user logs in again and successfully performs spatial operation
-        _, new_token = http_client.login_user(email=email, password=pwd)
+        _, new_token = authed_client.login_user(email=email, password=pwd)
         elevated_headers = {"Authorization": f"Bearer {new_token}"}
-        res_auth = http_client.post("/api/v1/junctions", json_data=junction_payload, headers=elevated_headers)
+        res_auth = authed_client.post("/api/v1/junctions", json_data=junction_payload, headers=elevated_headers)
         assert res_auth.status_code in (200, 201)
 
     # 5. Query nearby junctions via PostGIS spatial query
-    nearby_res = http_client.get(
+    nearby_res = authed_client.get(
         "/api/v1/junctions/nearby",
         params={"latitude": 12.9716, "longitude": 77.5946, "radius": 1000}
     )
@@ -105,7 +105,7 @@ def test_combo_f01_f08_role_promotion_and_spatial_query(
 
 @pytest.mark.tier3
 def test_combo_f11_f09_mqtt_telemetry_to_timescale_hypertable(
-    mqtt_client: E2EMqttClient, db_client: E2EDatabaseClient, http_client: E2EHttpClient
+    mqtt_client: E2EMqttClient, db_client: E2EDatabaseClient, authed_client: E2EHttpClient
 ):
     """TC-C03: Pairwise - F11 (Standardized MQTT Tagging) + F9 (TimescaleDB Hypertable)."""
     # 1. Publish telemetry payload with verified source tag
@@ -132,12 +132,12 @@ def test_combo_f11_f09_mqtt_telemetry_to_timescale_hypertable(
 
 @pytest.mark.tier3
 def test_combo_f10_f15_traffic_service_standardized_error_envelope(
-    http_client: E2EHttpClient
+    authed_client: E2EHttpClient
 ):
     """TC-C04: Pairwise - F10 (Traffic Service) + F15 (Standardized Error & Correlation ID)."""
     # Request nonexistent traffic history with client correlation ID
     corr_id = f"test-corr-{uuid.uuid4().hex[:8]}"
-    res = http_client.get(
+    res = authed_client.get(
         "/api/v1/traffic/history",
         params={"junction_id": "UNKNOWN_J_9999", "start_time": "invalid-date"},
         headers={"X-Request-ID": corr_id}
@@ -155,11 +155,11 @@ def test_combo_f10_f15_traffic_service_standardized_error_envelope(
 
 @pytest.mark.tier3
 def test_combo_f13_f16_websocket_fanout_and_prometheus_metrics(
-    http_client: E2EHttpClient, redis_client: E2ERedisClient
+    authed_client: E2EHttpClient, redis_client: E2ERedisClient
 ):
     """TC-C05: Pairwise - F13 (WebSocket Fanout via Redis) + F16 (Prometheus Metrics)."""
     # 1. Verify /metrics is accessible
-    metrics_res = http_client.get("/metrics")
+    metrics_res = authed_client.get("/metrics")
     assert metrics_res.status_code == 200
 
     # 2. Publish event to Redis WebSocket channel
@@ -170,19 +170,19 @@ def test_combo_f13_f16_websocket_fanout_and_prometheus_metrics(
 
 @pytest.mark.tier3
 def test_combo_f12_f13_workload_decoupling_with_websocket_stream(
-    http_client: E2EHttpClient
+    authed_client: E2EHttpClient
 ):
     """TC-C06: Pairwise - F12 (Background Decoupling) + F13 (WebSocket State Broadcast)."""
     # Trigger background simulation task
-    res = http_client.post(
+    res = authed_client.post(
         "/api/v1/simulation/start",
         json_data={"duration": 5, "scenario": "corridor_peak"}
     )
     assert res.status_code in (200, 202, 401, 409)
 
     # Web worker remains immediately responsive for subsequent state check
-    status_res = http_client.get("/api/v1/simulation/status")
-    assert status_res.status_code in (200, 401)
+    status_res = authed_client.get("/api/v1/simulation/status")
+    assert status_res.status_code == 200, f"Expected 200 for an authenticated request, got {status_res.status_code}"
 
 
 @pytest.mark.tier3
@@ -198,11 +198,11 @@ def test_combo_f17_f18_sumo_corridor_18_link_webster_control():
 
 @pytest.mark.tier3
 def test_combo_f21_f11_topology_green_wave_and_mqtt_event_tagging(
-    http_client: E2EHttpClient, mqtt_client: E2EMqttClient
+    authed_client: E2EHttpClient, mqtt_client: E2EMqttClient
 ):
     """TC-C08: Pairwise - F21 (Dynamic Green-Wave) + F11 (MQTT Source Tagging)."""
     # 1. Trigger emergency preemption
-    res = http_client.post(
+    res = authed_client.post(
         "/api/v1/emergency/activate",
         json_data={"vehicle_id": "AMB_COMBO", "corridor": ["J1", "J2", "J3"], "priority": "CRITICAL"}
     )
@@ -218,26 +218,26 @@ def test_combo_f21_f11_topology_green_wave_and_mqtt_event_tagging(
 
 @pytest.mark.tier3
 def test_combo_f14_f16_lazy_loaded_ml_and_latency_metrics(
-    http_client: E2EHttpClient
+    authed_client: E2EHttpClient
 ):
     """TC-C09: Pairwise - F14 (Lazy ML Loading) + F16 (Prometheus Metrics)."""
     # ML forecast endpoint invocation
-    http_client.post(
+    authed_client.post(
         "/api/v1/ml/forecast",
         json_data={"junction_id": "J1", "horizon_steps": 3, "historical_readings": [10, 20]}
     )
     # Scrape metrics to verify Prometheus is recording activity
-    res = http_client.get("/metrics")
+    res = authed_client.get("/metrics")
     assert res.status_code == 200
 
 
 @pytest.mark.tier3
 def test_combo_f24_f25_openapi_typing_and_route_splitting(
-    http_client: E2EHttpClient
+    authed_client: E2EHttpClient
 ):
     """TC-C10: Pairwise - F24 (Strict OpenAPI Types) + F25 (Route Code Splitting)."""
     # OpenAPI spec endpoint delivers schema
-    res = http_client.get("/openapi.json")
+    res = authed_client.get("/openapi.json")
     assert res.status_code == 200
     spec = res.json()
     assert "paths" in spec

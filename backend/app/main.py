@@ -1,9 +1,20 @@
+import os
+import sys
 import asyncio
 import json
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import redis.asyncio as aioredis
+
+# Ensure repo root is available for shared imports
+_repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
+
+from shared.sumo_bootstrap import require_traci
+
+traci = require_traci(extra_paths=[_repo_root])
 
 from app.config import get_settings
 from app.database import init_db
@@ -21,16 +32,13 @@ async def redis_pubsub_bridge():
     retry_delay = 2
     while True:
         try:
+            from shared.constants import REDIS_CHANNELS
             from app.middleware.metrics import REDIS_PUBSUB_MESSAGES_TOTAL
             redis = aioredis.from_url(settings.REDIS_URL)
             pubsub = redis.pubsub()
-            channels = [
-                "traffic_updates", "signal_events", "alert_events", "emergency_events", "simulation_updates",
-                "surakshanet:events:traffic", "surakshanet:events:signals", "surakshanet:events:alerts",
-                "surakshanet:events:emergency", "surakshanet:events:training", "surakshanet:events:simulation"
-            ]
+            channels = list(REDIS_CHANNELS.values())
             await pubsub.subscribe(*channels)
-            print("Redis-to-WebSocket bridge listening on pub/sub channels...")
+            print(f"Redis-to-WebSocket bridge listening on {len(channels)} canonical pub/sub channels...")
 
             async for message in pubsub.listen():
                 if message and message.get("type") == "message":
@@ -50,20 +58,20 @@ async def redis_pubsub_bridge():
                         payload = {"raw": text_data}
 
                     # Map Redis channel to WebSocket room
-                    if "surakshanet:events:" in channel_name:
-                        ws_target = channel_name.replace("surakshanet:events:", "")
-                    elif "signal" in channel_name:
+                    if channel_name == REDIS_CHANNELS["signals"]:
                         ws_target = "signals"
-                    elif "alert" in channel_name:
+                    elif channel_name == REDIS_CHANNELS["alerts"]:
                         ws_target = "alerts"
-                    elif "emergency" in channel_name:
+                    elif channel_name == REDIS_CHANNELS["emergency"]:
                         ws_target = "emergency"
-                    elif "simulation" in channel_name:
+                    elif channel_name == REDIS_CHANNELS["simulation"]:
                         ws_target = "simulation"
-                    elif "training" in channel_name:
-                        ws_target = "training"
-                    else:
+                    elif channel_name == REDIS_CHANNELS["control_decisions"]:
+                        ws_target = "control"
+                    elif channel_name == REDIS_CHANNELS["traffic"]:
                         ws_target = "traffic"
+                    else:
+                        ws_target = channel_name
 
                     await manager.local_broadcast(ws_target, payload)
         except asyncio.CancelledError:
@@ -168,13 +176,19 @@ app.include_router(api_router, prefix=settings.API_PREFIX)
 app.include_router(ws_router)
 
 
+from app.api.health import router as health_router
+from app.api.ab import router as ab_router
+
+app.include_router(health_router)
+app.include_router(health_router, prefix=settings.API_PREFIX)
+app.include_router(ab_router)
+
+
 @app.get("/", tags=["Health"])
-@app.get("/health", tags=["Health"])
-@app.get("/api/v1/health", tags=["Health"])
-async def health_check() -> dict:
-    """Root health check endpoint."""
+async def root_check() -> dict:
+    """Root endpoint."""
     return {
-        "status": "healthy",
+        "status": "ok",
         "app": settings.APP_NAME,
         "version": settings.APP_VERSION,
     }

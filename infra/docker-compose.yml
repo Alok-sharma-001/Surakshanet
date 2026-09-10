@@ -47,6 +47,12 @@ services:
       - mosquitto_log:/mosquitto/log
     networks:
       - surakshanet-network
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 mosquitto_sub -t '$$SYS/broker/version' -C 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
 
 networks:
   surakshanet-network:

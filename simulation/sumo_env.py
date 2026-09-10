@@ -4,19 +4,29 @@ import json
 import logging
 from typing import Optional, Dict, Any, List
 
+# Ensure repo root is available for shared imports
+_repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
+
+from shared.sumo_bootstrap import ensure_sumo_on_path
+
+ensure_sumo_on_path([_repo_root])
+
 try:
-    import libsumo as traci
-except ImportError:
-    try:
-        import traci
-    except ImportError:
-        traci = None
+    import traci
+except ImportError as exc:
+    raise ImportError(
+        "'traci' is not importable from this interpreter "
+        f"({sys.executable}). See docs/04-environment-setup.md §2 (SN-013)."
+    ) from exc
 
 logger = logging.getLogger(__name__)
 
 try:
-    from shared.constants import PCU_FACTORS
+    from shared.constants import PCU_FACTORS, DEMO_SEED
 except ImportError:
+    DEMO_SEED = 42
     PCU_FACTORS = {
         'car': 1.0,
         'motorcycle': 0.5,
@@ -38,7 +48,7 @@ class SumoEnvironment:
     
     def __init__(self, net_file: str, route_file: str, config_file: Optional[str] = None,
                  gui: bool = False, step_length: float = 1.0, begin: int = 0, end: int = 3600,
-                 additional_files: Optional[list] = None):
+                 additional_files: Optional[list] = None, seed: Optional[int] = None):
         self.net_file = net_file
         self.route_file = route_file
         self.config_file = config_file
@@ -47,6 +57,7 @@ class SumoEnvironment:
         self.begin = begin
         self.end = end
         self.additional_files = additional_files or []
+        self.seed = seed if seed is not None else DEMO_SEED
         
         self.junction_ids: List[str] = []
         self.tl_ids: List[str] = []
@@ -57,8 +68,8 @@ class SumoEnvironment:
         self.step_count = 0
         self._is_running = False
         
-        if 'SUMO_HOME' not in os.environ:
-            logger.warning("SUMO_HOME not set in environment. TraCI might fail.")
+        if 'SUMO_HOME' not in os.environ and os.path.exists("/usr/share/sumo"):
+            os.environ["SUMO_HOME"] = "/usr/share/sumo"
             
     def start(self):
         """Start SUMO simulation with TraCI connection."""
@@ -80,16 +91,11 @@ class SumoEnvironment:
             "--step-length", str(self.step_length),
             "-b", str(self.begin),
             "-e", str(self.end),
-            "--waiting-time-memory", "10000"
+            "--waiting-time-memory", "10000",
+            "--seed", str(self.seed),
+            "--random", "false"
         ])
         
-        if traci is None:
-            self._is_running = True
-            self.junction_ids = ["DEL-CP-01", "DEL-ITO-02", "DEL-ASH-04", "DEL-LAJ-06"]
-            self.tl_ids = ["DEL-CP-01", "DEL-ITO-02", "DEL-ASH-04", "DEL-LAJ-06"]
-            logger.info("SUMO TraCI unavailable. Operating in microscopic simulation fallback mode.")
-            return
-
         try:
             traci.start(cmd)
             self._is_running = True
@@ -111,13 +117,6 @@ class SumoEnvironment:
         """Advance simulation by n steps and return current state."""
         if not self._is_running:
             raise RuntimeError("Simulation is not running.")
-            
-        if traci is None:
-            self.step_count += n_steps
-            self.total_departed += 12 * n_steps
-            self.total_arrived += 10 * n_steps
-            self.total_waiting_time += 18.5 * n_steps
-            return self.get_state()
 
         for _ in range(n_steps):
             traci.simulationStep()
@@ -138,27 +137,6 @@ class SumoEnvironment:
         if not self._is_running:
             return {}
             
-        if traci is None:
-            return {
-                "simulation_time": self.step_count * 1.0,
-                "step_count": self.step_count,
-                "junctions": {
-                    jid: {
-                        "queue_length": round(15.0 + (self.step_count % 10) * 1.5, 1),
-                        "speed": round(32.0 - (self.step_count % 8) * 0.8, 1),
-                        "vehicles": 18 + (self.step_count % 12),
-                        "current_phase": 0 if (self.step_count // 30) % 2 == 0 else 2,
-                        "phase_elapsed": (self.step_count % 30) * 1.0
-                    }
-                    for jid in self.junction_ids
-                },
-                "global_metrics": {
-                    "total_vehicles": max(10, self.total_departed - self.total_arrived),
-                    "total_waiting_time": round(self.total_waiting_time, 1),
-                    "throughput": self.total_arrived
-                }
-            }
-            
         state = {
             "simulation_time": traci.simulation.getTime(),
             "step_count": self.step_count,
@@ -170,40 +148,59 @@ class SumoEnvironment:
             }
         }
         
+        all_dets = set(traci.lanearea.getIDList()) if hasattr(traci, "lanearea") else set()
         for tl_id in self.tl_ids:
             try:
-                controlled_links = traci.trafficlight.getControlledLinks(tl_id)
-                edges = set()
-                for link in controlled_links:
-                    if link:
-                        edges.add(link[0][0].split('_')[0]) # Get base edge ID
-                        
                 approaches = {}
-                for edge in edges:
-                    direction = self._get_approach_direction(edge)
-                    veh_count = traci.edge.getLastStepVehicleNumber(edge)
-                    queue_len = traci.edge.getLastStepHaltingNumber(edge)
-                    avg_speed = traci.edge.getLastStepMeanSpeed(edge)
-                    
-                    # Calculate PCU
-                    pcu = 0.0
-                    for veh_id in traci.edge.getLastStepVehicleIDs(edge):
-                        vclass = traci.vehicle.getVehicleClass(veh_id)
-                        pcu += PCU_FACTORS.get(vclass, 1.0)
-                        
-                    approaches[direction] = {
-                        "pcu": pcu,
-                        "queue_length": queue_len,
-                        "avg_speed": avg_speed,
-                        "vehicle_count": veh_count
-                    }
-                    
+                for dir_code in ["N", "E", "S", "W"]:
+                    det_id = f"det_{tl_id}_{dir_code}_0"
+                    if det_id in all_dets:
+                        v_count = float(traci.lanearea.getLastStepVehicleNumber(det_id))
+                        queue_m = float(traci.lanearea.getJamLengthMeters(det_id))
+                        spd = float(traci.lanearea.getLastStepMeanSpeed(det_id)) * 3.6
+                        avg_speed = max(0.0, spd) if spd >= 0.0 else 35.0
+                        occ = float(traci.lanearea.getLastStepOccupancy(det_id)) / 100.0
+                        v_ids = traci.lanearea.getLastStepVehicleIDs(det_id)
+                        pcu = sum(PCU_FACTORS.get(traci.vehicle.getVehicleClass(v), 1.0) for v in v_ids) if v_ids else 0.0
+                        if v_count > 0 and pcu == 0.0:
+                            pcu = v_count
+                        approaches[dir_code] = {
+                            "pcu": pcu,
+                            "queue_length": queue_m / 5.5,
+                            "queue_length_m": queue_m,
+                            "avg_speed": avg_speed,
+                            "occupancy": occ,
+                            "vehicle_count": v_count
+                        }
+
+                if not approaches:
+                    controlled_links = traci.trafficlight.getControlledLinks(tl_id)
+                    edges = set()
+                    for link in controlled_links:
+                        if link:
+                            edges.add(link[0][0].rsplit('_', 1)[0])
+                    for edge in edges:
+                        direction = self._get_approach_direction(edge)
+                        veh_count = traci.edge.getLastStepVehicleNumber(edge)
+                        queue_len = traci.edge.getLastStepHaltingNumber(edge)
+                        avg_speed = traci.edge.getLastStepMeanSpeed(edge)
+                        pcu = 0.0
+                        for veh_id in traci.edge.getLastStepVehicleIDs(edge):
+                            vclass = traci.vehicle.getVehicleClass(veh_id)
+                            pcu += PCU_FACTORS.get(vclass, 1.0)
+                        approaches[direction] = {
+                            "pcu": pcu,
+                            "queue_length": queue_len,
+                            "avg_speed": avg_speed,
+                            "vehicle_count": veh_count
+                        }
+
                 state["junctions"][tl_id] = {
                     "approaches": approaches,
                     "current_phase": traci.trafficlight.getPhase(tl_id),
                     "phase_name": traci.trafficlight.getPhaseName(tl_id),
                     "phase_elapsed": traci.trafficlight.getPhaseDuration(tl_id) - (traci.trafficlight.getNextSwitch(tl_id) - traci.simulation.getTime()),
-                    "total_waiting_time": sum(appr["queue_length"] for appr in approaches.values()) # Simplified waiting per junction
+                    "total_waiting_time": sum(appr.get("queue_length", 0.0) for appr in approaches.values())
                 }
             except Exception as e:
                 logger.warning(f"Error getting state for junction {tl_id}: {e}")

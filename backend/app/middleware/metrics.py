@@ -43,6 +43,37 @@ SIMULATION_STEP_DURATION_SECONDS = Histogram(
     "Traffic simulation step duration in seconds"
 )
 
+# Control-Loop Prometheus Metrics (SN-037)
+CONTROL_DECISIONS_TOTAL = Counter(
+    "control_decisions_total",
+    "Total control decisions made",
+    ["junction", "controller", "action"]
+)
+
+CONTROL_CLAMPS_TOTAL = Counter(
+    "control_clamps_total",
+    "Total safety envelope clamps applied",
+    ["reason"]
+)
+
+CONTROL_INFERENCE_DURATION_SECONDS = Histogram(
+    "control_inference_duration_seconds",
+    "Inference duration for control policies in seconds",
+    ["controller"]
+)
+
+CONTROL_STEP_LAG_SECONDS = Gauge(
+    "control_step_lag_seconds",
+    "Lag in seconds between control loop iterations",
+    ["junction"]
+)
+
+CONTROL_FALLBACKS_TOTAL = Counter(
+    "control_fallbacks_total",
+    "Total fallbacks triggered in control service",
+    ["reason"]
+)
+
 
 async def metrics_middleware(request: Request, call_next):
     ACTIVE_CONNECTIONS.inc()

@@ -7,6 +7,9 @@ import uuid
 import pytest
 from tests.e2e.client import E2EHttpClient
 
+# A repeated logout may succeed idempotently or report the token already revoked.
+IDEMPOTENT_LOGOUT_STATUSES = (200, 401)
+
 
 @pytest.mark.tier2
 @pytest.mark.m1
@@ -23,10 +26,13 @@ def test_logout_twice_idempotency(http_client: E2EHttpClient):
     res1 = http_client.post("/api/v1/auth/logout", headers={"Authorization": f"Bearer {token}"})
     assert res1.status_code == 200
 
-    # Second logout
+    # Second logout. Both outcomes are the documented contract: the endpoint
+    # is idempotent (200) or the token is already revoked (401). What must not
+    # happen is a 5xx.
     res2 = http_client.post("/api/v1/auth/logout", headers={"Authorization": f"Bearer {token}"})
-    # Either succeeds or returns 401 (already revoked) without 500 error
-    assert res2.status_code in (200, 401), f"Unexpected status on double logout: {res2.status_code}"
+    assert res2.status_code in IDEMPOTENT_LOGOUT_STATUSES, (
+        f"Repeated logout must be idempotent or rejected, got {res2.status_code}"
+    )
 
 
 @pytest.mark.tier2

@@ -7,6 +7,16 @@ name: CI
     branches: [main]
 
 jobs:
+  phase0-guard:
+    name: Phase 0 Regression Guard (SN-140)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Assert Phase 0 deletions still hold
+        run: ./scripts/check_phase0_regressions.sh
+
   backend:
     name: Backend Lint, Typecheck, and Tests
     runs-on: ubuntu-latest

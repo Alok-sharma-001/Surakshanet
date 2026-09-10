@@ -11,10 +11,10 @@ from tests.e2e.client import E2EHttpClient
 @pytest.mark.tier1
 @pytest.mark.m2
 @pytest.mark.feature(10)
-def test_get_latest_traffic_endpoint(http_client: E2EHttpClient):
+def test_get_latest_traffic_endpoint(authed_client: E2EHttpClient):
     """TC-F10-01: Verify GET /api/v1/traffic/latest returns traffic status."""
-    res = http_client.get("/api/v1/traffic/latest")
-    assert res.status_code in (200, 401), f"Unexpected status: {res.status_code}"
+    res = authed_client.get("/api/v1/traffic/latest")
+    assert res.status_code == 200, f"Expected 200 for an authenticated request, got {res.status_code}: {res.text}"
     if res.status_code == 200:
         data = res.json()
         assert isinstance(data, (list, dict))
@@ -23,7 +23,7 @@ def test_get_latest_traffic_endpoint(http_client: E2EHttpClient):
 @pytest.mark.tier1
 @pytest.mark.m2
 @pytest.mark.feature(10)
-def test_post_traffic_reading_schema_validation(http_client: E2EHttpClient):
+def test_post_traffic_reading_schema_validation(authed_client: E2EHttpClient):
     """TC-F10-02: Verify POST /api/v1/traffic/reading validates required fields."""
     payload = {
         "junction_id": "J1",
@@ -32,17 +32,17 @@ def test_post_traffic_reading_schema_validation(http_client: E2EHttpClient):
         "congestion_level": "MEDIUM",
         "source": "sim",
     }
-    res = http_client.post("/api/v1/traffic/reading", json_data=payload)
+    res = authed_client.post("/api/v1/traffic/reading", json_data=payload)
     assert res.status_code in (200, 201, 401, 404, 422)
 
 
 @pytest.mark.tier1
 @pytest.mark.m2
 @pytest.mark.feature(10)
-def test_traffic_pcu_calculation_endpoint(http_client: E2EHttpClient):
+def test_traffic_pcu_calculation_endpoint(authed_client: E2EHttpClient):
     """TC-F10-03: Verify PCU calculation endpoint or response includes PCU metric."""
     # Test PCU endpoint or telemetry post
-    res = http_client.post(
+    res = authed_client.post(
         "/api/v1/traffic/pcu",
         json_data={"cars": 20, "buses": 5, "two_wheelers": 30, "trucks": 2}
     )
@@ -60,9 +60,9 @@ def test_traffic_pcu_calculation_endpoint(http_client: E2EHttpClient):
 @pytest.mark.tier1
 @pytest.mark.m2
 @pytest.mark.feature(10)
-def test_get_traffic_corridor_overview(http_client: E2EHttpClient):
+def test_get_traffic_corridor_overview(authed_client: E2EHttpClient):
     """TC-F10-04: Verify GET /api/v1/traffic/corridor provides arterial summary."""
-    res = http_client.get("/api/v1/traffic/corridor")
+    res = authed_client.get("/api/v1/traffic/corridor")
     assert res.status_code in (200, 401, 404)
 
 

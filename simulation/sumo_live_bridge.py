@@ -26,34 +26,24 @@ import queue
 logger = logging.getLogger("surakshanet.sumo_bridge")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
-# Ensure SUMO tools and dist-packages are in sys.path across all virtual environments
-candidate_paths = [
-    os.path.join(os.environ.get("SUMO_HOME", "/usr/share/sumo"), "tools"),
-    "/usr/share/sumo/tools",
-    "/usr/lib/python3/dist-packages",
-    "/usr/local/share/sumo/tools",
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-]
-for p in candidate_paths:
-    if os.path.exists(p) and p not in sys.path:
-        sys.path.insert(0, p)
+# Ensure repo root is available for shared imports
+_repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
 
-try:
-    from shared.constants import MQTT_JUNCTION_TELEMETRY_TOPIC
-except ImportError:
-    MQTT_JUNCTION_TELEMETRY_TOPIC = "surakshanet/junctions/{junction_id}/telemetry"
+from shared.sumo_bootstrap import require_traci
 
-if "SUMO_HOME" not in os.environ and os.path.exists("/usr/share/sumo"):
-    os.environ["SUMO_HOME"] = "/usr/share/sumo"
+traci = require_traci(extra_paths=[_repo_root])
 
-try:
-    import traci
-except ImportError:
-    try:
-        from tools import traci
-    except ImportError:
-        logger.error("TraCI module not found. Make sure SUMO is installed on the system.")
-        sys.exit(1)
+from datetime import datetime, timezone
+from shared.constants import (
+    DataSource,
+    DEMO_SEED,
+    PCU_FACTORS,
+    REDIS_CHANNELS,
+    MQTT_JUNCTION_TELEMETRY_TOPIC,
+)
+from shared.telemetry import ApproachTelemetry, JunctionTelemetry, validate_telemetry
 
 def publish_redis_raw(channel: str, message: str, host: str = "127.0.0.1", port: int = 6379) -> bool:
     """Publishes a message to Redis using raw TCP socket (zero external pip dependencies)."""
@@ -78,11 +68,13 @@ class SumoLiveBridge:
         redis_host: str = "127.0.0.1",
         redis_port: int = 6379,
         mqtt_host: str = "127.0.0.1",
-        mqtt_port: int = 1883
+        mqtt_port: int = 1883,
+        seed: int = DEMO_SEED
     ):
         self.config_path = os.path.abspath(config_path)
         self.gui = gui
         self.step_delay_ms = step_delay_ms
+        self.seed = seed
         self.redis_host = "127.0.0.1" if redis_host == "localhost" else redis_host
         self.redis_port = redis_port
         self.mqtt_host = "127.0.0.1" if mqtt_host == "localhost" else mqtt_host
@@ -94,6 +86,10 @@ class SumoLiveBridge:
         self.emergency_mode = False
         self.active_ambulance_id = None
         self.command_queue = queue.Queue()
+        self.last_cmd_seq: Dict[str, int] = {}
+        self.junction_phase: Dict[str, int] = {}
+        self.junction_phase_start: Dict[str, float] = {}
+        self.current_controller: Dict[str, str] = {}
         self._redis_sock = None
         self.redis_password = os.environ.get("REDIS_PASSWORD", None)
         self.redis_client = None
@@ -163,7 +159,9 @@ class SumoLiveBridge:
             "--start",
             "--quit-on-end",
             "--delay", str(self.step_delay_ms),
-            "--step-length", "1.0"
+            "--step-length", "1.0",
+            "--seed", str(self.seed),
+            "--random", "false"
         ]
 
         logger.info(f"Starting SUMO with command: {' '.join(cmd)}")
@@ -193,6 +191,29 @@ class SumoLiveBridge:
                             val = cmd.get("value", 5)
                             logger.info(f"🎛 DASHBOARD SIGNAL OVERRIDE: {action} (val={val})")
                             self.handle_signal_override(action, val)
+                        elif p_type == "SET_PHASE":
+                            tl_id = cmd.get("junction_id")
+                            target_phase = cmd.get("phase")
+                            dur_s = float(cmd.get("duration_s", 5.0))
+                            seq = int(cmd.get("seq", 0))
+                            ctrl = cmd.get("controller", "marl")
+                            if tl_id and target_phase is not None and not self.emergency_mode:
+                                if seq >= self.last_cmd_seq.get(tl_id, -1):
+                                    self.last_cmd_seq[tl_id] = seq
+                                    self.current_controller[tl_id] = ctrl
+                                    try:
+                                        curr = traci.trafficlight.getPhase(tl_id)
+                                        if curr != target_phase:
+                                            traci.trafficlight.setPhase(tl_id, target_phase)
+                                        traci.trafficlight.setPhaseDuration(tl_id, dur_s)
+                                        logger.debug(f"🚦 [SET_PHASE] {tl_id} phase={target_phase} dur={dur_s}s seq={seq}")
+                                    except Exception as e:
+                                        logger.warning(f"Error applying SET_PHASE on {tl_id}: {e}")
+                        elif p_type == "SIGNAL_MODE_CHANGED":
+                            tl_id = cmd.get("junction_id")
+                            mode_val = str(cmd.get("mode", "MARL")).lower()
+                            if tl_id:
+                                self.current_controller[tl_id] = mode_val
                     except Exception as e:
                         logger.warning(f"Error executing queued command: {e}")
 
@@ -208,6 +229,11 @@ class SumoLiveBridge:
 
                 traci.simulationStep()
                 self.step_count += 1
+                if self.redis_client:
+                    try:
+                        self.redis_client.set("sumo:step", str(self.step_count))
+                    except Exception:
+                        pass
 
                 # 1. Collect live vehicle data from TraCI
                 veh_ids = traci.vehicle.getIDList()
@@ -241,41 +267,116 @@ class SumoLiveBridge:
                 else:
                     los = "F (Forced Breakdown)"
 
-                # 2. Collect Traffic Lights & Junction telemetry
+                # 2. Collect Traffic Lights & Junction canonical telemetry
                 tl_ids = traci.trafficlight.getIDList()
                 tl_states = {}
                 junctions_stats = []
+                all_dets = set(traci.lanearea.getIDList())
+                sim_time_s = float(traci.simulation.getTime())
+
                 for i, tl in enumerate(tl_ids):
                     try:
                         state_str = traci.trafficlight.getRedYellowGreenState(tl)
                         phase = traci.trafficlight.getPhase(tl)
                         tl_states[tl] = {"phase": phase, "state": state_str}
-                        
-                        lanes = traci.trafficlight.getControlledLanes(tl)
-                        uniq_lanes = list(set(lanes))
-                        junc_queue = sum(traci.lane.getLastStepHaltingNumber(lane) for lane in uniq_lanes)
-                        moving_speeds = [traci.lane.getLastStepMeanSpeed(lane) * 3.6 for lane in uniq_lanes if traci.lane.getLastStepVehicleNumber(lane) > 0]
+
+                        # Track phase duration
+                        if tl not in self.junction_phase or self.junction_phase[tl] != phase:
+                            self.junction_phase[tl] = phase
+                            self.junction_phase_start[tl] = sim_time_s
+                        phase_elapsed_s = max(0.0, sim_time_s - self.junction_phase_start.get(tl, sim_time_s))
+
+                        # Build all 4 approaches (N, E, S, W) from lane-area detectors (SN-015, SN-025)
+                        approaches = []
+                        for dir_code in ["N", "E", "S", "W"]:
+                            det_id = f"det_{tl}_{dir_code}_0"
+                            if det_id in all_dets:
+                                v_ids = traci.lanearea.getLastStepVehicleIDs(det_id)
+                                v_count = float(len(v_ids))
+                                queue_m = float(traci.lanearea.getJamLengthMeters(det_id))
+                                spd = float(traci.lanearea.getLastStepMeanSpeed(det_id)) * 3.6
+                                speed_kmh = max(0.0, spd) if spd >= 0.0 else 35.0
+                                occ = float(traci.lanearea.getLastStepOccupancy(det_id)) / 100.0
+                                occ = max(0.0, min(1.0, occ))
+                                lane_id = traci.lanearea.getLaneID(det_id)
+
+                                pcu = 0.0
+                                accum_wait = 0.0
+                                breakdown = {}
+                                for v in v_ids:
+                                    try:
+                                        v_type = traci.vehicle.getTypeID(v)
+                                        breakdown[v_type] = breakdown.get(v_type, 0) + 1
+                                        pcu += PCU_FACTORS.get(v_type, 1.0)
+                                        accum_wait += float(traci.vehicle.getAccumulatedWaitingTime(v))
+                                    except Exception:
+                                        pass
+                                if v_count > 0 and pcu == 0.0:
+                                    pcu = v_count * 1.0
+
+                                approaches.append(ApproachTelemetry(
+                                    direction=dir_code,
+                                    lane_ids=[lane_id],
+                                    vehicle_count=v_count,
+                                    pcu=pcu,
+                                    queue_length_m=queue_m,
+                                    mean_speed_kmh=speed_kmh,
+                                    occupancy=occ,
+                                    accumulated_wait_s=accum_wait,
+                                    vehicle_breakdown=breakdown
+                                ))
+                            else:
+                                approaches.append(ApproachTelemetry(
+                                    direction=dir_code,
+                                    lane_ids=[],
+                                    vehicle_count=0.0,
+                                    pcu=0.0,
+                                    queue_length_m=0.0,
+                                    mean_speed_kmh=35.0,
+                                    occupancy=0.0,
+                                    accumulated_wait_s=0.0,
+                                    vehicle_breakdown={}
+                                ))
+
+                        # Build and validate canonical JunctionTelemetry (SN-023, SN-025)
+                        jt = JunctionTelemetry(
+                            junction_id=tl,
+                            source=DataSource.SUMO,
+                            approaches=approaches,
+                            timestamp=datetime.now(timezone.utc).isoformat(),
+                            sim_time_s=sim_time_s,
+                            current_phase=int(phase),
+                            phase_elapsed_s=round(phase_elapsed_s, 2),
+                            cycle_length_s=90.0,
+                            controller=self.current_controller.get(tl, "marl"),
+                            total_pcu=sum(a.pcu for a in approaches),
+                            seed=self.seed
+                        )
+                        # Ensure it validates against schema
+                        validated = validate_telemetry(jt.to_dict())
+                        self.publish_redis(REDIS_CHANNELS["traffic"], validated.to_json())
+
+                        junc_queue = sum(int(a.queue_length_m / 7.5) for a in approaches)
+                        moving_speeds = [a.mean_speed_kmh for a in approaches if a.vehicle_count > 0]
                         junc_avg_speed = round(sum(moving_speeds) / len(moving_speeds), 1) if moving_speeds else 35.0
-                        veh_count = sum(traci.lane.getLastStepVehicleNumber(lane) for lane in uniq_lanes)
-                        junc_pcu = max(40, veh_count * 18 + int(junc_queue * 8.5))
 
                         junctions_stats.append({
                             "id": tl,
                             "index": i,
                             "queue": junc_queue,
                             "speed": junc_avg_speed,
-                            "pcu": junc_pcu,
+                            "pcu": jt.total_pcu,
                             "phase": phase,
                             "signal_state": state_str,
                             "is_congested": junc_queue > 6 or junc_avg_speed < 18.0
                         })
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"Error extracting canonical telemetry for junction {tl}: {e}")
 
-                # 3. Construct Live Telemetry Packet
+                # 3. Construct Live Telemetry Summary Packet
                 telemetry = {
                     "type": "SIMULATION_TICK",
-                    "source": "sim",
+                    "source": DataSource.SUMO.value,
                     "step": self.step_count,
                     "sim_time": f"{int((self.step_count % 3600) // 60):02d}:{int(self.step_count % 60):02d}",
                     "total_vehicles": total_vehicles,
@@ -289,22 +390,18 @@ class SumoLiveBridge:
                     "timestamp": time.time()
                 }
 
-                # 4. Stream to Redis channel `traffic_updates`
+                # 4. Stream simulation summary to REDIS_CHANNELS["simulation"]
                 payload_str = json.dumps(telemetry)
-                self.publish_redis("traffic_updates", payload_str)
+                self.publish_redis(REDIS_CHANNELS["simulation"], payload_str)
 
-                # Periodic signal optimization event to signal_events
-                if self.step_count % 15 == 0 and junctions_stats:
-                    top_j = max(junctions_stats, key=lambda x: x["queue"])
-                    event_payload = {
-                        "action": f"MARL Green Extension +4.0s (Junction {top_j['id']})",
-                        "source": "sim",
-                        "junction_id": top_j["id"],
-                        "queue": top_j["queue"],
-                        "speed": top_j["speed"],
-                        "timestamp": time.time()
-                    }
-                    self.publish_redis("signal_events", json.dumps(event_payload))
+                # SN-002: a periodic publisher previously emitted fake green extension
+                # messages to signal_events every 15 steps, regardless of state and with
+                # no model involved. The dashboard displayed that string as an AI decision.
+                #
+                # The bridge reports state; it does not narrate decisions. Real
+                # control decisions are published by the control service once it
+                # exists (Phase 2, SN-030), carrying the state vector and Q-values
+                # that produced them.
 
                 if self.step_count % 5 == 0:
                     logger.info(
@@ -407,33 +504,56 @@ class SumoLiveBridge:
             logger.warning(f"Failed to apply signal override in SUMO: {e}")
 
     def listen_dashboard_commands(self):
-        """Background thread listening for manual overrides and emergency events from the dashboard."""
+        """Background thread listening for control commands, manual overrides, and emergency events."""
+        sub_channels = [
+            REDIS_CHANNELS["emergency"],
+            REDIS_CHANNELS["signals"],
+            REDIS_CHANNELS["control_commands"],
+        ]
         while self.is_running:
             logger.info(f"Connecting to Redis command bus at {self.redis_host}:{self.redis_port}...")
             try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.connect((self.redis_host, self.redis_port))
-                sub_cmd = "*3\r\n$9\r\nSUBSCRIBE\r\n$16\r\nemergency_events\r\n$13\r\nsignal_events\r\n"
-                s.sendall(sub_cmd.encode("utf-8"))
-                f = s.makefile("r", encoding="utf-8", errors="ignore")
-                logger.info("✅ Redis Command Bus: Subscribed to emergency_events & signal_events")
-                while self.is_running:
-                    line = f.readline()
-                    if not line:
-                        break
-                    if line.startswith("$"):
-                        length = int(line[1:].strip())
-                        msg = f.read(length)
-                        f.readline()
-                        try:
-                            payload = json.loads(msg)
-                            if isinstance(payload, dict) and ("type" in payload or "action" in payload):
-                                self.command_queue.put(payload)
-                        except Exception:
-                            pass
+                if self.redis_client:
+                    pubsub = self.redis_client.pubsub()
+                    pubsub.subscribe(*sub_channels)
+                    logger.info(f"✅ Redis Command Bus: Subscribed to {', '.join(sub_channels)}")
+                    for item in pubsub.listen():
+                        if not self.is_running:
+                            break
+                        if item and item.get("type") == "message":
+                            try:
+                                raw_data = item.get("data")
+                                text_data = raw_data.decode("utf-8") if isinstance(raw_data, bytes) else str(raw_data)
+                                payload = json.loads(text_data)
+                                if isinstance(payload, dict) and ("type" in payload or "action" in payload):
+                                    self.command_queue.put(payload)
+                            except Exception:
+                                pass
+                else:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.connect((self.redis_host, self.redis_port))
+                    c1, c2, c3 = sub_channels[0], sub_channels[1], sub_channels[2]
+                    sub_cmd = f"*4\r\n$9\r\nSUBSCRIBE\r\n${len(c1)}\r\n{c1}\r\n${len(c2)}\r\n{c2}\r\n${len(c3)}\r\n{c3}\r\n"
+                    s.sendall(sub_cmd.encode("utf-8"))
+                    f = s.makefile("r", encoding="utf-8", errors="ignore")
+                    logger.info(f"✅ Redis Command Bus (socket): Subscribed to {', '.join(sub_channels)}")
+                    while self.is_running:
+                        line = f.readline()
+                        if not line:
+                            break
+                        if line.startswith("$"):
+                            length = int(line[1:].strip())
+                            msg = f.read(length)
+                            f.readline()
+                            try:
+                                payload = json.loads(msg)
+                                if isinstance(payload, dict) and ("type" in payload or "action" in payload):
+                                    self.command_queue.put(payload)
+                            except Exception:
+                                pass
             except Exception as e:
                 if self.is_running:
-                    logger.warning(f"Dashboard command listener reconnecting in 2s ({e})...")
+                    logger.warning(f"Command listener reconnecting in 2s ({e})...")
                     time.sleep(2)
 
     def stop(self):
@@ -456,12 +576,14 @@ if __name__ == "__main__":
     parser.add_argument("--no-gui", action="store_true", help="Run SUMO in headless mode without GUI")
     parser.add_argument("--delay", type=int, default=50, help="Step delay in milliseconds (default: 50)")
     parser.add_argument("--redis-port", type=int, default=6379, help="Redis port (default: 6379)")
+    parser.add_argument("--seed", type=int, default=DEMO_SEED, help=f"Simulation seed (default: {DEMO_SEED})")
     args = parser.parse_args()
 
     bridge = SumoLiveBridge(
         config_path=args.config,
         gui=not args.no_gui,
         step_delay_ms=args.delay,
-        redis_port=args.redis_port
+        redis_port=args.redis_port,
+        seed=args.seed
     )
     bridge.start()
