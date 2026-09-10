@@ -34,7 +34,13 @@ def test_forecast_junction_traffic():
     assert "forecast_15m_pcu" in result
     assert "forecast_30m_pcu" in result
     assert "spillback_risk" in result
-    assert 0.0 <= result["spillback_risk"] <= 1.0
+    if result["source"] == "unavailable":
+        # No trained LSTM/XGBoost models in this environment — must be honest, not fabricated.
+        assert result["forecast_15m_pcu"] is None
+        assert result["spillback_risk"] is None
+    else:
+        assert result["source"] == "LSTM_XGBOOST_ENSEMBLE"
+        assert 0.0 <= result["spillback_risk"] <= 1.0
 
 
 def test_clear_emergency_corridor():

@@ -9,7 +9,7 @@ import logging
 from typing import Optional, Dict, Any
 
 from app.config import get_settings
-from shared.constants import TelemetrySource
+from shared.constants import DataSource
 from ml.marl.webster_fallback import WebsterFallback
 from app.agent_tools.its_tools import (
     forecast_junction_traffic,
@@ -231,7 +231,7 @@ class ResilientTrafficSupervisor:
                 )
                 self.active_tier = "tier_3_deterministic_webster"
                 return {
-                    "source": TelemetrySource.MOCK.value,
+                    "source": DataSource.HEURISTIC.value,
                     "tier": "tier_3_deterministic_webster",
                     "junction_id": junction_id,
                     "phase_string": "rrrrGGGggrrrrGGGgg",
@@ -255,11 +255,16 @@ class ResilientTrafficSupervisor:
                     action_text = await response.text()
                     self.active_tier = "tier_1_cloud"
                     return {
-                        "source": TelemetrySource.LIVE.value,
+                        "source": DataSource.MODEL.value,
                         "tier": "tier_1_cloud",
                         "junction_id": junction_id,
                         "action": action_text,
-                        "status": "AI_AGENT_OPTIMIZED"
+                        "status": "AI_RECOMMENDATION_UNVALIDATED",
+                        "validated": False,
+                        "note": "Free-text LLM recommendation, not a parsed signal plan. Must be "
+                                 "converted to explicit ns_green/ew_green/yellow values and pass "
+                                 "validate_signal_plan_safety() before it may be applied to any "
+                                 "signal controller."
                     }
             except Exception as net_err:
                 logger.warning(
@@ -280,11 +285,16 @@ class ResilientTrafficSupervisor:
                     action_text = await response.text()
                     self.active_tier = "tier_2_edge_litert"
                     return {
-                        "source": TelemetrySource.SIM.value,
+                        "source": DataSource.MODEL.value,
                         "tier": "tier_2_edge_litert",
                         "junction_id": junction_id,
                         "action": action_text,
-                        "status": "EDGE_AI_OPTIMIZED"
+                        "status": "AI_RECOMMENDATION_UNVALIDATED",
+                        "validated": False,
+                        "note": "Free-text LLM recommendation, not a parsed signal plan. Must be "
+                                 "converted to explicit ns_green/ew_green/yellow values and pass "
+                                 "validate_signal_plan_safety() before it may be applied to any "
+                                 "signal controller."
                     }
             except Exception as edge_err:
                 logger.error(
@@ -297,7 +307,7 @@ class ResilientTrafficSupervisor:
         self.active_tier = "tier_3_deterministic_webster"
         plan = self.webster_fallback.get_current_plan()
         return {
-            "source": TelemetrySource.MOCK.value,
+            "source": DataSource.HEURISTIC.value,
             "tier": "tier_3_deterministic_webster",
             "junction_id": junction_id,
             "phase_string": "rrrrGGGggrrrrGGGgg",

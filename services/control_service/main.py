@@ -28,6 +28,11 @@ import uuid
 from datetime import datetime, timezone
 from typing import Dict, Optional, Any
 
+_repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+for _p in [_repo_root, os.path.join(_repo_root, "backend")]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
@@ -109,16 +114,23 @@ class ControlService:
         logger.info("Starting SurakshaNet Autonomous Control Service...")
 
         # Setup database
-        self.engine = create_async_engine(settings.DATABASE_URL, echo=False)
+        db_url = os.environ.get("DATABASE_URL") or settings.DATABASE_URL
+        if db_url and "@postgres:" in db_url:
+            db_url = db_url.replace("@postgres:5432", "@127.0.0.1:5433")
+        self.engine = create_async_engine(db_url, echo=False)
         self.async_session = sessionmaker(self.engine, class_=AsyncSession, expire_on_commit=False)
 
         # Setup Redis
-        self.redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=False)
+        redis_url = os.environ.get("REDIS_URL") or settings.REDIS_URL
+        if redis_url and ("@redis:" in redis_url or "redis://redis:" in redis_url):
+            redis_url = redis_url.replace("redis://redis:6379", "redis://127.0.0.1:6379")
+        self.redis_client = aioredis.from_url(redis_url, decode_responses=False)
 
         # Pre-load mode cache from database
         await self._refresh_mode_cache()
 
         # Launch background tasks
+        asyncio.create_task(self._heartbeat_loop())
         asyncio.create_task(self._mode_poller_loop())
         asyncio.create_task(self._traffic_telemetry_listener())
         asyncio.create_task(self._signal_events_listener())
@@ -154,6 +166,19 @@ class ControlService:
                     self.junction_uuid_cache[str(j_uuid)] = j_uuid
         except Exception as e:
             logger.warning(f"Error refreshing signal mode cache from DB: {e}")
+
+    async def _heartbeat_loop(self):
+        """Periodically update control_service:heartbeat key in Redis for health checks."""
+        while self.is_running:
+            try:
+                if self.redis_client:
+                    await self.redis_client.set("control_service:heartbeat", str(time.time()), ex=30)
+                await asyncio.sleep(2.0)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug(f"Error updating control service heartbeat: {e}")
+                await asyncio.sleep(2.0)
 
     async def _mode_poller_loop(self):
         """Periodically refresh signal mode cache every 5.0 seconds."""
@@ -298,7 +323,7 @@ class ControlService:
             phase_elapsed_s=telemetry.phase_elapsed_s
         )
         inf_duration = time.perf_counter() - t_start
-        CONTROL_INFERENCE_DURATION_SECONDS.labels(controller=chosen_controller.controller_name).observe(inf_duration)
+        CONTROL_INFERENCE_DURATION_SECONDS.labels(controller=controller_name).observe(inf_duration)
 
         # 4. Mandatory Safety Envelope outside the policy (SN-032)
         ped_cycles = self.cycles_since_ped.get(tl_id, 0)
@@ -339,7 +364,10 @@ class ControlService:
 
         # 6. Database persistence & identity resolution (SN-024)
         decision_id = uuid.uuid4()
-        decision_ts = datetime.now(timezone.utc)
+        # control_decisions.timestamp is DateTime (naive) to match the hypertable's
+        # composite PK convention (see ControlDecision model) — store naive UTC, or
+        # asyncpg rejects the later reward UPDATE's WHERE-clause comparison.
+        decision_ts = datetime.now(timezone.utc).replace(tzinfo=None)
         self.last_decision_id[tl_id] = decision_id
         self.last_decision_ts[tl_id] = decision_ts
 
@@ -392,7 +420,7 @@ class ControlService:
             "issued_by": "control_service",
             "controller": controller_name,
             "decision_id": str(decision_id),
-            "timestamp": decision_ts.isoformat()
+            "timestamp": decision_ts.isoformat() + "Z"
         }
         await self.redis_client.publish(
             REDIS_CHANNELS["control_commands"],
@@ -413,12 +441,13 @@ class ControlService:
             "clamp_reason": safety_res.clamp_reason,
             "q_values": decision_result.q_values,
             "model_version": decision_result.model_version,
-            "timestamp": decision_ts.isoformat()
+            "timestamp": decision_ts.isoformat() + "Z"
         }
         await self.redis_client.publish(
             REDIS_CHANNELS["control_decisions"],
             json.dumps(ws_event)
         )
+        await self.redis_client.set("control_service:last_decision", str(time.time()), ex=30)
 
         logger.debug(
             f"⚡ [DECISION] {tl_id} | {controller_name} | action={safety_res.action} "
@@ -427,7 +456,14 @@ class ControlService:
         )
 
     async def _resolve_junction(self, identifier: str) -> Optional[uuid.UUID]:
-        """Resolves junction string identifier to database UUID."""
+        """Resolves a SUMO/MQTT junction identifier (e.g. "J0") to a database UUID.
+
+        Traffic-light ids come from traci.trafficlight.getIDList() and are topology-
+        dependent (never hardcoded — see CLAUDE.md §8), so a fixed junction seed list
+        can't cover every network. If no existing row matches, provision one on first
+        sight so control_decisions has a real junction to persist against instead of
+        silently dropping every decision for an unrecognised identifier.
+        """
         if identifier in self.junction_uuid_cache:
             return self.junction_uuid_cache[identifier]
 
@@ -443,8 +479,27 @@ class ControlService:
                 if j:
                     self.junction_uuid_cache[identifier] = j.id
                     return j.id
+
+                # Deterministic placeholder location — this is simulation-topology
+                # metadata (where the traffic light lives on the map), not a sensor
+                # reading, so a stable synthetic offset is honest; it is never used
+                # as a measured value.
+                offset = (abs(hash(identifier)) % 1000) / 10000.0
+                new_junction = Junction(
+                    id=uuid.uuid4(),
+                    name=identifier,
+                    latitude=12.9177 + offset,
+                    longitude=77.6238 + offset,
+                    num_approaches=4,
+                    is_active=True,
+                )
+                db.add(new_junction)
+                await db.commit()
+                logger.info(f"Auto-provisioned junction '{identifier}' (id={new_junction.id}) — no prior DB row matched.")
+                self.junction_uuid_cache[identifier] = new_junction.id
+                return new_junction.id
         except Exception as e:
-            logger.warning(f"Failed to resolve junction {identifier}: {e}")
+            logger.warning(f"Failed to resolve or provision junction {identifier}: {e}")
 
         return None
 

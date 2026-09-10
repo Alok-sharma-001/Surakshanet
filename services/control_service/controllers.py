@@ -34,6 +34,8 @@ class ControllerDecision:
 
 
 class BaseController(ABC):
+    controller_name: str = "base"
+
     @abstractmethod
     def select_action(
         self,
@@ -52,6 +54,7 @@ class MarlController(BaseController):
     Greedy Deep Q-Network controller using the trained PyTorch model.
     Zero exploration (epsilon=0.0) for deterministic demo execution.
     """
+    controller_name: str = "marl"
 
     def __init__(self, weights_path: str = WEIGHTS_PATH):
         self.weights_path = weights_path
@@ -126,6 +129,7 @@ class WebsterController(BaseController):
     Fixed-time and flow-ratio Webster fallback controller.
     Uses Webster's equation and time-of-day plans from ml/marl/webster_fallback.py.
     """
+    controller_name: str = "webster"
 
     def __init__(self):
         self.webster = WebsterFallback()
@@ -175,6 +179,7 @@ class ManualController(BaseController):
     """
     Operator manual controller. Executes explicit commands received from dashboard.
     """
+    controller_name: str = "manual"
 
     def __init__(self):
         self.manual_commands: Dict[str, int] = {}  # junction_id -> requested_action

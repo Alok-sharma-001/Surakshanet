@@ -11,6 +11,7 @@ cd "$SCRIPT_DIR"
 
 PROFILE="demo"
 NO_FRONTEND=false
+FOREGROUND=false
 DEMO_SEED=42
 STEP_TIMEOUT=90
 
@@ -27,6 +28,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-frontend)
             NO_FRONTEND=true
+            shift
+            ;;
+        --foreground|-f)
+            FOREGROUND=true
             shift
             ;;
         --seed)
@@ -186,6 +191,7 @@ fi
 
 nohup $PYTHON_BIN simulation/sumo_live_bridge.py --seed "$DEMO_SEED" --no-gui >> logs/sumo_bridge.log 2>&1 &
 echo $! > logs/sumo_bridge.pid
+disown $! 2>/dev/null || true
 sleep 2
 
 if ! kill -0 "$(cat logs/sumo_bridge.pid)" 2>/dev/null; then
@@ -206,6 +212,7 @@ fi
 
 nohup $PYTHON_BIN services/control_service/main.py >> logs/control_service.log 2>&1 &
 echo $! > logs/control_service.pid
+disown $! 2>/dev/null || true
 sleep 2
 
 if ! kill -0 "$(cat logs/control_service.pid)" 2>/dev/null; then
@@ -229,7 +236,7 @@ else
             kill -TERM "$(cat logs/frontend.pid)" 2>/dev/null || true
             rm -f logs/frontend.pid
         fi
-        (cd frontend/dashboard && nohup npm run dev -- --host 0.0.0.0 --port 5173 >> "$SCRIPT_DIR/logs/frontend.log" 2>&1 & echo $! > "$SCRIPT_DIR/logs/frontend.pid")
+        (cd frontend/dashboard && nohup npm run dev -- --host 0.0.0.0 --port 5173 >> "$SCRIPT_DIR/logs/frontend.log" 2>&1 & echo $! > "$SCRIPT_DIR/logs/frontend.pid" && disown $! 2>/dev/null || true)
 
         elapsed=0
         until curl -s http://127.0.0.1:5173 >/dev/null 2>&1; do
@@ -248,16 +255,14 @@ fi
 # ==============================================================================
 report_step "8" "Verify all services"
 
-sleep 3
 DEEP_HEALTH_FILE="$(mktemp)"
-curl -s http://127.0.0.1:8000/health/deep > "$DEEP_HEALTH_FILE" 2>/dev/null || echo '{"status":"error"}' > "$DEEP_HEALTH_FILE"
+all_ok=false
+HEALTH_ERR=""
 
-if [[ ! -s "$DEEP_HEALTH_FILE" ]] || grep -q '{"status":"error"}' "$DEEP_HEALTH_FILE"; then
-    rm -f "$DEEP_HEALTH_FILE"
-    report_failure "8" "Verify all services" "empty response from /health/deep" "backend did not respond" "docs/04-environment-setup.md §6"
-fi
-
-HEALTH_ERR=$($PYTHON_BIN -c "
+for i in $(seq 1 15); do
+    curl -s http://127.0.0.1:8000/health/deep > "$DEEP_HEALTH_FILE" 2>/dev/null || echo '{"status":"error"}' > "$DEEP_HEALTH_FILE"
+    if [[ -s "$DEEP_HEALTH_FILE" ]] && ! grep -q '{"status":"error"}' "$DEEP_HEALTH_FILE"; then
+        HEALTH_ERR=$($PYTHON_BIN -c "
 import sys, json
 try:
     with open('$DEEP_HEALTH_FILE') as f:
@@ -274,10 +279,19 @@ try:
 except Exception as e:
     print(f'Failed to parse /health/deep response: {e}')
     sys.exit(1)
-" 2>&1) || {
+" 2>&1)
+        if [[ $? -eq 0 ]]; then
+            all_ok=true
+            break
+        fi
+    fi
+    sleep 1
+done
+
+if [[ "$all_ok" != "true" ]]; then
     rm -f "$DEEP_HEALTH_FILE"
     report_failure "8" "Verify all services" "one or more services unhealthy in /health/deep" "$HEALTH_ERR" "docs/04-environment-setup.md §6"
-}
+fi
 rm -f "$DEEP_HEALTH_FILE"
 report_step_ok
 
@@ -294,6 +308,14 @@ echo "  Seed                $DEMO_SEED  (deterministic)"
 echo ""
 
 # ==============================================================================
-# Step 10: Exit 0
+# Step 10: Exit or keep running
 # ==============================================================================
+if [[ "$FOREGROUND" == "true" ]]; then
+    echo "SurakshaNet running in foreground mode. Monitoring services..."
+    trap './stop.sh; exit 0' SIGINT SIGTERM
+    while true; do
+        sleep 5
+    done
+fi
+
 exit 0

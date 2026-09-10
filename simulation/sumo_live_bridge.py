@@ -169,6 +169,13 @@ class SumoLiveBridge:
         self.is_running = True
         logger.info("✅ Connected to SUMO TraCI! Live telemetry bridge running...")
 
+        if self.redis_client:
+            try:
+                self.redis_client.setex("simulation:bridge:heartbeat", 30, str(time.time()))
+                self.redis_client.set("sumo:step", "0")
+            except Exception:
+                pass
+
         # Start two-way dashboard command listener (Emergency Green Waves & Signal Overrides)
         cmd_thread = threading.Thread(target=self.listen_dashboard_commands, daemon=True)
         cmd_thread.start()
@@ -516,19 +523,17 @@ class SumoLiveBridge:
                 if self.redis_client:
                     pubsub = self.redis_client.pubsub()
                     pubsub.subscribe(*sub_channels)
-                    logger.info(f"✅ Redis Command Bus: Subscribed to {', '.join(sub_channels)}")
-                    for item in pubsub.listen():
-                        if not self.is_running:
-                            break
-                        if item and item.get("type") == "message":
-                            try:
+                    while self.is_running:
+                        try:
+                            item = pubsub.get_message(timeout=0.5)
+                            if item and item.get("type") == "message":
                                 raw_data = item.get("data")
                                 text_data = raw_data.decode("utf-8") if isinstance(raw_data, bytes) else str(raw_data)
                                 payload = json.loads(text_data)
                                 if isinstance(payload, dict) and ("type" in payload or "action" in payload):
                                     self.command_queue.put(payload)
-                            except Exception:
-                                pass
+                        except Exception:
+                            pass
                 else:
                     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     s.connect((self.redis_host, self.redis_port))

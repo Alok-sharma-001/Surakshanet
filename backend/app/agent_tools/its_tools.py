@@ -4,6 +4,7 @@ Exposes core ML, forecasting, routing, and emergency preemption subsystems as
 type-annotated, self-documenting functions consumable by Antigravity agents.
 """
 
+import asyncio
 import math
 import uuid
 import time
@@ -11,6 +12,56 @@ import logging
 from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _run_async(coro):
+    """Runs an async coroutine from this module's synchronous tool functions.
+
+    Antigravity agent tools are plain sync callables, but reading recent readings
+    needs the app's async DB session. If the calling thread already has a running
+    event loop (likely, since the agent framework itself is async), asyncio.run()
+    can't be used directly there — so that case is delegated to a throwaway thread
+    that owns its own loop instead.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
+async def _fetch_recent_readings(junction_id: str, limit: int = 36) -> List[Dict[str, Any]]:
+    """Fetches the most recent traffic_readings rows for a junction, oldest first.
+
+    Accepts either a junction UUID or its name, mirroring the resolution pattern
+    used by services/control_service/main.py::_resolve_junction.
+    """
+    from sqlalchemy import select
+    from app.database import async_session_maker
+    from app.models.traffic import TrafficReading
+    from app.models.junction import Junction
+
+    async with async_session_maker() as db:
+        j_id = None
+        try:
+            j_id = uuid.UUID(junction_id)
+        except (ValueError, AttributeError, TypeError):
+            result = await db.execute(select(Junction.id).where(Junction.name.ilike(junction_id)))
+            j_id = result.scalars().first()
+
+        if j_id is None:
+            return []
+
+        result = await db.execute(
+            select(TrafficReading.timestamp, TrafficReading.pcu_value)
+            .where(TrafficReading.junction_id == j_id)
+            .order_by(TrafficReading.timestamp.desc())
+            .limit(limit)
+        )
+        rows = result.all()
+        return [{"timestamp": ts, "pcu_value": pcu} for ts, pcu in reversed(rows)]
 
 # Global singletons for ML engines to avoid reload overhead
 _green_wave_controller = None
@@ -65,29 +116,37 @@ def forecast_junction_traffic(junction_id: str) -> Dict[str, Any]:
     # If model is trained and available, predict with model
     if forecaster and getattr(forecaster, "is_lstm_trained", False) and getattr(forecaster, "is_xgb_trained", False):
         try:
-            preds = forecaster.predict(junction_id=junction_id, recent_readings=[])
+            recent_readings = _run_async(_fetch_recent_readings(junction_id))
+            if not recent_readings:
+                raise ValueError(f"No traffic_readings found for junction '{junction_id}'.")
+
+            preds = forecaster.predict(junction_id=junction_id, recent_readings=recent_readings)
+            # predict() returns {"horizons": [{"minutes": .., "predicted_pcu": ..}, ...], "spillback_risk": ..}
+            by_minutes = {h["minutes"]: h["predicted_pcu"] for h in preds["horizons"]}
+            p15, p30, p60 = by_minutes.get(15), by_minutes.get(30), by_minutes.get(60)
             return {
                 "junction_id": junction_id,
-                "forecast_15m_pcu": preds.get(3, 450.0),
-                "forecast_30m_pcu": preds.get(6, 620.0),
-                "forecast_60m_pcu": preds.get(12, 780.0),
-                "spillback_risk": round(min(1.0, preds.get(6, 620.0) / 1000.0), 2),
-                "trend": "INCREASING" if preds.get(12, 780.0) > preds.get(3, 450.0) else "STABLE",
+                "forecast_15m_pcu": p15,
+                "forecast_30m_pcu": p30,
+                "forecast_60m_pcu": p60,
+                "spillback_risk": preds["spillback_risk"],
+                "trend": "INCREASING" if (p60 is not None and p15 is not None and p60 > p15) else "STABLE",
                 "source": "LSTM_XGBOOST_ENSEMBLE"
             }
         except Exception as err:
-            logger.warning(f"Forecaster inference error: {err}. Falling back to baseline estimates.")
+            logger.warning(f"Forecaster inference error: {err}. Reporting unavailable rather than fabricating.")
 
-    # Robust baseline estimate when models are training or offline
+    # No trained model and no way to derive a genuine estimate — report honestly,
+    # matching the /ml/predict 503 contract (CLAUDE.md §5) instead of inventing numbers.
     return {
         "junction_id": junction_id,
-        "forecast_15m_pcu": 480.0,
-        "forecast_30m_pcu": 650.0,
-        "forecast_60m_pcu": 720.0,
-        "spillback_risk": 0.65,
-        "trend": "INCREASING",
-        "confidence": 0.85,
-        "source": "ESTIMATION_BASELINE"
+        "forecast_15m_pcu": None,
+        "forecast_30m_pcu": None,
+        "forecast_60m_pcu": None,
+        "spillback_risk": None,
+        "trend": "UNKNOWN",
+        "source": "unavailable",
+        "reason": "forecasting model not trained or unavailable"
     }
 
 

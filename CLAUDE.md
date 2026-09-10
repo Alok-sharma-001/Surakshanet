@@ -381,7 +381,7 @@ npm run build
 ## 11. Local Environment State
 
 - `.venv` runs Python **3.14** (`/home/alok/surakshanet/.venv/bin/python3`).
-- `.venv` has all core dependencies installed (`torch-2.14.0+cpu`, `sqlalchemy==2.0.52`, `pydantic==2.13.5`, `pytest-asyncio==1.4.0`, `asyncpg==0.31.0`, `geoalchemy2==0.20.0`, etc.).
+- `.venv` has all core dependencies installed (`torch-2.14.0+cpu`, `sqlalchemy==2.0.52`, `pydantic==2.13.5`, `pytest-asyncio==1.4.0`, `asyncpg==0.31.0`, `geoalchemy2==0.20.0`, etc.). `xgboost`, `joblib`, and `scikit-learn` were missing from `.venv` despite being pinned in `requirements.txt` (verified 2026-09-11, installed to fix) — check `pip show <pkg>` before assuming a requirements.txt pin means a package is actually present locally.
 - `PYTHONPATH=$(pwd):$(pwd)/backend pytest tests/critical/ -v` runs all 24 critical tests with 0 failures in <9 seconds.
 - SUMO and `traci` are operational in `.venv`.
 - Pre-audit benchmark artifacts were permanently purged and live evaluations are recorded in `ab_runs`.
@@ -456,7 +456,7 @@ npm run build
 |---|---|---|
 | `simulation/sumo_live_bridge.py` | HIGH | 20KB complex TraCI bridge; verify TraCI API compatibility on any change; uses the hard `require_traci()` guard intentionally |
 | `services/control_service/ab_runner.py` | HIGH | SN-038's headline evidence generator — never adjust it to produce a more favorable number; a negative result is a valid, required-to-report outcome |
-| `ml/marl/train_marl.py` | HIGH | Currently trains on synthetic `np.random` data, not SUMO (SN-012f, open) — any performance claim sourced from its output is unverified until fixed |
+| `ml/marl/train_marl.py` | HIGH | Trains against real `SumoEnvironment`/TraCI (SN-012f, DONE — verified 2026-09-11: file imports and drives `simulation.sumo_env.SumoEnvironment`; `np.random.seed()` calls are only for run-to-run reproducibility, not data generation). This row previously said the opposite (synthetic `np.random` data) — that was stale; the file still deserves care on any change since a regression here would be easy to miss |
 | `backend/app/main.py` | MEDIUM | Mid-file imports after SUMO path injection — acknowledged debt |
 | `backend/app/models/junction.py` | MEDIUM | GeoAlchemy2 SQLite monkey-patch at top of file for spatialite-less test runs |
 | `backend/tests/conftest.py` | MEDIUM | Admin role elevation pattern required by many tests — changing breaks test isolation |
