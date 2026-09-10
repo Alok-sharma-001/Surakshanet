@@ -1,26 +1,33 @@
-# Surakshanet — Production-Grade Intelligent Transportation System (ITS)
+# Surakshanet — Intelligent Transportation System (ITS)
 
-Surakshanet is a scalable, resilient, and defensible Intelligent Transportation System designed for urban traffic monitoring, adaptive signal control, emergency corridor preemption, and real-time operator observability.
+Surakshanet is an Intelligent Transportation System designed for urban traffic monitoring, spatial junction management, adaptive signal optimization, and operator observability.
+
+> **Implementation Status & Roadmap:**
+> This repository is undergoing a 10-phase architectural hardening per the independent code audit.
+> Current progress and specifications are documented in [`docs/`](docs/00-project-overview.md) and tracked in [`docs/CHECKLIST.md`](docs/CHECKLIST.md).
+> All telemetry and prediction payloads enforce explicit data provenance (`DataSource`: `sumo`, `vision`, `mqtt`, `model`, `heuristic`, `manual`).
 
 ---
 
-## Table of Contents
+## Capability Status
 
-- [System Architecture](#system-architecture)
-- [Port Allocations & Network Topology](#port-allocations--network-topology)
-- [Environment Configuration](#environment-configuration)
-- [Quickstart & Operations Runbook](#quickstart--operations-runbook)
-- [Database Migrations & Backup Procedures](#database-migrations--backup-procedures)
-- [Emergency Vehicle Corridor Preemption](#emergency-vehicle-corridor-preemption)
-- [Testing & Quality Verification](#testing--quality-verification)
-- [Troubleshooting & Diagnostic FAQ](#troubleshooting--diagnostic-faq)
-- [License](#license)
+| Capability | Current State | Subsystem & Roadmap Phase |
+| :--- | :--- | :--- |
+| **Spatial Junction Master** | **Implemented** | PostgreSQL 15 + PostGIS (`ST_DWithin`, spatial queries, GiST indexing) |
+| **Telemetry Ingestion & Storage** | **Implemented** | TimescaleDB hypertable (`traffic_readings`) + MQTT Mosquitto broker |
+| **Auth & Security** | **Implemented** | JWT OAuth2 authentication, role checks, password hashing |
+| **Micro-Simulation Environment** | **Simulated** | Eclipse SUMO corridor simulation via TraCI bridge (`simulation/`) |
+| **A* Traffic Routing** | **Implemented** | Network graph pathfinding with congestion cost weights (`backend/app/api/routing.py`) |
+| **Object Detection (Vision)** | **Implemented (Standalone)** | YOLOv8 vehicle detection on frame upload (`POST /ml/detect`) |
+| **Signal Control (MARL)** | **Planned (Phase 2)** | Pre-trained DQN weights exist; live inference loop connects in Phase 2 (`services/control_service/`) |
+| **Emergency Green Corridor** | **Planned (Phase 3)** | Rolling ETA preemption & signal plan restore (`docs/10-emergency-corridor.md`) |
+| **Public Citizen Advisory** | **Planned (Phase 4)** | Public unauthenticated traffic bulletin API (`docs/12-citizen-advisory.md`) |
 
 ---
 
 ## System Architecture
 
-Surakshanet utilizes a decoupled, event-driven microservices architecture built for high availability and low latency:
+Surakshanet utilizes an event-driven architecture connecting micro-simulation, telemetry ingestion, spatial database, and operator dashboard:
 
 ```
                   ┌─────────────────────────────────────────┐
@@ -37,21 +44,21 @@ Surakshanet utilizes a decoupled, event-driven microservices architecture built 
                                        │
                                        ▼
 ┌───────────────────────────────────────────────────────────────────────────┐
-│                      FastAPI Application Cluster                          │
-│   • Stateless API Workers (Port 8000) with Correlation Tracking          │
-│   • PostGIS Spatial Query Services & Hypertable Telemetry Ingestion       │
-│   • Multi-Agent RL (DQN) & Webster Fixed-Time Signal Controllers          │
-│   • Dynamic Topology Green-Wave Emergency Corridor Dispatcher            │
-│   • Real-Time WebSocket Connection Manager (Pub/Sub Multi-Worker Fanout)  │
+│                           FastAPI Application                             │
+│   • REST Endpoints (/api/v1/traffic, /junctions, /ml, /routing, /alerts)  │
+│   • PostGIS Spatial Queries & TimescaleDB Telemetry Ingestion            │
+│   • Signal State Machine & Controller Mode API (Webster / MARL / Manual)  │
+│   • Real-Time WebSocket Connection Manager (Redis Pub/Sub Fanout)         │
+│   • Mandatory Data Provenance on Every Payload (DataSource contract)      │
 └──────────────┬─────────────────────────────────────────────┬──────────────┘
                │                                             │
                ▼                                             ▼
 ┌───────────────────────────────┐             ┌─────────────────────────────┐
 │ Consolidated Spatial Database │             │      Frontend Dashboard     │
 │   • TimescaleDB + PostGIS     │             │   • Vite + React 18 + TS    │
-│   • Port 5432 (or 5434 host)  │             │   • Sub-500kB Split Bundles │
-│   • Spatial GiST Indexes      │             │   • Reconnect WS & Badges   │
-│   • 7-Day Chunk Hypertables   │             │   • Error Boundaries        │
+│   • Port 5432 (or 5434 host)  │             │   • Data-Provenance Badges  │
+│   • Spatial GiST Indexes      │             │   • Real-Time Map & Telemetry│
+│   • 7-Day Chunk Hypertables   │             │   • Zero Client-Side Fakes  │
 └───────────────────────────────┘             └─────────────────────────────┘
 ```
 
@@ -149,13 +156,13 @@ docker exec -i surakshanet-timescaledb pg_restore -U surakshanet -d surakshanet 
 
 ---
 
-## Emergency Vehicle Corridor Preemption
+## Emergency Vehicle Corridor Preemption (Roadmap Phase 3)
 
-Surakshanet features dynamic green-wave corridor preemption with topological approach detection.
+The emergency corridor architecture specifies rolling ETA-based preemption with signal plan restore and cross-street starvation protection (specified in [`docs/10-emergency-corridor.md`](docs/10-emergency-corridor.md)).
 
-### Activating Green-Wave Preemption via REST API
+### Activating Route Preemption via REST API
 
-Operators and emergency dispatchers can preempt arterial signals for approaching ambulances:
+Authorized emergency operators can dispatch signal overrides for approaching emergency vehicles:
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/emergency/activate \

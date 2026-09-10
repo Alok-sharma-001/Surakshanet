@@ -1,6 +1,11 @@
 # Surakshanet Subsystem & Production Status Matrix
 
-This document provides a transparent and audited accounting of all Surakshanet subsystems, distinguishing between live hardware integration paths, simulation engines, and mock fallback modes.
+> [!IMPORTANT]
+> **SUPERSEDED BY AUDITED CODEBASE BASELINE**:
+> The definitive source-level status for all 34 subsystems is maintained in [`docs/01-current-state.md`](docs/01-current-state.md).
+> The mandatory data provenance contract (`DataSource`: `sumo`, `vision`, `mqtt`, `model`, `heuristic`, `manual`) is specified in [`docs/07-telemetry.md`](docs/07-telemetry.md).
+
+This document provides historical context on subsystem integration paths and legacy tagging.
 
 ---
 

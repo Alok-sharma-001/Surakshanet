@@ -1,8 +1,10 @@
 # SurakshaNet E2E Test Suite Readiness Declaration
 
-**Status**: READY FOR VERIFICATION & CI GATING  
-**Author**: `test_writer_e2e`  
-**Date**: 2026-09-06  
+> [!IMPORTANT]
+> **TEST REBUILD ROADMAP NOTICE**:
+> Per the codebase audit, decorative tests are superseded by the Phase 8 critical path test suite specified in [`docs/19-testing.md`](docs/19-testing.md) (15 essential end-to-end critical paths, `SN-111` through `SN-126`).
+
+**Status**: LEGACY TEST INVENTORY  
 **Test Suite Path**: `/home/alok/surakshanet/tests/e2e/`  
 **Test Documentation**: `/home/alok/surakshanet/TEST_INFRA.md`  
 
