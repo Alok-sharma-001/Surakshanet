@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Camera, ShieldCheck, Crosshair, Cpu } from 'lucide-react';
+import { Camera, ShieldCheck, Crosshair, Cpu, VideoOff } from 'lucide-react';
 
 interface DetectionBox {
   id: string;
@@ -20,32 +20,48 @@ const CAM_FEEDS = [
 
 export const ComputerVisionFeed: React.FC = () => {
   const [activeCam, setActiveCam] = useState('CAM-01');
-  const [fps, setFps] = useState(30.2);
+  const [boxes, setBoxes] = useState<DetectionBox[]>([]);
+  const [fps, setFps] = useState<number | null>(null);
+  const [hasVideoSource, setHasVideoSource] = useState(false);
+  const [counts, setCounts] = useState({ cars: 0, buses: 0, bikes: 0, pedestrians: 0 });
 
-  // Dynamic subtle jitter for bounding boxes
-  const [boxes, setBoxes] = useState<DetectionBox[]>([
-    { id: '1', label: 'CAR', confidence: 98, color: '#E5584D', top: 32, left: 24, width: 22, height: 26 },
-    { id: '2', label: 'BUS', confidence: 91, color: '#0D0E11', top: 22, left: 58, width: 28, height: 38 },
-    { id: '3', label: 'BIKE', confidence: 94, color: '#F59E0B', top: 62, left: 16, width: 14, height: 20 },
-    { id: '4', label: 'CAR', confidence: 96, color: '#E5584D', top: 58, left: 42, width: 20, height: 24 },
-    { id: '5', label: 'PEDESTRIAN', confidence: 95, color: '#22C55E', top: 48, left: 88, width: 8, height: 22 },
-  ]);
-
-  // Subtle live tracking jitter
+  // SN-004: Poll for real vision detections from GET /vision/detections/latest (Phase 5).
+  // Until a live vision worker or camera stream is connected, display "No video source".
   useEffect(() => {
-    const interval = setInterval(() => {
-      setBoxes((prev) =>
-        prev.map((b) => ({
-          ...b,
-          left: Math.max(5, Math.min(85, b.left + (Math.random() * 1 - 0.5))),
-          top: Math.max(10, Math.min(75, b.top + (Math.random() * 0.8 - 0.4))),
-        }))
-      );
-      setFps(+(29.8 + Math.random() * 0.8).toFixed(1));
-    }, 400);
+    let isMounted = true;
 
-    return () => clearInterval(interval);
-  }, []);
+    const checkVisionFeed = async () => {
+      try {
+        const response = await fetch(`/api/v1/vision/detections/latest?cam_id=${activeCam}`);
+        if (!response.ok) throw new Error('No active feed');
+        const data = await response.json();
+        if (isMounted && data && Array.isArray(data.detections) && data.detections.length > 0) {
+          setBoxes(data.detections);
+          setFps(data.fps ?? 30.0);
+          setHasVideoSource(true);
+          if (data.counts) setCounts(data.counts);
+        } else if (isMounted) {
+          setBoxes([]);
+          setFps(null);
+          setHasVideoSource(false);
+        }
+      } catch {
+        if (isMounted) {
+          setBoxes([]);
+          setFps(null);
+          setHasVideoSource(false);
+          setCounts({ cars: 0, buses: 0, bikes: 0, pedestrians: 0 });
+        }
+      }
+    };
+
+    checkVisionFeed();
+    const interval = setInterval(checkVisionFeed, 5000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [activeCam]);
 
   return (
     <div className="bg-white rounded-3xl p-6 border border-studio-pink/40 shadow-studio-card relative overflow-hidden flex flex-col font-syne">
@@ -53,10 +69,21 @@ export const ComputerVisionFeed: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-studio-pink/30">
         <div>
           <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-            <span className="font-mono text-xs font-bold text-emerald-700 uppercase tracking-wider">
-              AI ANALYSIS ACTIVE
-            </span>
+            {hasVideoSource ? (
+              <>
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                <span className="font-mono text-xs font-bold text-emerald-700 uppercase tracking-wider">
+                  AI ANALYSIS ACTIVE
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="w-2 h-2 rounded-full bg-slate-400" />
+                <span className="font-mono text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  NO VIDEO SOURCE
+                </span>
+              </>
+            )}
             <span className="text-studio-muted">|</span>
             <span className="font-mono text-xs text-studio-muted">YOLOv8s-Traffic-v2</span>
           </div>
@@ -84,8 +111,8 @@ export const ComputerVisionFeed: React.FC = () => {
         </div>
       </div>
 
-      {/* Video Stream Simulation Container */}
-      <div className="my-5 relative w-full h-80 sm:h-96 rounded-2xl bg-studio-bgLight overflow-hidden border border-studio-pink/50 shadow-inner group">
+      {/* Video Stream Container */}
+      <div className="my-5 relative w-full h-80 sm:h-96 rounded-2xl bg-studio-bgLight overflow-hidden border border-studio-pink/50 shadow-inner group flex items-center justify-center">
         {/* Background stylized perspective */}
         <div className="absolute inset-0 bg-gradient-to-b from-studio-pink/20 via-studio-bg/40 to-white/90 flex items-center justify-center pointer-events-none">
           <div className="w-full h-full opacity-15 bg-[radial-gradient(#e5584d_1px,transparent_1px)] [background-size:24px_24px]" />
@@ -94,7 +121,7 @@ export const ComputerVisionFeed: React.FC = () => {
           </div>
         </div>
 
-        {/* Bounding Boxes */}
+        {/* Bounding Boxes (rendered only when real detections exist) */}
         {boxes.map((box) => (
           <div
             key={box.id}
@@ -106,18 +133,15 @@ export const ComputerVisionFeed: React.FC = () => {
               height: `${box.height}%`,
             }}
           >
-            {/* Box Border */}
             <div
               className="w-full h-full rounded-lg border-2 relative"
               style={{ borderColor: box.color, boxShadow: `0 0 10px ${box.color}30` }}
             >
-              {/* Corner tick marks */}
               <div className="absolute -top-1 -left-1 w-2 h-2 border-t-2 border-l-2 border-white" />
               <div className="absolute -top-1 -right-1 w-2 h-2 border-t-2 border-r-2 border-white" />
               <div className="absolute -bottom-1 -left-1 w-2 h-2 border-b-2 border-l-2 border-white" />
               <div className="absolute -bottom-1 -right-1 w-2 h-2 border-b-2 border-r-2 border-white" />
 
-              {/* Tag Label */}
               <div
                 className="absolute -top-5 left-0 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold tracking-wider text-white flex items-center gap-1 shadow-sm whitespace-nowrap"
                 style={{ backgroundColor: box.color }}
@@ -129,18 +153,32 @@ export const ComputerVisionFeed: React.FC = () => {
           </div>
         ))}
 
+        {/* Explicit "No video source" state overlay when disconnected */}
+        {!hasVideoSource && (
+          <div className="relative z-10 flex flex-col items-center justify-center p-6 text-center max-w-sm">
+            <div className="w-14 h-14 rounded-2xl bg-studio-pink/30 flex items-center justify-center text-studio-muted mb-3 border border-studio-pink/50">
+              <VideoOff className="w-7 h-7 text-slate-500" />
+            </div>
+            <h4 className="text-base font-bold text-studio-text mb-1">No video source</h4>
+            <p className="text-xs text-studio-muted font-grotesk leading-relaxed">
+              Camera feed for <span className="font-mono font-bold text-studio-coral">{activeCam}</span> is offline.
+              Telemetry detections will stream once the RTSP worker is connected.
+            </p>
+          </div>
+        )}
+
         {/* HUD Camera Overlays */}
         <div className="absolute top-3 left-3 bg-white/95 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-studio-pink/50 text-[11px] font-mono text-studio-text flex items-center gap-2 shadow-sm">
-          <span className="w-2 h-2 rounded-full bg-studio-coral animate-pulse" />
-          <span className="font-bold">LIVE</span>
+          <span className={`w-2 h-2 rounded-full ${hasVideoSource ? 'bg-studio-coral animate-pulse' : 'bg-slate-400'}`} />
+          <span className="font-bold">{hasVideoSource ? 'LIVE' : 'OFFLINE'}</span>
           <span className="text-studio-coralDark font-bold">{activeCam}</span>
           <span className="text-studio-muted">•</span>
           <span>4K UHD</span>
         </div>
 
         <div className="absolute top-3 right-3 bg-white/95 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-studio-pink/50 text-[11px] font-mono text-studio-text flex items-center gap-3 shadow-sm">
-          <div>FPS: <span className="text-emerald-700 font-bold">{fps}</span></div>
-          <div>LATENCY: <span className="text-studio-coral font-bold">14ms</span></div>
+          <div>FPS: <span className="text-emerald-700 font-bold">{fps !== null ? fps : '--'}</span></div>
+          <div>LATENCY: <span className="text-studio-coral font-bold">{hasVideoSource ? '14ms' : '--'}</span></div>
         </div>
 
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-20">
@@ -154,10 +192,10 @@ export const ComputerVisionFeed: React.FC = () => {
             <span>CLASSIFICATION BREAKDOWN:</span>
           </div>
           <div className="flex items-center gap-4 text-studio-text font-bold">
-            <div>CARS: <span className="text-studio-coral">18</span></div>
-            <div>BUSES: <span className="text-slate-800">3</span></div>
-            <div>BIKES: <span className="text-amber-600">12</span></div>
-            <div>PEDESTRIANS: <span className="text-emerald-600">4</span></div>
+            <div>CARS: <span className="text-studio-coral">{counts.cars}</span></div>
+            <div>BUSES: <span className="text-slate-800">{counts.buses}</span></div>
+            <div>BIKES: <span className="text-amber-600">{counts.bikes}</span></div>
+            <div>PEDESTRIANS: <span className="text-emerald-600">{counts.pedestrians}</span></div>
           </div>
         </div>
       </div>
@@ -166,7 +204,7 @@ export const ComputerVisionFeed: React.FC = () => {
       <div className="flex flex-wrap items-center justify-between text-xs text-studio-muted font-mono pt-2">
         <div className="flex items-center gap-2">
           <ShieldCheck className="w-4 h-4 text-emerald-600" />
-          <span>Edge Precision: <strong className="text-studio-text font-bold">99.2% mAP@0.5</strong></span>
+          <span>Edge Precision: <strong className="text-studio-text font-bold">{hasVideoSource ? '99.2% mAP@0.5' : 'STANDBY'}</strong></span>
         </div>
         <div>
           LOCATION: <span className="text-studio-text font-semibold">New Delhi Central Operations Matrix</span>
@@ -175,3 +213,4 @@ export const ComputerVisionFeed: React.FC = () => {
     </div>
   );
 };
+

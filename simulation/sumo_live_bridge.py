@@ -293,18 +293,14 @@ class SumoLiveBridge:
                 payload_str = json.dumps(telemetry)
                 self.publish_redis("traffic_updates", payload_str)
 
-                # Periodic signal optimization event to signal_events
-                if self.step_count % 15 == 0 and junctions_stats:
-                    top_j = max(junctions_stats, key=lambda x: x["queue"])
-                    event_payload = {
-                        "action": f"MARL Green Extension +4.0s (Junction {top_j['id']})",
-                        "source": "sim",
-                        "junction_id": top_j["id"],
-                        "queue": top_j["queue"],
-                        "speed": top_j["speed"],
-                        "timestamp": time.time()
-                    }
-                    self.publish_redis("signal_events", json.dumps(event_payload))
+                # SN-002: a periodic publisher previously emitted fake green extension
+                # messages to signal_events every 15 steps, regardless of state and with
+                # no model involved. The dashboard displayed that string as an AI decision.
+                #
+                # The bridge reports state; it does not narrate decisions. Real
+                # control decisions are published by the control service once it
+                # exists (Phase 2, SN-030), carrying the state vector and Q-values
+                # that produced them.
 
                 if self.step_count % 5 == 0:
                     logger.info(

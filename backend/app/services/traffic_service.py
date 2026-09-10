@@ -14,6 +14,7 @@ from app.schemas.traffic import (
     SensorCreate,
     TrafficReadingCreate,
 )
+from shared.constants import DataSource
 
 
 def _get_dialect_name(db: AsyncSession) -> str:
@@ -160,9 +161,19 @@ async def create_reading(
     elif ts.tzinfo is not None:
         ts = ts.replace(tzinfo=None)
 
-    resolved_source = source or reading_dict.get("source") or "live"
-    if resolved_source not in ("live", "sim", "mock"):
-        resolved_source = "live"
+    raw_source = source or reading_dict.get("source") or DataSource.MQTT
+    if isinstance(raw_source, DataSource):
+        resolved_source = raw_source.value
+    else:
+        raw_str = str(raw_source).lower()
+        if raw_str in [s.value for s in DataSource]:
+            resolved_source = raw_str
+        elif raw_str == "sim":
+            resolved_source = DataSource.SUMO.value
+        elif raw_str == "mock":
+            resolved_source = DataSource.HEURISTIC.value
+        else:
+            resolved_source = DataSource.MQTT.value
 
     reading = TrafficReading(
         id=uuid.uuid4(),
