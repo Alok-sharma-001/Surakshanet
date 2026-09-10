@@ -11,11 +11,13 @@ async def test_model_health(client: AsyncClient, auth_headers: dict):
 
 @pytest.mark.asyncio
 async def test_predict_junction(client: AsyncClient, auth_headers: dict):
-    # This might return 404 or a fallback prediction if not trained
     junction_id = "test-junction-123"
     response = await client.get(f"/api/v1/ml/predict/{junction_id}", headers=auth_headers)
-    # We accept 200 (predicted) or 400/404 (model not trained for junction)
-    assert response.status_code in [200, 400, 404]
+    # /ml/predict returns 503 honestly (CLAUDE.md §5) when there's no trained
+    # model and no readings to anchor a heuristic fallback on — it never
+    # fabricates a prediction, so 503 is the expected outcome here, not just
+    # a fallback among several acceptable ones.
+    assert response.status_code in [200, 400, 404, 503]
 
 @pytest.mark.asyncio
 async def test_training_status(client: AsyncClient, auth_headers: dict):

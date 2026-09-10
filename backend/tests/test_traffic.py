@@ -73,7 +73,9 @@ async def test_create_reading(client: AsyncClient, auth_headers: dict):
     r_resp = await client.post("/api/v1/traffic/readings", json={
         "sensor_id": sensor_id,
         "vehicle_count": 10,
+        "pcu_value": 10.0,
         "average_speed": 45.5,
+        "source": "manual",
         "timestamp": "2023-10-01T12:00:00Z"
     }, headers=auth_headers)
     assert r_resp.status_code == 201
@@ -131,12 +133,14 @@ async def test_traffic_reading_composite_pk_and_source(client: AsyncClient, auth
     }, headers=auth_headers)
     s_id = s_resp.json()["id"]
 
-    # 1. Reading with source="sim"
+    # 1. Reading with a real DataSource value (SN-008: the legacy "sim"/"live"
+    # vocabulary is retired and no longer satisfies the source CHECK constraint —
+    # see CLAUDE.md §7).
     r_resp1 = await client.post("/api/v1/traffic/readings", json={
         "sensor_id": s_id,
         "vehicle_count": 42,
         "pcu_value": 35.5,
-        "source": "sim",
+        "source": "sumo",
         "timestamp": "2026-09-06T12:00:00Z"
     }, headers=auth_headers)
     assert r_resp1.status_code == 201
@@ -146,9 +150,13 @@ async def test_traffic_reading_composite_pk_and_source(client: AsyncClient, auth
     result1 = await db_session.execute(select(TrafficReading).where(TrafficReading.id == r_id1))
     db_reading1 = result1.scalar_one_or_none()
     assert db_reading1 is not None
-    assert db_reading1.source == "sim"
+    assert db_reading1.source == "sumo"
 
-    # 2. Reading default source="live"
+    # 2. A reading with no source falls back to the schema's own default
+    # (backend/app/schemas/traffic.py::TrafficReadingCreate.source =
+    # DataSource.MQTT — this endpoint is primarily used for MQTT-ingested
+    # readings). The retired "live" default is gone; migration 001b only
+    # removed that DB-column default, not this API-layer one.
     r_resp2 = await client.post("/api/v1/traffic/readings", json={
         "sensor_id": s_id,
         "vehicle_count": 15,
@@ -161,7 +169,7 @@ async def test_traffic_reading_composite_pk_and_source(client: AsyncClient, auth
     result2 = await db_session.execute(select(TrafficReading).where(TrafficReading.id == r_id2))
     db_reading2 = result2.scalar_one_or_none()
     assert db_reading2 is not None
-    assert db_reading2.source == "live"
+    assert db_reading2.source == "mqtt"
 
 
 @pytest.mark.asyncio
