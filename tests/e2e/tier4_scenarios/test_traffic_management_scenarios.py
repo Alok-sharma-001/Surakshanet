@@ -15,6 +15,7 @@ from tests.e2e.client import (
     E2ERedisClient,
     E2EMqttClient,
 )
+from shared.constants import REDIS_CHANNELS
 
 
 @pytest.mark.tier4
@@ -69,7 +70,7 @@ def test_scenario_corridor_peak_hour_congestion_workflow(
         "arterial_split_ratio": 0.70,
         "source": "sim"
     })
-    subscribers = redis_client.publish("surakshanet:events:signals", timing_event)
+    subscribers = redis_client.publish(REDIS_CHANNELS["signals"], timing_event)
     assert isinstance(subscribers, int)
 
     # Step 4: Verify Prometheus metrics respond

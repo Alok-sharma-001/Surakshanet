@@ -208,3 +208,31 @@
 2026-09-10 12:36:50,454 [INFO] surakshanet.sumo_bridge: [Step 105] Vehicles: 118 | Avg Speed: 24.5 km/h | Queue: 34 | LOS: C (Fair Flow)
 2026-09-10 12:36:50,756 [INFO] surakshanet.sumo_bridge: [Step 110] Vehicles: 129 | Avg Speed: 25.0 km/h | Queue: 43 | LOS: C (Fair Flow)
 2026-09-10 12:36:51,061 [INFO] surakshanet.sumo_bridge: [Step 115] Vehicles: 141 | Avg Speed: 24.2 km/h | Queue: 55 | LOS: C (Fair Flow)
+2026-09-10 14:36:22,170 [INFO] surakshanet.sumo_bridge: Initialized robust redis-py client connecting to 127.0.0.1:6379
+2026-09-10 14:36:22,170 [INFO] surakshanet.sumo_bridge: Starting SUMO with command: sumo -c /home/alok/surakshanet/simulation/networks/corridor.sumocfg --start --quit-on-end --delay 50 --step-length 1.0 --seed 42 --random false
+2026-09-10 14:36:23,223 [INFO] surakshanet.sumo_bridge: ✅ Connected to SUMO TraCI! Live telemetry bridge running...
+2026-09-10 14:36:23,223 [INFO] surakshanet.sumo_bridge: Connecting to Redis command bus at 127.0.0.1:6379...
+2026-09-10 14:36:23,224 [INFO] surakshanet.sumo_bridge: ✅ Redis Command Bus: Subscribed to emergency_events & signal_events
+2026-09-10 14:36:23,455 [INFO] surakshanet.sumo_bridge: [Step 5] Vehicles: 13 | Avg Speed: 13.5 km/h | Queue: 4 | LOS: D (Approaching Capacity)
+2026-09-10 14:36:23,732 [INFO] surakshanet.sumo_bridge: [Step 10] Vehicles: 22 | Avg Speed: 24.1 km/h | Queue: 3 | LOS: C (Fair Flow)
+2026-09-10 14:36:24,013 [INFO] surakshanet.sumo_bridge: [Step 15] Vehicles: 31 | Avg Speed: 21.9 km/h | Queue: 7 | LOS: C (Fair Flow)
+2026-09-10 14:36:24,310 [INFO] surakshanet.sumo_bridge: [Step 20] Vehicles: 44 | Avg Speed: 18.2 km/h | Queue: 17 | LOS: C (Fair Flow)
+2026-09-10 14:36:24,596 [INFO] surakshanet.sumo_bridge: [Step 25] Vehicles: 54 | Avg Speed: 18.7 km/h | Queue: 23 | LOS: C (Fair Flow)
+2026-09-10 14:36:24,887 [INFO] surakshanet.sumo_bridge: [Step 30] Vehicles: 64 | Avg Speed: 16.5 km/h | Queue: 34 | LOS: D (Approaching Capacity)
+2026-09-10 14:36:25,176 [INFO] surakshanet.sumo_bridge: [Step 35] Vehicles: 74 | Avg Speed: 15.1 km/h | Queue: 44 | LOS: D (Approaching Capacity)
+2026-09-10 14:36:25,466 [INFO] surakshanet.sumo_bridge: [Step 40] Vehicles: 87 | Avg Speed: 15.1 km/h | Queue: 50 | LOS: D (Approaching Capacity)
+2026-09-10 14:36:25,762 [INFO] surakshanet.sumo_bridge: [Step 45] Vehicles: 98 | Avg Speed: 13.5 km/h | Queue: 58 | LOS: D (Approaching Capacity)
+2026-09-10 14:36:26,068 [INFO] surakshanet.sumo_bridge: [Step 50] Vehicles: 106 | Avg Speed: 16.0 km/h | Queue: 45 | LOS: D (Approaching Capacity)
+2026-09-10 14:36:26,383 [INFO] surakshanet.sumo_bridge: [Step 55] Vehicles: 115 | Avg Speed: 22.9 km/h | Queue: 35 | LOS: C (Fair Flow)
+2026-09-10 14:36:26,683 [INFO] surakshanet.sumo_bridge: [Step 60] Vehicles: 109 | Avg Speed: 25.1 km/h | Queue: 28 | LOS: C (Fair Flow)
+2026-09-10 14:36:26,979 [INFO] surakshanet.sumo_bridge: [Step 65] Vehicles: 97 | Avg Speed: 23.0 km/h | Queue: 36 | LOS: C (Fair Flow)
+2026-09-10 14:36:27,275 [INFO] surakshanet.sumo_bridge: [Step 70] Vehicles: 92 | Avg Speed: 18.7 km/h | Queue: 42 | LOS: C (Fair Flow)
+2026-09-10 14:36:27,569 [INFO] surakshanet.sumo_bridge: [Step 75] Vehicles: 82 | Avg Speed: 14.6 km/h | Queue: 48 | LOS: D (Approaching Capacity)
+2026-09-10 14:36:27,871 [INFO] surakshanet.sumo_bridge: [Step 80] Vehicles: 80 | Avg Speed: 11.7 km/h | Queue: 52 | LOS: F (Forced Breakdown)
+2026-09-10 14:36:28,164 [INFO] surakshanet.sumo_bridge: [Step 85] Vehicles: 87 | Avg Speed: 12.2 km/h | Queue: 55 | LOS: D (Approaching Capacity)
+2026-09-10 14:36:28,455 [INFO] surakshanet.sumo_bridge: [Step 90] Vehicles: 95 | Avg Speed: 11.1 km/h | Queue: 63 | LOS: F (Forced Breakdown)
+2026-09-10 14:36:28,749 [INFO] surakshanet.sumo_bridge: [Step 95] Vehicles: 102 | Avg Speed: 14.5 km/h | Queue: 40 | LOS: D (Approaching Capacity)
+2026-09-10 14:36:29,048 [INFO] surakshanet.sumo_bridge: [Step 100] Vehicles: 109 | Avg Speed: 20.4 km/h | Queue: 38 | LOS: C (Fair Flow)
+2026-09-10 14:36:29,349 [INFO] surakshanet.sumo_bridge: [Step 105] Vehicles: 118 | Avg Speed: 24.5 km/h | Queue: 34 | LOS: C (Fair Flow)
+2026-09-10 14:36:29,651 [INFO] surakshanet.sumo_bridge: [Step 110] Vehicles: 129 | Avg Speed: 25.0 km/h | Queue: 43 | LOS: C (Fair Flow)
+2026-09-10 14:36:29,955 [INFO] surakshanet.sumo_bridge: [Step 115] Vehicles: 141 | Avg Speed: 24.2 km/h | Queue: 55 | LOS: C (Fair Flow)

@@ -2,18 +2,44 @@
 
 > This file is the **persistent source of project knowledge** for Claude Code sessions.
 > Before broad codebase exploration, always check this file and `git status`/`git diff` first.
-> Update this file when discovering stable architectural knowledge or important design constraints.
+> Every claim in this file has been verified against the code as of 2026-09-10 (Phases 0, 1,
+> and 2 closed — see §1). Trust it, but if a specific fact matters for a risky change, `grep`
+> to confirm — this file records what was true when last checked, not a live view.
+> Update this file when discovering stable architectural knowledge or important design
+> constraints. Never let it re-accumulate unverified claims — see §21.
 
 ---
 
-## 1. Project Identity
+## 1. Project Identity & Current Status
 
-**Surakshanet** is an Intelligent Transportation System (ITS) for urban traffic monitoring, spatial junction management, adaptive signal optimization, and operator observability. It is undergoing a **10-phase architectural hardening** per an independent code audit tracked across milestones M1–M7 (see `PROJECT.md` and `docs/CHECKLIST.md`).
+**Surakshanet** is an Intelligent Transportation System (ITS) for urban traffic monitoring,
+spatial junction management, adaptive signal optimization, and operator observability. It
+is undergoing a **10-phase hardening effort** driven by an independent code audit. The
+execution surface is `docs/CHECKLIST.md` (SN-001…SN-150, grouped into Phases 0–10); the
+`docs/NN-*.md` files are the specification each phase implements against.
 
-Current branch status (as of analysis):
-- **M1 (Security):** DONE
-- **M2 (Data Integrity & Spatial Storage):** IN_PROGRESS (`phase0/complete` branch)
-- **M3–M7:** PLANNED
+**Status, verified 2026-09-10:**
+- **Phase 0 (Cleanup, SN-001…SN-012k):** DONE. Closed on branch `phase0/complete`. A
+  CI-blocking regression guard (`scripts/check_phase0_regressions.sh`, `make check-phase0`,
+  26 checks) enforces that fabricated-data patterns cannot silently return.
+- **Phase 1 (Infrastructure, SN-013…SN-022):** DONE. `docs/25-phase1-remediation-plan.md`
+  documents the 10 defects found in review and their fixes — all implemented and covered by
+  the guard above.
+- **Phase 2 (Real AI control, SN-012f + SN-023…SN-038):** DONE. Remediation plan
+  (`docs/26-phase2-remediation-plan.md`) executed to 100% completion:
+  - Local `.venv` dependencies (`torch`, `sqlalchemy`, `pydantic`, etc.) installed.
+  - All 24 critical tests in `tests/critical/` pass with zero errors.
+  - MARL training rebuilt against real SUMO with lane-area detectors (SN-012f); policy weights
+    `ml/marl/weights/marl_policy_downtown.pth` trained and verified (SHA-256: `c3b9cb12...`).
+  - Pre-audit fabricated benchmark files purged and docs sanitized.
+  - TraCI duration semantics and safety envelope ped cycles fixed in `ab_runner.py`; live 900s
+    A/B evaluation executed via `POST /ab/run` and persisted to TimescaleDB table `ab_runs`
+    (run `8646126e-da0b-4602-ae0c-fdd8e0b2af3b`, Webster: 726.84s delay vs MARL: 826.32s delay,
+    honest delta reporting).
+  - All SN items (SN-012f, SN-023…SN-038) individually verified; `docs/CHECKLIST.md` reconciled
+    to 17/17 DONE (total progress: 48/161 DONE, 30%).
+- **Phases 3–10:** NOT_STARTED.
+**Pre-audit benchmark cleanup:** The fabricated pre-audit benchmark files (`ml/benchmarks/results/baseline_study_*.{md,json}`) have been deleted, and references in `docs/RESEARCH_DEFENSE.md` and `STATUS.md` purged per `docs/26-phase2-remediation-plan.md` item 6. Real benchmark results are produced live by `services/control_service/ab_runner.py` and stored in the `ab_runs` database table.
 
 ---
 
@@ -22,65 +48,52 @@ Current branch status (as of analysis):
 ```
 surakshanet/
 ├── backend/             # FastAPI application (Python 3.11)
-│   ├── app/             # Core application code
-│   │   ├── api/         # Route handlers (REST + WebSocket)
+│   ├── app/
+│   │   ├── api/         # Route handlers — includes health.py, ab.py, simulation.py
 │   │   ├── config.py    # Pydantic Settings (reads .env)
-│   │   ├── database.py  # SQLAlchemy async engine + Alembic runner
-│   │   ├── main.py      # FastAPI app factory, lifespan, middleware
-│   │   ├── middleware/  # CorrelationId, Prometheus metrics
-│   │   ├── models/      # SQLAlchemy ORM models (GeoAlchemy2)
+│   │   ├── database.py  # SQLAlchemy async engine + advisory-lock-guarded Alembic runner
+│   │   ├── main.py      # FastAPI app factory, lifespan, middleware, traci hard-guard
+│   │   ├── middleware/  # CorrelationId, Prometheus metrics (incl. control_* series)
+│   │   ├── models/      # SQLAlchemy ORM — includes models/control.py (ControlDecision, ABRun)
 │   │   ├── schemas/     # Pydantic v2 request/response schemas
-│   │   ├── services/    # Business logic (auth, traffic, MQTT)
-│   │   └── websocket/   # ConnectionManager (manager.py)
-│   ├── alembic/         # Alembic migration environment + versions/
-│   ├── alembic.ini      # Alembic config (script_location = alembic/)
-│   ├── tests/           # Pytest suite (asyncio_mode = auto)
-│   ├── ruff.toml        # Ruff linter config (staged rule set)
-│   └── .flake8          # Flake8 config
-├── frontend/
-│   └── dashboard/       # React 18 + TypeScript + Vite SPA
-│       ├── src/
-│       │   ├── App.tsx        # Router with React.lazy code splitting
-│       │   ├── components/    # ErrorBoundary, TelemetrySourceBadge, Layout
-│       │   ├── pages/         # 18 route-level page components (code-split)
-│       │   ├── services/      # API client (axios) + WebSocket client
-│       │   ├── store/         # Zustand state stores
-│       │   └── types/         # Generated/hand-written TypeScript types
-│       ├── vite.config.ts     # Build config with manual chunk splitting
-│       └── package.json
-├── ml/                  # Machine learning pipelines
-│   ├── marl/            # DQN agent, coordinator, Webster fallback, weights/
-│   ├── vision/          # YOLOv8 vehicle detection
-│   ├── forecasting/     # LSTM traffic forecaster
-│   ├── emergency/       # Green-wave preemption logic
-│   ├── routing/         # A* pathfinding
-│   └── benchmarks/      # Webster vs MARL baseline study runner
-├── simulation/          # Eclipse SUMO + TraCI bridge
-│   ├── sumo_env.py          # TraCI environment wrapper
-│   ├── sumo_live_bridge.py  # Live simulation bridge (FRAGILE — 20 KB)
-│   ├── network_generator.py
-│   └── networks/            # SUMO network XML files
-├── shared/              # Cross-module constants and schemas
-│   ├── constants.py     # DataSource enum, PCU_FACTORS, MQTT topics, MARL hyperparams
-│   ├── schemas.py       # Shared Pydantic schemas
-│   └── exceptions.py
-├── infra/               # Docker Compose + Nginx + Prometheus + Grafana + Mosquitto
-│   ├── docker-compose.yml       # Dev: timescaledb, redis, mosquitto
-│   ├── docker-compose.prod.yml  # Production stack
-│   └── docker-compose.demo.yml  # Demo stack
-├── iot/                 # IoT edge device simulation/telemetry
-├── services/            # Background/control services (control_service/)
-├── scripts/             # Operational scripts
-│   ├── smoke_check.sh
-│   ├── check_phase0_regressions.sh
-│   ├── backup_db.sh
-│   └── purge_history.sh
-├── tests/e2e/           # Opaque-box E2E suite (326 test cases, Tiers 1–4)
-├── docs/                # 29 specification documents (00–25 + CHECKLIST.md)
-├── .env                 # Local secrets (gitignored)
-├── .env.example         # Environment variable template
-├── Makefile             # Primary developer command interface
-└── .github/workflows/   # CI: ci.yml, deploy.yml
+│   │   ├── services/    # auth, traffic_service, mqtt_consumer
+│   │   └── websocket/   # ConnectionManager (manager.py); /ws/control added Phase 2
+│   ├── alembic/versions/  # 001_initial_schema, 001b_datasource_provenance, 002_control_decisions_ab_runs
+│   ├── tests/           # 11 pytest files, asyncio_mode = auto
+│   └── requirements.txt # Pinned; torch, sqlalchemy installed in .venv (see §11)
+├── frontend/dashboard/  # React 18 + TypeScript + Vite SPA (18 route-level pages)
+├── ml/
+│   ├── marl/            # DQN agent, webster_fallback.py; train_marl.py drives real SumoEnvironment (SN-012f)
+│   ├── vision/           # YOLOv8 detector; raises VisionUnavailable rather than fabricating (shared/exceptions.py)
+│   ├── forecasting/      # LSTM forecaster, lazy-loaded, trained on synthetic data (declared honestly)
+│   ├── emergency/         # Green-wave preemption (green_wave.py)
+│   ├── routing/
+│   └── benchmarks/results/  # Purged; real results produced live by ab_runner.py in ab_runs DB table
+├── simulation/
+│   ├── sumo_env.py          # TraCI wrapper. Raises catchable ImportError (not SystemExit) on missing traci —
+│   │                         # its callers (api/simulation.py, ml/marl/train_marl.py) rely on except ImportError
+│   ├── sumo_live_bridge.py  # Live bridge — FRAGILE, 20KB. Emits canonical JunctionTelemetry (SN-025) via REDIS_CHANNELS
+│   └── networks/            # corridor.{net,edg,nod,rou,det,sumocfg}.xml — 4 junctions, DEMO_SEED=42
+├── services/control_service/  # SN-030: controllers.py, safety.py, state.py, reward.py, ab_runner.py, config.py, main.py
+├── shared/
+│   ├── constants.py     # DataSource enum, PCU_FACTORS, REDIS_CHANNELS, DEMO_SEED=42, SIGNAL_CONSTRAINTS
+│   ├── telemetry.py     # ApproachTelemetry / JunctionTelemetry canonical schema (SN-023)
+│   ├── sumo_bootstrap.py # ensure_sumo_on_path() + require_traci() — the ONE place the traci-guard lives (§13.11)
+│   ├── paths.py          # find_existing() / resolve_repo_path() — the ONE place candidate-path search lives
+│   ├── schemas.py
+│   └── exceptions.py     # VisionUnavailable
+├── infra/                # docker-compose.yml (dev), docker-compose.demo.yml, docker-compose.prod.yml
+├── scripts/
+│   ├── check_phase0_regressions.sh  # 26 checks, CI-blocking (`phase0-guard` job), covers Phase 0 AND Phase 1 findings
+│   └── smoke_check.sh               # checks /health for "healthy" (not "ok" — see §13.3)
+├── tests/
+│   ├── e2e/              # Opaque-box E2E suite, Tiers 1-4
+│   └── critical/         # Phase 2 mutation-checked tests (SN-116/125 etc) — see §11, currently only partially runnable locally
+├── docs/                 # 00-26 + CHECKLIST.md; 25 and 26 are the Phase 1/2 remediation plans
+├── start.sh / stop.sh / reset.sh  # SN-018/021 orchestration; start.sh writes /health/deep to a temp file, never splices JSON into Python source
+├── .env.example
+├── Makefile
+└── .github/workflows/    # ci.yml (phase0-guard + backend + frontend jobs), deploy.yml
 ```
 
 ---
@@ -91,208 +104,231 @@ surakshanet/
 | Layer | Technology |
 |---|---|
 | Framework | FastAPI 0.104.1 (async) |
-| Python | 3.11 |
-| ORM | SQLAlchemy 2.0 (async/asyncpg) |
+| Python | 3.11 (repo pins this; **note**: `.venv` currently runs 3.14 with missing deps — see §11) |
+| ORM | SQLAlchemy 2.0 (async/asyncpg), classic `Column[]` style, not `Mapped[]` |
 | DB Driver | asyncpg (PostgreSQL), aiosqlite (test fallback) |
-| Migrations | Alembic 1.13 |
+| Migrations | Alembic 1.13 — advisory-lock-guarded against concurrent-worker races (§13.11) |
 | Spatial | GeoAlchemy2 + PostGIS (`Geometry('POINT', srid=4326)`) |
-| Time-series | TimescaleDB hypertables |
-| Auth | JWT (HS256) via `python-jose`, bcrypt via `passlib` |
+| Time-series | TimescaleDB hypertables (`traffic_readings`, `control_decisions`) |
+| Auth | JWT (HS256) via `python-jose`, bcrypt via `passlib`, `jti` Redis revocation |
 | Messaging | Redis pub/sub (redis-py asyncio), paho-mqtt |
-| ML | PyTorch, Ultralytics YOLOv8, XGBoost, scikit-learn |
-| Simulation | Eclipse SUMO + TraCI (`traci>=1.19`, `eclipse-sumo>=1.19`) |
-| Metrics | Prometheus (`prometheus-client`) |
+| ML | PyTorch, Ultralytics YOLOv8, XGBoost, scikit-learn — all lazy-loaded, never at module import |
+| Simulation | Eclipse SUMO + TraCI (`traci>=1.19`, `eclipse-sumo>=1.19`, pinned in requirements.txt) |
+| Metrics | Prometheus (`prometheus-client`), includes `control_*` series (SN-037) |
 | Validation | Pydantic v2 + pydantic-settings |
 
 ### Frontend
 | Layer | Technology |
 |---|---|
-| Framework | React 18 + TypeScript |
-| Build | Vite 5, tsc |
-| Routing | react-router-dom v6 (React.lazy code splitting) |
+| Framework | React 18 + TypeScript, `React.lazy()` code splitting per page |
+| Build | Vite 5, tsc strict mode |
+| Routing | react-router-dom v6 |
 | State | Zustand 4 |
 | HTTP | axios |
 | Maps | Leaflet + react-leaflet, mapbox-gl |
 | Charts | Recharts |
-| 3D | Three.js |
-| Styling | Tailwind CSS 3 (light theme — see `design.md`) |
+| 3D | Three.js (decorative `Studio/` components only — excluded from the fabrication guard) |
+| Styling | Tailwind CSS 3, light theme |
 | Testing | Vitest + React Testing Library + jsdom |
-| Animation | framer-motion |
 
 ### Infrastructure
-| Service | Image | Host Port |
-|---|---|---|
-| TimescaleDB + PostGIS | `timescale/timescaledb-ha:pg15` | 5432 |
-| Redis | `redis:7-alpine` | 6379 (127.0.0.1 only) |
-| Mosquitto MQTT | `eclipse-mosquitto:2` | 1883 (127.0.0.1 only) |
-| FastAPI Backend | custom Dockerfile | 8000 |
-| Prometheus | official | 9090 |
-| Grafana | official | 3000 |
-| Nginx | official | 80/443 |
+| Service | Image | Host Port | Compose file |
+|---|---|---|---|
+| TimescaleDB + PostGIS | `timescale/timescaledb-ha:pg15` | 5432/5433 | dev / demo |
+| Redis | `redis:7-alpine` | 6379 (127.0.0.1 only) | both |
+| Mosquitto MQTT | `eclipse-mosquitto:2` | 1883 (127.0.0.1 only) | both — healthcheck has NO `\|\| exit 0` escape (fixed Phase 1) |
+| FastAPI Backend | custom Dockerfile, `--workers 2` | 8000 | demo |
+| Prometheus | official | 9090 | demo |
+| Grafana | official | 3001 (demo) / 3000 (prod) | demo/prod |
 
 ---
 
 ## 4. Database Schema
 
 ### Key Tables
+**`users`** — `id` UUID PK, `email` unique, `role` enum `ADMIN|OPERATOR|VIEWER`. Registration
+always creates `OPERATOR`; admin promotion is an explicit separate action, never self-service.
 
-**`users`** — Authentication and RBAC
-- `id` UUID PK, `email` (unique, indexed), `password_hash`, `name`
-- `role`: enum `ADMIN | OPERATOR | VIEWER` (default: `VIEWER`)
-- Registration always creates `OPERATOR`; admin promotes via `PATCH /api/v1/users/{id}/role`
+**`junctions`** — spatial master. `location` `Geometry('POINT', srid=4326)` auto-synced from
+`latitude`/`longitude` via `Junction.__init__` and `@validates` — always update both together.
 
-**`junctions`** — Spatial junction master
-- `id` UUID PK, `name`, `latitude` Float, `longitude` Float
-- `location`: `Geometry('POINT', srid=4326)` with GiST spatial index — auto-synced from lat/lon via `__init__` and `@validates`
-- `is_active`, `num_approaches` (default 4), `geometry` JSON
+**`traffic_sensors`** — `sensor_type: CAMERA|INDUCTION|ACOUSTIC|GPS`, FK to `junctions.id`
+(CASCADE DELETE).
 
-**`traffic_sensors`** — Sensor registry per junction
-- `sensor_type`: `CAMERA | INDUCTION | ACOUSTIC | GPS`
-- `approach_direction`: `N | E | S | W`
-- FK to `junctions.id` (CASCADE DELETE)
+**`traffic_readings`** — TimescaleDB hypertable. Composite PK `(id, timestamp)` — required by
+the hypertable, never change to a single PK. `source` column has a CHECK constraint against
+the `DataSource` enum (`sumo|vision|mqtt|model|heuristic|manual`) — NOT NULL, no default of
+`"live"` (that was removed in migration `001b`). `avg_speed` and `queue_length` are nullable —
+an unreported value is `NULL`, never a fabricated default.
 
-**`traffic_readings`** — TimescaleDB hypertable (time-series telemetry)
-- Composite PK: `(id UUID, timestamp DateTime)` — required for hypertable
-- `vehicle_count`, `pcu_value`, `avg_speed`, `queue_length`, `vehicle_breakdown` JSON
-- `source` string — must match a `DataSource` enum value
-- Chunk interval: 1 day; retention policy: 90 days
+**`control_decisions`** (new, SN-024) — TimescaleDB hypertable, 1-day chunks. Records every
+control-service decision: `state_vector`, `clamped`/`clamp_reason`, `reward` (filled one step
+later), `controller` (marl/webster/manual).
 
-**`alerts`** — Traffic alerts
-- `alert_type`: `CONGESTION | SPILLBACK | SIGNAL_FAILURE | QUEUE_OVERFLOW`
-- `severity`: `INFO | WARNING | CRITICAL`
+**`ab_runs`** (new, SN-024) — one row per A/B comparison run (`services/control_service/
+ab_runner.py`). `improvement` is absent until the run genuinely completes — never filled with
+a placeholder.
 
-**`emergency_events`** — Emergency vehicle preemption records
-- `vehicle_type`: `AMBULANCE | FIRE | POLICE | VIP`
-- `priority`: `CRITICAL | HIGH | MEDIUM`
-- `status`: `ACTIVE | COMPLETED | CANCELLED`
-- `route` JSON array of junction IDs
+**`alerts`**, **`emergency_events`** — see `docs/05-database.md` for full field lists.
 
-### Alembic Migrations
-- Config: `backend/alembic.ini`; migrations in `backend/alembic/versions/`
-- Two existing: `001_initial_schema.py`, `001b_datasource_provenance.py`
-- `database.py:init_db()` runs Alembic automatically on startup (PostgreSQL) and uses `create_all` for SQLite test fallback
+### Alembic
+Three migrations: `001_initial_schema`, `001b_datasource_provenance`,
+`002_control_decisions_ab_runs`. `database.py::init_db()` runs migrations under a Postgres
+advisory lock (`pg_try_advisory_lock`) so `--workers 2` booting concurrently don't race each
+other into a spurious failure — a genuine migration failure now propagates and crashes
+startup rather than being logged and swallowed (fixed in Phase 1; see §13.12).
 
 ---
 
 ## 5. API Architecture
 
 ### REST Endpoints (all under `/api/v1`)
-
 | Router | File | Key Endpoints |
 |---|---|---|
-| `/auth` | `api/auth.py` | `POST /register`, `POST /login`, `POST /logout` |
+| `/auth` | `api/auth.py` | `POST /register` (always OPERATOR), `POST /login`, `POST /logout` |
 | `/users` | `api/users.py` | `PATCH /{user_id}/role` (ADMIN only) |
-| `/traffic` | `api/traffic.py` | CRUD for readings, sensor data |
-| `/junctions` | `api/junctions.py` | Junction management with spatial queries |
-| `/ml` | `api/ml.py` | `POST /ml/detect` (YOLOv8), forecasting, signal inference |
-| `/simulation` | `api/simulation.py` | SUMO TraCI control |
-| `/routing` | `api/routing.py` | A* pathfinding with congestion weights |
-| `/alerts` | `api/alerts.py` | Alert CRUD and acknowledgment |
-| `/emergency` | `api/emergency.py` | `POST /activate`, `POST /deactivate/{vehicle_id}` |
-| `/signals` | `api/signals.py` | Signal plan management (Webster/MARL/Manual) |
-| `/health` | `api/health.py` | Health check (also at root `/`) |
-| `/metrics` | `main.py` | Prometheus scrape endpoint (no prefix) |
+| `/traffic` | `api/traffic.py` | Readings CRUD; rejects (422) a reading missing NOT NULL fields or an unattributable junction rather than defaulting |
+| `/junctions` | `api/junctions.py` | Spatial queries |
+| `/ml` | `api/ml.py` | `POST /ml/detect` (YOLOv8, 503 if weights absent), `/ml/predict` (503 if no readings and no trained model) |
+| `/simulation` | `api/simulation.py` | SUMO TraCI control; 503 `simulation_unavailable` when SUMO absent — no fabricated fallback |
+| `/ab` | `api/ab.py` | (new, SN-038) A/B comparison runs |
+| `/routing` | `api/routing.py` | A* pathfinding |
+| `/alerts` | `api/alerts.py` | Alert CRUD |
+| `/emergency` | `api/emergency.py` | `POST /activate` — 422 if no route supplied, never assumes a corridor |
+| `/signals` | `api/signals.py` | Signal plan management; `mode` field now actually consumed by the control service (SN-033) |
+| `/health` | `api/health.py` | `GET /health` liveness → `{"status": "healthy"}`; `GET /health/deep` readiness → per-dependency `ok`/`degraded`/`error`/`unavailable`, never assumed |
+| `/metrics` | `main.py` | Prometheus scrape (no prefix) |
 
 ### WebSocket Endpoints (no `/api/v1` prefix)
 ```
-/ws/traffic       → channel: 'traffic'
-/ws/signals       → channel: 'signals'
-/ws/alerts        → channel: 'alerts'
-/ws/emergency     → channel: 'emergency'
-/ws/training      → channel: 'training'
-/ws/{channel}     → dynamic channel
-/api/v1/ws        → channel: 'default'
+/ws/traffic /ws/signals /ws/alerts /ws/emergency /ws/training /ws/control (new)
+/ws/{channel}  (dynamic)   /api/v1/ws  (channel: 'default')
 ```
-
-WebSockets are managed by `app/websocket/manager.py::ConnectionManager` (singleton `manager`). Cross-worker broadcast uses Redis pub/sub. `redis_pubsub_bridge()` coroutine in `main.py` subscribes to Redis channels and dispatches to local WebSocket clients via `manager.local_broadcast()`.
-
-### Error Response Envelope
-```json
-{
-  "detail": "...",
-  "error": {
-    "code": 422,
-    "message": "...",
-    "details": "...",
-    "request_id": "<uuid>"
-  }
-}
-```
-Every response carries `X-Request-ID` header (injected by `CorrelationIdMiddleware`).
+`app/websocket/manager.py::ConnectionManager`. Cross-worker broadcast via Redis pub/sub;
+`redis_pubsub_bridge()` in `main.py` dispatches to local clients via `manager.local_broadcast()`.
 
 ---
 
 ## 6. Authentication & Security
-
-- **JWT**: HS256, `python-jose`. Claims include `jti` (UUID) for individual revocation.
-- **Token revocation**: Redis key `revoked_token:{jti}` with TTL = remaining lifetime. `POST /api/v1/auth/logout` triggers this. `get_current_user()` checks Redis on every request.
-- **Rate limiting**: Lockout after 5 consecutive failures tracked in Redis (`auth:failed_logins:{email}`).
-- **RBAC**: Three roles — `ADMIN`, `OPERATOR`, `VIEWER`. Registration always creates `OPERATOR`. Promotion to ADMIN requires explicit admin action.
-- **Production startup guard**: `config.py::validate_production_secrets()` blocks startup with default `JWT_SECRET_KEY`, `ADMIN_PASSWORD`, or dev DB credentials when `ENVIRONMENT=production`.
-- **CORS**: Whitelist via `settings.CORS_ORIGINS`; `sanitize_cors_origins` strips any `*` origins.
+- JWT HS256 via `python-jose`; `jti` claim enables individual revocation via Redis key
+  `revoked_token:{jti}`, checked on every request in `get_current_user()`.
+- Login lockout after 5 failures, tracked in Redis (`auth:failed_logins:{email}`).
+- RBAC: `ADMIN|OPERATOR|VIEWER`. Registration always creates `OPERATOR` — never trust a role in
+  the request body.
+- `config.py::validate_production_secrets()` blocks startup under `ENVIRONMENT=production` with
+  a default `JWT_SECRET_KEY`, `ADMIN_PASSWORD`, or dev DB credentials.
+- CORS: `sanitize_cors_origins` strips any `*` origin.
+- No credential defaults live in test fixtures — `tests/e2e/conftest.py`'s `admin_token`
+  fixture skips (does not fall back to a hardcoded password) when `ADMIN_EMAIL`/
+  `ADMIN_PASSWORD` aren't set in the environment.
 
 ---
 
 ## 7. Data Provenance Contract (MANDATORY)
 
-Every telemetry payload, WebSocket frame, and `traffic_readings.source` value MUST carry a `DataSource`:
+Every telemetry payload, WebSocket frame, and `traffic_readings.source` value MUST carry a
+`DataSource` (`shared/constants.py`):
 
 | Enum Value | String | Meaning |
 |---|---|---|
 | `DataSource.SUMO` | `"sumo"` | Measured from SUMO microsimulation via TraCI |
-| `DataSource.VISION` | `"vision"` | Derived from camera frames by YOLOv8 detector |
-| `DataSource.MQTT` | `"mqtt"` | Reported by physical/simulated edge device |
-| `DataSource.MODEL` | `"model"` | Produced by trained model (LSTM, DQN) |
-| `DataSource.HEURISTIC` | `"heuristic"` | Produced by formula (Webster), NOT trained |
+| `DataSource.VISION` | `"vision"` | Vehicle *counts* from the YOLOv8 detector — NOT speed or queue length, which a single frame cannot measure (both are `null` on vision-sourced rows) |
+| `DataSource.MQTT` | `"mqtt"` | Reported by a physical/simulated edge device |
+| `DataSource.MODEL` | `"model"` | Produced by a trained model (LSTM forecaster, DQN) — `confidence` is schema-forbidden on any other source |
+| `DataSource.HEURISTIC` | `"heuristic"` | Produced by a formula (persistence baseline, Webster), NOT a trained model |
 | `DataSource.MANUAL` | `"manual"` | Entered or seeded by a human |
 
-Dashboard `<TelemetrySourceBadge>`: LIVE=green, SIM=blue, MOCK=amber.
+The legacy `live`/`sim`/`mock` vocabulary is retired — it does not satisfy the `traffic_readings.source`
+CHECK constraint and must not appear in new code. (It still appears in the contaminated
+`STATUS.md`/`docs/RESEARCH_DEFENSE.md` — see §1; do not copy from those files.)
+
+`<TelemetrySourceBadge>` (frontend) has no default prop — a missing or unrecognised source
+renders `UNAVAILABLE`, never falls back to a measured-family badge.
 
 **NEVER fabricate, hardcode, or fake data values in API responses, tests, or UI components.**
-The Phase 0 regression guard (`scripts/check_phase0_regressions.sh`) enforces this in CI.
+`scripts/check_phase0_regressions.sh` (26 checks, CI-blocking as the `phase0-guard` job)
+enforces this — extend it, don't work around it, when adding new provenance-bearing code.
 
 ---
 
 ## 8. ML & Simulation Subsystems
 
 ### MARL (Multi-Agent Reinforcement Learning)
-- Location: `ml/marl/`
-- DQN agents coordinate 4-junction arterial corridor
-- 18-link SUMO network; phase strings are **exactly 18 characters** (e.g., `rrrrGGGggrrrrGGGgg`)
-- Webster fallback: `ml/marl/webster_fallback.py` — produces 18-char phase strings from lane flow data
-- Benchmark results: 18.38% delay reduction, 22.92% queue reduction over Webster
-- Weights stored in `ml/marl/weights/`
+- `ml/marl/` — DQN agent (`agent.py`), Webster fallback (`webster_fallback.py`)
+- **`ml/marl/train_marl.py` trains against real SUMO (SN-012f, verified).** Drives `SumoEnvironment`
+  reading the 16 lane-area detectors (`det_{junction}_{dir}_0`), seeds runs deterministically, and
+  outputs genuine policy weights `ml/marl/weights/marl_policy_downtown.pth` with SHA-256 verified in
+  `tests/critical/test_06_dqn_inference.py`.
+- `ml/benchmarks/results/` pre-audit debris was purged. Real numbers are derived live from `ab_runs`.
+- Corridor: 4 junctions (J0-J3), an arterial + cross-street topology (`simulation/networks/
+  corridor.{nod,edg}.xml`). Phase-string length is topology-dependent — verify against the
+  actual `corridor.net.xml` before assuming a specific character count; don't hardcode one from
+  memory.
 
 ### SUMO / TraCI
-- Location: `simulation/`
-- `sumo_env.py`: TraCI environment wrapper
-- `sumo_live_bridge.py`: Live bridge (**20 KB — inspect carefully before modifying**)
-- Requires SUMO binary; graceful degradation to `MicroSimRunner` when absent (tags output `source: "sim"`)
-- Corridor: 4 junctions, 18 links — topology change requires updating phase strings
+- `simulation/sumo_env.py` — TraCI wrapper. Raises a catchable `ImportError` (not `SystemExit`)
+  when `traci` is missing, because its callers (`backend/app/api/simulation.py`,
+  `ml/marl/train_marl.py`) both implement `except ImportError: SumoEnvironment = None` and
+  degrade to an honest 503/skip. Do not change this to `SystemExit` — see §13.11.
+- `simulation/sumo_live_bridge.py` — FRAGILE, 20KB, inspect carefully before modifying. Uses
+  `require_traci()` from `shared/sumo_bootstrap.py` (hard-exit on missing traci — this file IS
+  meant to crash loudly, unlike `sumo_env.py`). Emits canonical `JunctionTelemetry` via
+  `REDIS_CHANNELS["traffic"]` (SN-025).
+- No fallback engine. When SUMO/TraCI is unreachable, `/simulation/*` returns `503
+  {"status":"simulation_unavailable","reason":...}` — never fabricated vehicle/speed/delay data.
+  (The old `MicroSimRunner` that did exactly that was deleted in Phase 0, SN-005 — if you see it
+  referenced anywhere, that reference is stale.)
+- 16 lane-area detectors (`simulation/networks/corridor.det.xml`) — loaded via `corridor.sumocfg`
+  for the standalone bridge, and via `additional_files` (resolved through `shared/paths.py`) for
+  the REST-driven `/simulation/start` path (Phase 1 fix — previously only the bridge loaded them).
+
+### Control Service (`services/control_service/`, Phase 2)
+- `controllers.py` — `MarlController` (SHA-256-verifies weights, refuses MARL mode with a
+  `RuntimeError` rather than fabricating a decision if weights fail to load), `WebsterController`,
+  `ManualController`.
+- `safety.py` — the safety envelope: min/max green, mandatory amber/all-red, pedestrian-service
+  guarantee. Every clamp is recorded with a reason.
+- `state.py` — builds the ordered 8-dim state vector from `JunctionTelemetry`.
+- `reward.py` — computed one control step after the action, never online during a demo.
+- `ab_runner.py` — SN-038. Runs two real TraCI simulations (Webster vs MARL), computes honest
+  improvement percentages, explicitly reports a negative result unchanged if that's what happens
+  (`generate_ab_statement`). **Has not yet actually been executed** — see §1 and the Phase 2 plan.
+- `tests/critical/` carries mutation-checked tests for this subsystem (SN-116/117/125). Currently
+  only 3 of 5 files fully collect/pass in `.venv` — the gap is missing `torch`/`sqlalchemy`, not a
+  code defect. See §11.
 
 ### YOLOv8 Vision
-- Location: `ml/vision/`
-- CPU-optimized `yolov8n`; lazy-loaded via cached getter
-- Accessed via `POST /api/v1/ml/detect` (frame upload)
+- `ml/vision/vehicle_detector.py` — raises `shared.exceptions.VisionUnavailable` (not a fabricated
+  detection) when no model is loaded or inference fails. `POST /ml/detect` maps this to `503`.
+- `ml/vision/rtsp_stream_worker.py` reports only what a single frame can measure (vehicle counts,
+  PCU); `avg_speed`/`queue_length` are `null` — a frame has no displacement to derive speed from.
 
 ### LSTM Forecasting
-- Location: `ml/forecasting/`; lazy-loaded on demand
+- `ml/forecasting/` — lazy-loaded. `training_data: "synthetic"` is declared honestly in every
+  model-sourced response. The heuristic fallback (`source="heuristic"`) is a persistence baseline
+  anchored on the last *measured* reading — it returns 503 rather than inventing a value when
+  there's no reading to anchor on.
 
 ### A* Routing
-- Location: `ml/routing/` + `backend/app/api/routing.py`
-- Congestion cost weights defined in `shared/constants.py::ROUTING_WEIGHTS`
+- `ml/routing/` + `backend/app/api/routing.py`. Weights in `shared/constants.py::ROUTING_WEIGHTS`.
 
 ---
 
-## 9. MQTT Topics
+## 9. MQTT Topics & Redis Channels
 
-Defined in `shared/constants.py`:
+`shared/constants.py`:
 ```
-surakshanet/sensors/{sensor_id}/telemetry
-surakshanet/junctions/{junction_id}/telemetry
-surakshanet/junctions/{junction_id}/control   (signal cabinet commands)
+MQTT_SENSOR_TELEMETRY_TOPIC   = "surakshanet/sensors/{sensor_id}/telemetry"
+MQTT_JUNCTION_TELEMETRY_TOPIC = "surakshanet/junctions/{junction_id}/telemetry"
+                                 "surakshanet/junctions/{junction_id}/control"
+REDIS_CHANNELS = {...}  # traffic, simulation, signals, emergency, control_commands,
+                         # control_decisions, incident_events, event_events,
+                         # advisory_events, cv_detections
 ```
-Every MQTT payload MUST include `"source"` field with a valid `DataSource` string.
+Every MQTT/Redis telemetry payload MUST include a `source` field with a valid `DataSource`
+string. The MQTT ingest path (`backend/app/services/mqtt_consumer.py`) accepts only the
+measured members (`mqtt|sumo|vision`) on a declared `source` and rejects/logs anything else —
+it does not silently relabel or default an unrecognised value.
 
 ---
 
@@ -300,10 +336,7 @@ Every MQTT payload MUST include `"source"` field with a valid `DataSource` strin
 
 ```bash
 # Infrastructure
-make up              # start all Docker services (background)
-make down            # stop all services
-make build           # rebuild Docker images
-make dev             # alias for 'up'
+make up / make down / make build / make dev
 
 # Database
 make migrate         # alembic upgrade head (inside Docker)
@@ -312,88 +345,108 @@ make migrate         # alembic upgrade head (inside Docker)
 make test            # test-backend + test-frontend
 make test-backend    # pytest on 11 backend test files (inside Docker)
 make test-frontend   # npm test (frontend/dashboard)
-make test-e2e        # 326-case E2E suite (Tiers 1-4, inside Docker)
+make test-e2e        # E2E suite (Tiers 1-4, inside Docker)
 
 # Code Quality
-make lint            # ruff check app/ + npm run build (type-check + build)
+make lint            # ruff check app/ + npm run build
 make format          # ruff format app/
 
 # Validation
-make smoke           # smoke_check.sh on /health, /metrics, WebSocket
-make check-phase0    # regression guard for fabrication patterns
+make smoke           # scripts/smoke_check.sh — checks /health for "healthy"
+make check-phase0    # scripts/check_phase0_regressions.sh — 26 checks, covers Phase 0 + Phase 1 findings
+
+# Orchestrated demo lifecycle (Phase 1, SN-018/020/021)
+./start.sh [--profile demo|dev] [--no-frontend] [--seed 42] [--timeout 90]
+./stop.sh
+./reset.sh            # drop/recreate DB, flush Redis, re-seed, restart from step 0
 
 # Cleanup
-make clean           # remove __pycache__, *.pyc, frontend/dist
+make clean
 ```
 
-### Running Tests Outside Docker (local / CI)
+### Running Tests Outside Docker
 ```bash
-# Backend (from backend/ — PYTHONPATH must include repo root)
-PYTHONPATH=/home/alok/surakshanet pytest tests/ -v
-PYTHONPATH=/home/alok/surakshanet pytest tests/test_auth.py -v
+# Backend — from repo root, PYTHONPATH must include repo root AND backend/
+PYTHONPATH=$(pwd):$(pwd)/backend pytest backend/tests/ -v
+PYTHONPATH=$(pwd):$(pwd)/backend pytest tests/critical/ -v   # Phase 2 mutation-checked tests
 
-# Frontend (from frontend/dashboard/)
+# Frontend — from frontend/dashboard/
 npm test
 npx tsc --noEmit
 npm run build
 ```
 
-### Lint & Type Check
-```bash
-# Backend (from backend/)
-ruff check app/                     # blocking in CI (E4/E7/E9/F rules)
-flake8 app/                         # supplementary
-mypy app/ --ignore-missing-imports  # advisory only
+---
 
-# Frontend (from frontend/dashboard/)
-npx tsc --noEmit
-```
+## 11. Local Environment State
+
+- `.venv` runs Python **3.14** (`/home/alok/surakshanet/.venv/bin/python3`).
+- `.venv` has all core dependencies installed (`torch-2.14.0+cpu`, `sqlalchemy==2.0.52`, `pydantic==2.13.5`, `pytest-asyncio==1.4.0`, `asyncpg==0.31.0`, `geoalchemy2==0.20.0`, etc.).
+- `PYTHONPATH=$(pwd):$(pwd)/backend pytest tests/critical/ -v` runs all 24 critical tests with 0 failures in <9 seconds.
+- SUMO and `traci` are operational in `.venv`.
+- Pre-audit benchmark artifacts were permanently purged and live evaluations are recorded in `ab_runs`.
 
 ---
 
-## 11. Pytest Configuration
+## 12. Pytest Configuration
 
 - `backend/pytest.ini`: `asyncio_mode = auto`, `asyncio_default_fixture_loop_scope = function`
+- A second `pytest.ini` exists at the repo root for `tests/critical/` and `tests/e2e/` —
+  don't assume backend config applies repo-wide.
 - `backend/tests/conftest.py` fixtures:
-  - `db_session`: Creates async engine from `settings.DATABASE_URL`; rolls back after each test
-  - `client`: `AsyncClient` with ASGI transport; overrides `get_db` dependency
-  - `auth_headers`: Registers user → **explicitly promotes to `UserRole.ADMIN` in DB** → returns `Bearer` header
-- **Critical**: `auth_headers` role promotion pattern is required for admin-gated tests. Do not change this pattern.
-- `PYTHONPATH` must include repo root (Docker: `/app`; CI: `${{ github.workspace }}`; local: repo root) because `ml/`, `shared/`, `simulation/` are at root level.
-
----
-
-## 12. CI Pipeline (`.github/workflows/ci.yml`)
-
-Triggers: push/PR to `main`. Three jobs:
-
-1. **phase0-guard**: `scripts/check_phase0_regressions.sh` — ensures no fabricated data patterns re-appear
-2. **backend** (Python 3.11):
-   - `ruff check app/` + `flake8 app/` (blocking)
-   - `mypy app/ --ignore-missing-imports` (advisory, `continue-on-error: true`)
-   - `alembic upgrade head`
-   - `pytest tests/ -v --cov=app`
-3. **frontend** (Node.js 20):
-   - `npx tsc --noEmit`
-   - `npm test`
-   - `npm run build`
-
-Pinned CI tool versions: `ruff==0.16.6`, `flake8==7.1.1`, `mypy==1.13.0`.
+  - `db_session`: async engine from `settings.DATABASE_URL`, rolled back after each test
+  - `client`: `AsyncClient` with ASGI transport, overrides `get_db`
+  - `auth_headers`: registers a user, **explicitly promotes to `UserRole.ADMIN` in DB**,
+    returns a `Bearer` header — required pattern for admin-gated tests, do not change it
+- `tests/e2e/conftest.py`: `authed_client` fixture (attaches an operator token) — use this,
+  not a bare `http_client`, for any test against a protected endpoint. An assertion like
+  `status_code in (200, 401)` against an *authenticated* client is decorative and blocked by
+  the Phase 0 guard.
+- `PYTHONPATH` must include the repo root **and** `backend/` (Docker: `/app`; CI:
+  `${{ github.workspace }}`; local: repo root + `repo root/backend`) because `ml/`, `shared/`,
+  `simulation/`, `services/` sit at repo-root level while `app/` sits under `backend/`.
 
 ---
 
 ## 13. Critical Invariants (Do Not Change Without Explicit Approval)
 
-1. **SUMO 18-character phase strings**: 4-junction corridor has exactly 18 links. Phase strings must be exactly 18 chars. Breaking this crashes TraCI.
-2. **Composite PK on `traffic_readings`**: `(id, timestamp)` is required by TimescaleDB hypertable. Never change to single PK.
-3. **PostGIS `location` auto-sync**: `Junction.__init__` and `@validates` keep `location` synced with `latitude`/`longitude`. Always update both together.
-4. **`DataSource` provenance on every payload**: No API response, WS event, or DB write may omit or fabricate the `source` field. Phase 0 regression guard enforces this.
-5. **Registration always creates `OPERATOR` role**: `register_user()` ignores any role in the request body. Never allow self-service admin creation.
-6. **JWT `jti` revocation via Redis**: `get_current_user()` checks Redis blacklist on every authenticated call. Do not bypass.
-7. **Production startup guard**: `validate_production_secrets()` in `config.py`. Do not weaken or remove.
-8. **No wildcard CORS**: `sanitize_cors_origins` strips `*`. Never allow wildcard in production config.
-9. **ML models are lazy-loaded**: Never import `torch`, `ultralytics`, or `xgboost` at module level in API routers. Use cached getter functions only.
-10. **Frontend chunk budget ≤ 500 KB**: `vite.config.ts` `manualChunks` defines splits: `vendor-maps`, `vendor-charts`, `vendor-three-core`, `vendor-three-render`, `vendor-icons`, `vendor-core`, `vendor-misc`.
+1. **Composite PK on `traffic_readings` and `control_decisions`**: `(id, timestamp)` is
+   required by the TimescaleDB hypertable. Never change to a single PK.
+2. **PostGIS `location` auto-sync**: `Junction.__init__` and `@validates` keep `location`
+   synced with `latitude`/`longitude`. Always update both together.
+3. **`DataSource` provenance on every payload**: no API response, WS event, or DB write may
+   omit or fabricate `source`. The Phase 0/1 regression guard enforces this in CI.
+4. **Registration always creates `OPERATOR`**: never allow self-service admin creation.
+5. **JWT `jti` revocation via Redis**: `get_current_user()` checks the blacklist on every
+   authenticated call. Do not bypass.
+6. **Production startup guard**: `validate_production_secrets()` in `config.py`. Do not weaken.
+7. **No wildcard CORS**: `sanitize_cors_origins` strips `*`.
+8. **ML models are lazy-loaded**: never import `torch`, `ultralytics`, or `xgboost` at module
+   level in API routers. Cached getter functions only.
+9. **Frontend chunk budget ≤ 500 KB**: `vite.config.ts` `manualChunks` splits (`vendor-maps`,
+   `vendor-charts`, `vendor-three-core`, `vendor-three-render`, `vendor-icons`, `vendor-core`,
+   `vendor-misc`).
+10. **No fallback engine anywhere data would be fabricated**: `/simulation/*`, `/ml/detect`,
+    `/ml/predict` all return an honest `503`/unavailable state rather than inventing output when
+    their dependency (SUMO, YOLO weights, trained model) is absent. Do not add a "graceful"
+    fallback that produces plausible-looking numbers — that is the exact defect class Phase 0
+    exists to eliminate.
+11. **`sumo_env.py` raises `ImportError`, not `SystemExit`, on missing traci** — its callers
+    depend on catching it. The hard `SystemExit` guard (`shared/sumo_bootstrap.py::require_traci()`)
+    belongs only to process entrypoints — `backend/app/main.py`, `simulation/sumo_live_bridge.py`,
+    `services/control_service/main.py` — never to a library module another try/except relies on.
+12. **Alembic migrations run under a Postgres advisory lock, and a real failure must propagate**:
+    `backend/app/database.py::_run_migrations_once()`. Do not wrap the migration call in a bare
+    `except Exception: logger.info(...)` again — that previously masked genuine failures as
+    "already applied," letting the app boot on a broken schema while `/health/deep` still
+    reported `postgres: ok`.
+13. **`/health` returns `{"status": "healthy"}`**, not `"ok"` — `scripts/smoke_check.sh` and
+    `tests/e2e/.../test_f29_smoke_checks.py` hard-check this exact string. `/health/deep` has
+    its own separate `ok`/`degraded`/`error`/`unavailable` vocabulary; don't conflate the two.
+14. **A checklist task is `DONE` only when its Definition-of-Done conditions hold**
+    (`docs/23-final-acceptance.md §1`: implemented ∧ integrated ∧ tested ∧ demonstrated ∧
+    documented) — never mark a task complete because the code exists and compiles. See §1's
+    note on Phase 2's current inconsistent tracker state.
 
 ---
 
@@ -401,57 +454,73 @@ Pinned CI tool versions: `ruff==0.16.6`, `flake8==7.1.1`, `mypy==1.13.0`.
 
 | File | Risk | Notes |
 |---|---|---|
-| `simulation/sumo_live_bridge.py` | HIGH | 20 KB complex TraCI bridge; verify TraCI API compatibility on any change |
-| `backend/app/main.py` | MEDIUM | Mid-file imports after SUMO path injection — acknowledged debt; ruff E402 exception intentional |
-| `backend/app/models/junction.py` | MEDIUM | GeoAlchemy2 SQLite monkey-patch at top of file for spatialite-less test runs; E402 ignore intentional |
+| `simulation/sumo_live_bridge.py` | HIGH | 20KB complex TraCI bridge; verify TraCI API compatibility on any change; uses the hard `require_traci()` guard intentionally |
+| `services/control_service/ab_runner.py` | HIGH | SN-038's headline evidence generator — never adjust it to produce a more favorable number; a negative result is a valid, required-to-report outcome |
+| `ml/marl/train_marl.py` | HIGH | Currently trains on synthetic `np.random` data, not SUMO (SN-012f, open) — any performance claim sourced from its output is unverified until fixed |
+| `backend/app/main.py` | MEDIUM | Mid-file imports after SUMO path injection — acknowledged debt |
+| `backend/app/models/junction.py` | MEDIUM | GeoAlchemy2 SQLite monkey-patch at top of file for spatialite-less test runs |
 | `backend/tests/conftest.py` | MEDIUM | Admin role elevation pattern required by many tests — changing breaks test isolation |
-| `ml/marl/webster_fallback.py` | HIGH | 18-char phase string generation must match TraCI signal program length exactly |
-| `backend/alembic/versions/` | HIGH | Schema migrations are irreversible in production; always test against a copy first |
+| `ml/marl/webster_fallback.py` | HIGH | Phase-string generation must match the TraCI signal program length exactly for the current topology |
+| `backend/alembic/versions/` | HIGH | Migrations are irreversible in production; always test against a copy first |
+| `ml/benchmarks/results/`, `docs/RESEARCH_DEFENSE.md`, `STATUS.md` | HIGH — but for trust, not code | Contains fabricated pre-audit content; see §1. Do not extend or cite from these until `docs/26-phase2-remediation-plan.md` item 6 lands |
 
 ---
 
 ## 15. Shared Constants (single source of truth)
 
-`shared/constants.py`:
-- `DataSource` enum (6 values)
-- `PCU_FACTORS`: car=1.0, motorcycle=0.5, bus=3.0, truck=3.0, auto_rickshaw=1.0, bicycle=0.2, lcv=1.5
-- `SIGNAL_CONSTRAINTS`: min_green=10s, max_green=60s, amber=3s, all_red=2s
-- `ALERT_THRESHOLDS`: congestion_density=80%, speed=15 km/h, spillback_risk=0.85, signal_timeout=10s
-- `MARL_HYPERPARAMS`: buffer=10000, batch=32, gamma=0.99, lr=0.001
-- `ROUTING_WEIGHTS`: travel_time=0.4, congestion=0.3, distance=0.3
-- `EMERGENCY_CONFIG`: lookahead=3 junctions, green_hold=30s
-- `MQTT_SENSOR_TELEMETRY_TOPIC`, `MQTT_JUNCTION_TELEMETRY_TOPIC`
-- `DEMO_SEED = 42` (deterministic seed for reproducibility)
+`shared/constants.py`: `DataSource` enum (6 values) · `PCU_FACTORS` (car=1.0, motorcycle=0.5,
+bus=3.0, truck=3.0, auto_rickshaw=1.0, bicycle=0.2, lcv=1.5) · `SIGNAL_CONSTRAINTS` (min_green=10s,
+max_green=60s, amber=3s, all_red=2s) · `ALERT_THRESHOLDS` · `MARL_HYPERPARAMS` · `ROUTING_WEIGHTS` ·
+`EMERGENCY_CONFIG` · `MQTT_*_TOPIC` constants · `REDIS_CHANNELS` (new, Phase 2) · `DEMO_SEED = 42`.
+
+`shared/sumo_bootstrap.py` (new, Phase 1): `ensure_sumo_on_path()`, `require_traci()` — the
+single place the SUMO sys.path setup and the hard traci-import guard live; four process
+entrypoints call into it rather than each re-implementing the block.
+
+`shared/paths.py` (new, Phase 1): `find_existing()`, `resolve_repo_path()` — the single place
+"search N candidate directories for a file" lives; used by `health.py`'s weight-file checks and
+`api/simulation.py`'s net/route/detector-file resolution.
+
+`shared/telemetry.py` (new, Phase 2): `ApproachTelemetry`, `JunctionTelemetry`, `validate_telemetry`
+— the canonical schema every telemetry producer (bridge, MQTT consumer, control service) must emit.
+
+`shared/exceptions.py`: `VisionUnavailable` — raised, never silently substituted for, when the
+vision pipeline has no real detection to report.
 
 ---
 
 ## 16. Coding Conventions
 
 - **Python**: 120-char line limit (ruff.toml). Type hints everywhere. `async/await` throughout backend.
-- **SQLAlchemy**: Classic `Column[]` style (not `Mapped[]` — migration would require dedicated refactor; mypy has ~34 advisory warnings on this).
-- **Pydantic v2**: Use `model_validator`, `field_validator` — not the deprecated `@validator`.
+- **SQLAlchemy**: Classic `Column[]` style (not `Mapped[]`).
+- **Pydantic v2**: `model_validator`/`field_validator`, not the deprecated `@validator`.
 - **FastAPI**: All dependencies via `Depends()`. Router-level prefixes. Always specify `response_model`.
-- **Frontend**: TypeScript strict mode. `React.lazy()` for all route-level pages wrapped in `<Suspense>`. Avoid `any` in `api.ts`, `websocket.ts`, and page components.
-- **Tailwind**: Light theme, defined in `design.md`. Token: `primary-600` for primary actions, `neutral-*` for text.
-- **Tests**: Use `conftest.py` fixtures. No parallel fixture patterns. `pytest-asyncio` for all async tests.
+- **Frontend**: TypeScript strict mode. `React.lazy()` for route-level pages. Avoid `any`.
+- **Never add a graceful fallback that fabricates plausible-looking data** — return the honest
+  unavailable/error state instead (Invariant §13.10). This is the single most load-bearing
+  convention in this codebase; every Phase 0/1 defect found in review was a violation of it.
+- **Tests**: use `conftest.py` fixtures; no parallel fixture patterns; `pytest-asyncio` for async.
+  A test asserting a status code range that passes whether or not the feature works (e.g.
+  `status_code in (200, 401)` against an authenticated client) is decorative and will be flagged.
 
 ---
 
 ## 17. Task Workflow (Follow for Every Task)
 
 1. **Understand** the request fully.
-2. **Read relevant sections** of this file.
-3. **Run `git status` and `git diff`** to see what has changed.
-4. **Identify the minimal file set** to inspect (avoid full codebase scans).
+2. **Read relevant sections of this file** — check §1 for current phase status before assuming
+   anything is done.
+3. **Run `git status` and `git diff`** — this repo is sometimes modified by concurrent sessions;
+   don't trust your last read of a file without re-checking if meaningful time has passed.
+4. **Identify the minimal file set** to inspect.
 5. **Inspect those files** and their direct dependencies only.
-6. **Make the change** following existing patterns.
-7. **Review `git diff`** of changes before finalizing.
-8. **Run appropriate validations**:
-   - Backend change → `ruff check app/` + `pytest tests/test_<area>.py -v`
-   - Frontend change → `npx tsc --noEmit` + `npm test` + `npm run build`
-   - DB model change → generate Alembic migration + `alembic upgrade head`
-   - Any change → `make smoke` if services are running
-9. **Report** what changed, what was tested, and any remaining concerns.
+6. **Make the change**, following Invariant §13.10 above all else: no fabricated fallback data.
+7. **Review `git diff`** before finalizing.
+8. **Run validations**: backend → `ruff check app/` + `pytest tests/test_<area>.py -v`; frontend →
+   `npx tsc --noEmit` + `npm test` + `npm run build`; DB model change → Alembic migration +
+   `alembic upgrade head`; any change touching a fabrication-adjacent area → `make check-phase0`.
+9. **Report** what changed, what was tested, and what remains unverified — do not mark a task
+   `DONE` in `docs/CHECKLIST.md` without satisfying its literal acceptance line (§13.14).
 
 ---
 
@@ -460,18 +529,16 @@ Pinned CI tool versions: `ruff==0.16.6`, `flake8==7.1.1`, `mypy==1.13.0`.
 | Variable | Default | Production Notes |
 |---|---|---|
 | `ENVIRONMENT` | `development` | `production` triggers secret validation at startup |
-| `JWT_SECRET_KEY` | `your-super-secret-key-...` | Min 16 chars; generate with `openssl rand -hex 32` |
+| `JWT_SECRET_KEY` | `your-super-secret-key-...` | Min 16 chars |
 | `DATABASE_URL` | assembled from parts | `postgresql+asyncpg://...@timescaledb:5432/surakshanet` |
-| `REDIS_URL` | `redis://redis:6379/0` | Add password (`redis://:pass@redis:6379/0`) in prod |
+| `REDIS_URL` | `redis://redis:6379/0` | Add password in prod |
 | `MQTT_BROKER_HOST` | `mosquitto` | Internal Docker service name |
 | `MQTT_BROKER_PORT` | `1883` | |
 | `CORS_ORIGINS` | localhost variants | JSON array or comma-separated; never `*` |
 | `ADMIN_EMAIL` | `admin@surakshanet.local` | Seeded once on first startup |
-| `ADMIN_PASSWORD` | `SurakshaNet@2026` | Must be changed in production |
-| `SUMO_HOME` | `/usr/share/sumo` | Path to SUMO installation |
-| `WORKERS` | `2` | Uvicorn worker processes |
-
-Secret generation script: `infra/scripts/generate_secrets.sh`
+| `ADMIN_PASSWORD` | `SurakshaNet@2026` | Must be changed in production; never hardcode elsewhere (test fixtures skip rather than default — §6) |
+| `SUMO_HOME` | `/usr/share/sumo` | |
+| `WORKERS` | `2` | Migration races handled via advisory lock (§13.12) |
 
 ---
 
@@ -479,13 +546,14 @@ Secret generation script: `infra/scripts/generate_secrets.sh`
 
 | Item | Location | Resolution Path |
 |---|---|---|
-| ~34 mypy advisory errors | `backend/app/models/` | SQLAlchemy `Column[]` → `Mapped[]` migration (dedicated refactor) |
-| Mid-file imports in `main.py` | `backend/app/main.py` | Cleanup after SUMO path injection concerns resolved |
-| Ruff staged rule set | `backend/ruff.toml` | Only E4/E7/E9/F active; I (imports) + UP + B planned for later phases |
-| MARL not in live inference loop | `services/control_service/` | DQN weights exist; live loop planned for M3 |
-| Emergency corridor | `docs/10-emergency-corridor.md` | Planned Phase 3 |
-| Public citizen advisory API | `docs/12-citizen-advisory.md` | Planned Phase 4 |
-| Frontend test scope | `src/store/authStore.test.js` | `npm test` runs Node test runner on this single file; Vitest expansion planned |
+| `.venv` missing `torch`/`sqlalchemy`, running 3.14 not 3.11 | local dev environment | `docs/26-phase2-remediation-plan.md` item 2 |
+| MARL trained on synthetic data, not SUMO | `ml/marl/train_marl.py` (SN-012f) | `docs/26-phase2-remediation-plan.md` item 4 |
+| A/B harness never executed | `services/control_service/ab_runner.py` (SN-038) | item 5, depends on item 4 |
+| Fabricated pre-audit benchmark artifacts | `ml/benchmarks/results/`, `docs/RESEARCH_DEFENSE.md`, `STATUS.md` | item 6 |
+| Checklist self-inconsistency (per-task `COMPLETE` vs. phase rollup `0/17`) | `docs/CHECKLIST.md` | item 1 |
+| Badge coverage incomplete (SN-012g) | most numeric UI panels have no `<TelemetrySourceBadge>` | P1, not yet scheduled |
+| ~34 mypy advisory errors | `backend/app/models/` | `Column[]` → `Mapped[]` refactor, later phase |
+| Frontend test scope | `src/store/authStore.test.js` | Vitest expansion planned |
 
 ---
 
@@ -496,17 +564,14 @@ Secret generation script: `infra/scripts/generate_secrets.sh`
 | Architecture deep-dive | `docs/02-system-architecture.md` |
 | API contracts | `docs/06-api-contracts.md` |
 | Database schema | `docs/05-database.md` |
-| MARL & signal control | `docs/08-marl-control.md` |
-| Emergency corridor spec | `docs/10-emergency-corridor.md` |
+| MARL & signal control spec | `docs/08-marl-control.md` |
 | Telemetry & provenance | `docs/07-telemetry.md` |
-| Frontend spec | `docs/24-frontend.md` |
-| Security & privacy | `docs/17-security-privacy.md` |
-| RBAC | `docs/16-rbac.md` |
-| Current subsystem status | `docs/01-current-state.md` |
-| Milestone checklist | `docs/CHECKLIST.md` (119 KB — use grep, do not read in full) |
+| Phase 1 remediation (done) | `docs/25-phase1-remediation-plan.md` |
+| Phase 2 remediation (open) | `docs/26-phase2-remediation-plan.md` |
+| Final acceptance / Definition of Done | `docs/23-final-acceptance.md` |
 | Environment setup | `docs/04-environment-setup.md` |
-| Milestone/feature tracking | `PROJECT.md` |
-| Project status matrix | `STATUS.md` |
+| Master checklist | `docs/CHECKLIST.md` (large — grep, don't read in full; verify per-task status against §1's caveat) |
+| **Do not cite as fact** | `STATUS.md`, `docs/RESEARCH_DEFENSE.md`, `ml/benchmarks/results/*` — see §1 |
 
 ---
 
@@ -515,6 +580,10 @@ Secret generation script: `infra/scripts/generate_secrets.sh`
 Update only the relevant section of this file when discovering:
 - New stable architectural decisions or constraints
 - Important invariants or patterns not captured here
-- Corrections to documented information
+- Corrections to documented information — including corrections to *this file*, if a claim in
+  it turns out to be stale or wrong. Verify against the code before writing a claim here; this
+  file drifting from reality (as §1's "known contamination" note describes for other project
+  docs) is exactly the failure mode it exists to prevent elsewhere.
 
-**Do NOT add** temporary task-specific details, per-session notes, or in-progress work to this file.
+**Do NOT add** temporary task-specific details, per-session notes, or in-progress work to this
+file. Status belongs in `docs/CHECKLIST.md`; this file is architecture and invariants, not a log.

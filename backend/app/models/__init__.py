@@ -4,6 +4,7 @@ from app.models.junction import Junction, TrafficSensor, SensorType, ApproachDir
 from app.models.traffic import TrafficReading
 from app.models.signal import SignalPlan, SignalMode
 from app.models.alert import Alert, EmergencyEvent, AlertType, AlertSeverity, EmergencyPriority, EmergencyVehicleType, EmergencyStatus
+from app.models.control import ControlDecision, ABRun
 
 __all__ = [
     "Base",
@@ -23,4 +24,6 @@ __all__ = [
     "EmergencyPriority",
     "EmergencyVehicleType",
     "EmergencyStatus",
+    "ControlDecision",
+    "ABRun",
 ]

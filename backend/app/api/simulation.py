@@ -9,8 +9,10 @@ from pydantic import BaseModel, Field
 try:
     from simulation.sumo_env import SumoEnvironment
     from simulation.scenarios.demand_profiles import get_profile
+    from shared.paths import resolve_repo_path
 except ImportError:
     SumoEnvironment = None
+    resolve_repo_path = None
     def get_profile(name): return {}
 
 logger = logging.getLogger(__name__)
@@ -123,9 +125,20 @@ async def start_simulation(req: StartSimulationRequest):
             )
 
         try:
+            NET_DIR_PARTS = ("simulation", "networks")
+            if resolve_repo_path:
+                net_path = resolve_repo_path(*NET_DIR_PARTS, req.net_file) or req.net_file
+                route_path = resolve_repo_path(*NET_DIR_PARTS, req.route_file) or req.route_file
+                det_path = resolve_repo_path(*NET_DIR_PARTS, "corridor.det.xml")
+            else:
+                net_path = req.net_file
+                route_path = req.route_file
+                det_path = None
+
             sim_instance = SumoEnvironment(
-                net_file=req.net_file,
-                route_file=req.route_file,
+                net_file=net_path,
+                route_file=route_path,
+                additional_files=[det_path] if det_path else None,
                 gui=False
             )
             sim_instance.start()

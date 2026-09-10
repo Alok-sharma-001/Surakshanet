@@ -1,4 +1,5 @@
 from typing import AsyncGenerator
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
 from app.config import get_settings
@@ -19,6 +20,7 @@ async_session_maker = async_sessionmaker(
     autocommit=False,
     autoflush=False,
 )
+async_session_factory = async_session_maker
 
 Base = declarative_base()
 
@@ -52,16 +54,35 @@ def run_alembic_migrations() -> None:
         logger.warning(f"alembic.ini not found at {alembic_ini_path}")
 
 
+_MIGRATION_LOCK_KEY = 875_501_001  # arbitrary, unique to this app
+
+
+async def _run_migrations_once() -> None:
+    """Guard alembic upgrade head with a Postgres advisory lock so multiple
+    uvicorn workers booting concurrently don't race on the same migration —
+    that race was previously masked by swallowing every exception here."""
+    async with engine.connect() as conn:
+        got_lock = (await conn.execute(
+            text("SELECT pg_try_advisory_lock(:k)"), {"k": _MIGRATION_LOCK_KEY}
+        )).scalar()
+        if not got_lock:
+            logger.info("Another worker is running migrations; skipping.")
+            return
+        try:
+            await asyncio.to_thread(run_alembic_migrations)
+        finally:
+            await conn.execute(
+                text("SELECT pg_advisory_unlock(:k)"), {"k": _MIGRATION_LOCK_KEY}
+            )
+
+
 async def init_db() -> None:
     """Initialize the database by executing Alembic migrations and seeding default admin."""
     if "sqlite" in settings.DATABASE_URL:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
     else:
-        try:
-            await asyncio.to_thread(run_alembic_migrations)
-        except Exception as e:
-            logger.info(f"Alembic migration already applied or handled: {e}")
+        await _run_migrations_once()
 
     # Seed default admin user
     try:

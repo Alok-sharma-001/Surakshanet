@@ -15,6 +15,7 @@ from app.models.signal import SignalPlan, SignalMode
 from app.models.junction import Junction
 from app.services.auth_service import get_optional_current_user
 from app.models.user import User
+from shared.constants import REDIS_CHANNELS
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -158,7 +159,7 @@ async def update_signal_mode(
             "mode": new_mode.value,
             "timestamp": datetime.utcnow().isoformat()
         }
-        await redis.publish("signal_events", json.dumps(event))
+        await redis.publish(REDIS_CHANNELS["signals"], json.dumps(event))
         await redis.aclose()
     except Exception as e:
         logger.warning(f"Could not publish signal mode to Redis: {e}")
@@ -198,7 +199,7 @@ async def override_signal_phase(
 
     try:
         redis = aioredis.from_url(settings.REDIS_URL)
-        await redis.publish("signal_events", json.dumps(event_payload))
+        await redis.publish(REDIS_CHANNELS["signals"], json.dumps(event_payload))
         await redis.aclose()
     except Exception as e:
         logger.warning(f"Could not publish signal override to Redis: {e}")

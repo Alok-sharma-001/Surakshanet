@@ -48,10 +48,11 @@ services:
     networks:
       - surakshanet-network
     healthcheck:
-      test: ["CMD-SHELL", "timeout 2 mosquitto_sub -t '$$SYS/broker/version' -C 1 || exit 0"]
-      interval: 10s
+      test: ["CMD-SHELL", "timeout 2 mosquitto_sub -t '$$SYS/broker/version' -C 1"]
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 5s
 
 networks:
   surakshanet-network:

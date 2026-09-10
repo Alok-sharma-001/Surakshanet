@@ -249,15 +249,19 @@ fi
 report_step "8" "Verify all services"
 
 sleep 3
-DEEP_HEALTH=$(curl -s http://127.0.0.1:8000/health/deep 2>/dev/null || echo '{"status":"error"}')
-if [[ -z "$DEEP_HEALTH" ]] || [[ "$DEEP_HEALTH" == '{"status":"error"}' ]]; then
+DEEP_HEALTH_FILE="$(mktemp)"
+curl -s http://127.0.0.1:8000/health/deep > "$DEEP_HEALTH_FILE" 2>/dev/null || echo '{"status":"error"}' > "$DEEP_HEALTH_FILE"
+
+if [[ ! -s "$DEEP_HEALTH_FILE" ]] || grep -q '{"status":"error"}' "$DEEP_HEALTH_FILE"; then
+    rm -f "$DEEP_HEALTH_FILE"
     report_failure "8" "Verify all services" "empty response from /health/deep" "backend did not respond" "docs/04-environment-setup.md §6"
 fi
 
 HEALTH_ERR=$($PYTHON_BIN -c "
 import sys, json
 try:
-    data = json.loads('''$DEEP_HEALTH''')
+    with open('$DEEP_HEALTH_FILE') as f:
+        data = json.load(f)
     deps = data.get('dependencies', {})
     required = ['postgres', 'redis', 'mqtt', 'sumo', 'traci', 'control_service', 'marl_weights', 'forecast_weights']
     for req in required:
@@ -271,8 +275,10 @@ except Exception as e:
     print(f'Failed to parse /health/deep response: {e}')
     sys.exit(1)
 " 2>&1) || {
+    rm -f "$DEEP_HEALTH_FILE"
     report_failure "8" "Verify all services" "one or more services unhealthy in /health/deep" "$HEALTH_ERR" "docs/04-environment-setup.md §6"
 }
+rm -f "$DEEP_HEALTH_FILE"
 report_step_ok
 
 # ==============================================================================

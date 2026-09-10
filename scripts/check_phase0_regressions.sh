@@ -139,9 +139,35 @@ check "SN-009 provenance badge does not default to a measured source" \
   bash -c "grep -n \"source = 'mqtt'\|config\\[normSource\\] || config\\.\" \
     frontend/dashboard/src/components/TelemetrySourceBadge.tsx"
 
+# --- Phase 1 remediation guards --------------------------------------------
+
+check "no SystemExit in sumo_env.py's traci import" \
+  bash -c 'grep -n "raise SystemExit" simulation/sumo_env.py'
+
+check "no duplicated traci candidate_paths outside shared/" \
+  bash -c 'grep -rln "candidate_paths = \[" backend/ simulation/ services/ | grep -v shared/'
+
+check "/health returns healthy, not ok" \
+  bash -c '! grep -q "\"status\": \"healthy\"" backend/app/api/health.py && echo "FAIL"'
+
+check "no bare except Exception around alembic migration" \
+  bash -c 'grep -A 5 -B 5 "run_alembic_migrations" backend/app/database.py | grep "except Exception"'
+
+check "simulation start passes additional_files" \
+  bash -c '! grep -q "additional_files" backend/app/api/simulation.py && echo "FAIL"'
+
+check "no blocking socket.connect in health_deep" \
+  bash -c 'grep -n "s\.connect(" backend/app/api/health.py'
+
+check "no unconditional exit 0 in mosquitto healthcheck" \
+  bash -c 'grep -n "mosquitto_sub.*exit 0" infra/docker-compose*.yml'
+
+check "start.sh does not splice JSON into a python literal" \
+  bash -c 'grep -n "json.loads(.\x27\x27\x27\\\$DEEP_HEALTH" start.sh'
+
 echo
 if [ "$failed" -ne 0 ]; then
-  echo "Phase 0 regression detected. See docs/23-final-acceptance.md §3."
+  echo "Phase 0/1 regression detected. See docs/23-final-acceptance.md §3."
   exit 1
 fi
-echo "All Phase 0 deletions hold."
+echo "All Phase 0 and Phase 1 guards pass."

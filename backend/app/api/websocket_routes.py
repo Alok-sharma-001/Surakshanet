@@ -40,6 +40,11 @@ async def training_ws(websocket: WebSocket):
     await handle_websocket(websocket, 'training')
 
 
+@ws_router.websocket('/ws/control')
+async def control_ws(websocket: WebSocket):
+    await handle_websocket(websocket, 'control')
+
+
 @ws_router.websocket('/api/v1/ws')
 async def root_ws(websocket: WebSocket):
     await handle_websocket(websocket, 'default')

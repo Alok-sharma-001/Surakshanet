@@ -51,11 +51,11 @@ services:
     networks:
       - surakshanet-network
     healthcheck:
-      test: ["CMD-SHELL", "timeout 2 mosquitto_sub -t '$$SYS/broker/version' -C 1 || exit 0"]
+      test: ["CMD-SHELL", "timeout 2 mosquitto_sub -t '$$SYS/broker/version' -C 1"]
       interval: 5s
       timeout: 5s
       retries: 10
-      start_period: 2s
+      start_period: 5s
 
   backend:
     image: surakshanet/surakshanet-backend:latest
@@ -73,6 +73,7 @@ services:
       - ../ml:/app/ml
       - ../simulation:/app/simulation
       - ../services:/app/services
+      - ../tests:/app/tests
     environment:
       - ENVIRONMENT=demo
       - DATABASE_URL=postgresql+asyncpg://surakshanet:surakshanet_dev@timescaledb:5432/surakshanet

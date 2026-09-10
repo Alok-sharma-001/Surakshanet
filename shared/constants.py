@@ -14,6 +14,21 @@ class DataSource(str, enum.Enum):
 # SN-014: Deterministic seed for reproducible simulation and A/B evaluation
 DEMO_SEED: int = 42
 
+# SN-026: Single-source Redis channel names across all producers and subscribers
+REDIS_CHANNELS: Dict[str, str] = {
+    "traffic": "traffic_updates",
+    "signals": "signal_events",
+    "alerts": "alert_events",
+    "emergency": "emergency_events",
+    "simulation": "simulation_updates",
+    "control_commands": "control_commands",     # control service → bridge
+    "control_decisions": "control_decisions",    # control service → API/UI
+    "incidents": "incident_events",
+    "events": "event_events",
+    "advisories": "advisory_events",
+    "cv_detections": "cv_detections",
+}
+
 
 
 PCU_FACTORS: Dict[str, float] = {

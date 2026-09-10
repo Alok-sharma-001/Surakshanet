@@ -27,7 +27,7 @@ Every packet, WebSocket frame, and database reading in Surakshanet is strictly t
 | :--- | :--- | :--- | :--- | :--- |
 | **Spatial Junction Master** | PostgreSQL 15 + PostGIS (`ST_DWithin`, `ST_MakeEnvelope`) | In-memory spatial radius | **PRODUCTION-READY** | Consolidated under `timescale/timescaledb-ha:pg15` with GiST spatial indexing. |
 | **Sensor Telemetry Storage** | TimescaleDB Hypertables (7-day chunk partition) | Plain relational table | **PRODUCTION-READY** | Hypertable compression enabled with automated retention policies. |
-| **Adaptive Signal Control** | Multi-Agent Reinforcement Learning (DQN, 18-link corridor) | Webster Fixed-Time Signal Plan (18-char phase) | **RESEARCH-GRADE** | Demonstrates **18.38% delay reduction** and **22.92% queue reduction** over Webster baseline. |
+| **Adaptive Signal Control** | Multi-Agent Reinforcement Learning (DQN, 18-link corridor) | Webster Fixed-Time Signal Plan (18-char phase) | **RESEARCH-GRADE** | Dynamic multi-agent control evaluated against Webster fixed-time baseline via live `ab_runs` harness. |
 | **Emergency Preemption** | Dynamic Topology Green-Wave Engine | Manual Phase Hold Override | **PRODUCTION-READY** | Derives arterial approach phase from PostGIS junction coordinates. |
 | **Real-Time Streaming** | Redis Pub/Sub multi-worker fanout to WebSockets | Local in-process broadcast | **PRODUCTION-READY** | Stateless API workers with automatic exponential backoff reconnection. |
 | **Traffic Forecasting** | Bi-directional LSTM with attention | Rolling-average trend model | **FUNCTIONAL** | Model weights lazy-loaded on first inference; supports historical readings. |
@@ -38,5 +38,5 @@ Every packet, WebSocket frame, and database reading in Surakshanet is strictly t
 
 ## Known Operational Boundaries
 
-1. **SUMO TraCI Runtime:** Requires `sumo` binaries installed on host or container. When running in lightweight cloud environments without GUI/SUMO binaries, the stack automatically transitions to the internal `MicroSimRunner` and tags events as `source: "sim"`.
-2. **Camera RTSP Streams:** In the absence of live RTSP camera feeds on local dev networks, simulated frame generators emulate 30 FPS traffic streams tagged as `source: "sim"`.
+1. **SUMO TraCI Runtime:** Requires `sumo` binaries installed on host or container. When SUMO is offline or uninstalled, simulation endpoints return `503 simulation_unavailable` honestly; no mock runner exists.
+2. **Camera RTSP Streams:** When camera feeds or model weights are offline, vision endpoints return `503 vision_unavailable` honestly; no synthetic detections or derived speeds are emitted.

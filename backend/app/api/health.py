@@ -1,7 +1,7 @@
 import os
 import sys
 import time
-import socket
+import asyncio
 from datetime import datetime, timezone
 from fastapi import APIRouter
 from sqlalchemy import text
@@ -9,16 +9,25 @@ import redis.asyncio as aioredis
 
 from app.config import get_settings
 from app.database import async_session_maker
+from shared.paths import find_existing
 
 settings = get_settings()
 router = APIRouter()
+
+
+async def _check_mqtt_port(host: str, port: int, timeout: float = 1.0) -> None:
+    reader, writer = await asyncio.wait_for(
+        asyncio.open_connection(host, port), timeout=timeout
+    )
+    writer.close()
+    await writer.wait_closed()
 
 
 @router.get("/health")
 async def health():
     """Liveness probe returning minimal status and application version."""
     return {
-        "status": "ok",
+        "status": "healthy",
         "version": settings.APP_VERSION,
     }
 
@@ -62,10 +71,7 @@ async def health_deep():
         if mqtt_consumer.client and mqtt_consumer.client.is_connected():
             dependencies["mqtt"] = {"status": "ok"}
         else:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(1.0)
-            s.connect((settings.MQTT_BROKER_HOST, settings.MQTT_BROKER_PORT))
-            s.close()
+            await _check_mqtt_port(settings.MQTT_BROKER_HOST, settings.MQTT_BROKER_PORT)
             dependencies["mqtt"] = {"status": "ok"}
     except Exception as e:
         dependencies["mqtt"] = {"status": "error", "error": f"mqtt broker unreachable: {e}"}
@@ -149,16 +155,12 @@ async def health_deep():
 
     # 8. MARL Weights
     marl_rel_path = "ml/marl/weights/marl_policy_downtown.pth"
-    marl_found = False
-    for candidate in [
+    marl_found = find_existing([
         marl_rel_path,
         os.path.join(os.getcwd(), marl_rel_path),
         os.path.join(os.path.dirname(__file__), "../../../", marl_rel_path),
         f"/app/{marl_rel_path}",
-    ]:
-        if os.path.exists(candidate):
-            marl_found = True
-            break
+    ])
     if marl_found:
         dependencies["marl_weights"] = {"status": "ok", "path": marl_rel_path}
     else:
@@ -166,16 +168,12 @@ async def health_deep():
 
     # 9. Forecast Weights
     fc_rel_path = "ml/forecasting/weights/xgb_models.pkl"
-    fc_found = False
-    for candidate in [
+    fc_found = find_existing([
         fc_rel_path,
         os.path.join(os.getcwd(), fc_rel_path),
         os.path.join(os.path.dirname(__file__), "../../../", fc_rel_path),
         f"/app/{fc_rel_path}",
-    ]:
-        if os.path.exists(candidate):
-            fc_found = True
-            break
+    ])
     if fc_found:
         dependencies["forecast_weights"] = {"status": "ok", "training_data": "synthetic"}
     else:

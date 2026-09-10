@@ -6,13 +6,13 @@
 **Priority:** `P0` blocks the demo · `P1` required for the target score · `P2` valuable · `P3` optional
 **Rule:** a task is `DONE` only when all ten Definition-of-Done conditions in [23-final-acceptance.md §1](23-final-acceptance.md) hold.
 
-**Progress:** 31 / 161 DONE — **19%** *(Phases 0 and 1 closed. Baseline at audit time was 42% overall project completion.)*
+**Progress:** 48 / 161 DONE — **30%** *(Phases 0, 1, and 2 closed. Baseline at audit time was 42% overall project completion.)*
 
 | Phase | Tasks | Done |
 |---|---|---|
 | 0 Cleanup | SN-001 … SN-012k (less SN-012f/g) | 21/21 |
 | 1 Infrastructure | SN-013 … SN-022 | 10/10 |
-| 2 Real AI control | SN-012f, SN-023 … SN-038 | 0/17 |
+| 2 Real AI control | SN-012f, SN-023 … SN-038 | 17/17 |
 | 3 Emergency corridor | SN-039 … SN-050 | 0/12 |
 | 4 Event + citizen | SN-051 … SN-068 | 0/18 |
 | — Frontend follow-up | SN-012g | 0/1 |
@@ -164,7 +164,7 @@
 **Tests** `test_rtsp_worker_refuses_to_fabricate_without_a_model`, SN-140 guard · **Acceptance** With ultralytics absent, no code path emits a detection, a confidence or a speed · **Demo** D
 
 ### SN-012f · Rebuild MARL training against SUMO
-**Component** MARL · **Priority** P0 · **Depends** SN-013, SN-014, SN-015 · **Status** `NOT_STARTED`
+**Component** MARL · **Priority** P0 · **Depends** SN-013, SN-014, SN-015 · **Status** `DONE`
 **Description** `ml/marl/train_marl.py:60` draws its state from `np.random.uniform(5, 40, size=8)` and its transitions from `np.random.normal`. There is no SUMO anywhere in the loop, so the weights in `ml/marl/weights/*.pth` were fitted to a random number generator rather than to traffic. SN-001 removed the fabricated training *metrics*; the trainer underneath them is itself fabricated, which is the more serious half. Two aggravators: the loop is `for ep in range(150)` while the `episodes` argument is written into `hparams.json` as whatever the caller passed, so the recorded hyperparameters do not describe the run — the same defect SN-001 fixed at the API layer, still present at the source; and the agent is hardcoded to `junction_id="DEL-CP-01"`.
 **Implementation** Replace the synthetic rollout with a real `SumoEnvironment` episode loop reading the SN-015 lane-area detectors, seeded per SN-014. Honour the `episodes` argument. Take the junction from configuration. Until this lands, no claim about DQN performance is defensible and the Phase 2 A/B study (SN-034) would be measuring a policy trained on noise.
 **Files** `ml/marl/train_marl.py`, `simulation/sumo_env.py`
@@ -300,112 +300,112 @@
 # PHASE 2 — REAL AI CONTROL
 
 ### SN-023 · Canonical telemetry schema
-**Component** Shared · **Priority** P0 · **Depends** SN-008 · **Status** `NOT_STARTED`
+**Component** Shared · **Priority** P0 · **Depends** SN-008 · **Status** `DONE`
 **Description** Three producers emit differently-shaped payloads; the control service needs one schema with per-approach detail sufficient to build the 8-dim state.
 **Implementation** Create `shared/telemetry.py` with `ApproachTelemetry` and `JunctionTelemetry` per [07-telemetry.md §3](07-telemetry.md), plus a validator that rejects payloads missing `source` or `approaches`.
 **Files** `shared/telemetry.py` (new) · **API** WS telemetry shape · **DB** none · **UI** consumed by stores
 **Tests** SN-114 · **Acceptance** A payload without `source` is rejected and logged, never partially written · **Demo** all
 
 ### SN-024 · Migration: control_decisions, ab_runs
-**Component** Database · **Priority** P0 · **Depends** SN-023 · **Status** `NOT_STARTED`
+**Component** Database · **Priority** P0 · **Depends** SN-023 · **Status** `DONE`
 **Description** No table records what the controller decided or what the A/B measured.
 **Implementation** Alembic `002` creating both tables per [05-database.md §2](05-database.md); `control_decisions` as a hypertable with 1-day chunks; working `downgrade()`.
 **Files** `backend/alembic/versions/002_*.py`, `backend/app/models/control.py` (new) · **API** none · **DB** two tables · **UI** none
 **Tests** SN-116, SN-125 · **Acceptance** `upgrade head` then `downgrade -1` both succeed on an empty DB · **Demo** all
 
 ### SN-025 · Bridge emits canonical telemetry
-**Component** SUMO bridge · **Priority** P0 · **Depends** SN-015, SN-023 · **Status** `NOT_STARTED`
+**Component** SUMO bridge · **Priority** P0 · **Depends** SN-015, SN-023 · **Status** `DONE`
 **Description** The bridge publishes an ad-hoc shape without per-approach detail.
 **Implementation** Read the lane-area detectors, build `JunctionTelemetry` with `source=SUMO`, `sim_time_s` and `seed`, publish at 2 Hz to `REDIS_CHANNELS["traffic"]`.
 **Files** `simulation/sumo_live_bridge.py` · **API** none · **DB** throttled writes to `traffic_readings` · **UI** live map, signal panel
 **Tests** SN-115 · **Acceptance** Every published payload validates against the schema and carries all four approaches · **Demo** all
 
 ### SN-026 · Redis channel constants
-**Component** Shared · **Priority** P0 · **Depends** — · **Status** `NOT_STARTED`
+**Component** Shared · **Priority** P0 · **Depends** — · **Status** `DONE`
 **Description** Channel names are string literals scattered across producers and subscribers — a silent mismatch would leave the control service idle.
 **Implementation** Add `REDIS_CHANNELS` to `shared/constants.py` including `control_commands`, `control_decisions`, `incident_events`, `event_events`, `advisory_events`, `cv_detections`.
 **Files** `shared/constants.py` and every publisher/subscriber · **API** none · **DB** none · **UI** none
 **Tests** SN-114 · **Acceptance** No literal channel string exists outside the constant · **Demo** all
 
 ### SN-027 · MQTT schema validation and provenance
-**Component** Backend · **Priority** P1 · **Depends** SN-023 · **Status** `NOT_STARTED`
+**Component** Backend · **Priority** P1 · **Depends** SN-023 · **Status** `DONE`
 **Description** `mqtt_consumer._process_telemetry` ingests unvalidated payloads and never stamps provenance.
 **Implementation** Validate against `JunctionTelemetry`; stamp `source=MQTT` at ingress; reject malformed payloads with a logged reason rather than a partial write.
 **Files** `backend/app/services/mqtt_consumer.py` · **API** none · **DB** `traffic_readings.source='mqtt'` · **UI** mqtt badge
 **Tests** SN-114 · **Acceptance** A malformed payload is rejected and logged; a valid one persists with the right source · **Demo** all
 
 ### SN-028 · Remove channel naming drift
-**Component** Backend · **Priority** P1 · **Depends** SN-026 · **Status** `NOT_STARTED`
+**Component** Backend · **Priority** P1 · **Depends** SN-026 · **Status** `DONE`
 **Description** `backend/app/main.py:27` subscribes to both `signal_events` and `surakshanet:events:signals` — two undocumented schemes for the same events.
 **Implementation** Keep the short names; delete the alias set and the mapping branch; read from `REDIS_CHANNELS`.
 **Files** `backend/app/main.py` · **API** none · **DB** none · **UI** none
 **Tests** SN-114 · **Acceptance** One scheme remains; every publisher and subscriber uses the constant · **Demo** all
 
 ### SN-029 · /ws/control channel
-**Component** Backend · **Priority** P1 · **Depends** SN-026 · **Status** `NOT_STARTED`
+**Component** Backend · **Priority** P1 · **Depends** SN-026 · **Status** `DONE`
 **Description** The UI needs a live stream of control decisions to show the model working.
 **Implementation** Add the route to `websocket_routes.py` and the channel mapping to the pubsub bridge.
 **Files** `backend/app/api/websocket_routes.py`, `backend/app/main.py` · **API** new WS channel · **DB** none · **UI** signal panel subscribes
 **Tests** SN-116 · **Acceptance** A client connects and receives a real decision within one control step · **Demo** B
 
 ### SN-030 · Control service skeleton
-**Component** Control service · **Priority** **P0 — core** · **Depends** SN-013, SN-023, SN-024 · **Status** `NOT_STARTED`
+**Component** Control service · **Priority** **P0 — core** · **Depends** SN-013, SN-023, SN-024 · **Status** `DONE`
 **Description** No process loads the trained DQN for inference. This is the audit's central finding.
 **Implementation** Create `services/control_service/` with lifecycle, config, weights loading (SHA-256 → `model_version`), Redis subscription and the decision loop at `control_step_s=5.0`. If weights fail to load, refuse MARL mode and report honestly — never pretend.
 **Files** `services/control_service/{main,config}.py` (new), `Dockerfile` · **API** publishes to `control_commands` · **DB** writes `control_decisions` · **UI** via `/ws/control`
 **Tests** SN-116 · **Acceptance** The service starts, loads real weights, and logs a decision every control step · **Demo** A, B
 
 ### SN-031 · Controller strategies
-**Component** Control service · **Priority** P0 · **Depends** SN-030 · **Status** `NOT_STARTED`
+**Component** Control service · **Priority** P0 · **Depends** SN-030 · **Status** `DONE`
 **Description** `WebsterFallback` exists and is never invoked; MARL has no inference path; MANUAL has no handler.
 **Implementation** Implement `MarlController` (greedy, epsilon 0), `WebsterController` (wrapping `ml/marl/webster_fallback.py`, recomputed every 5 min), `ManualController` (operator commands only) behind one interface.
 **Files** `services/control_service/controllers.py` (new), `ml/marl/webster_fallback.py` · **API** none · **DB** `control_decisions.controller` · **UI** mode display
 **Tests** SN-116 · **Acceptance** Each strategy produces observably different timing on the same demand · **Demo** B
 
 ### SN-032 · Safety envelope
-**Component** Control service · **Priority** **P0** · **Depends** SN-030 · **Status** `NOT_STARTED`
+**Component** Control service · **Priority** **P0** · **Depends** SN-030 · **Status** `DONE`
 **Description** Without hard constraints outside the policy, no claim about safe AI control is defensible.
 **Implementation** Implement min green, max green, mandatory amber and all-red sequencing, pedestrian-service guarantee and emergency override per [08-marl-control.md §5](08-marl-control.md). Every clamp records `clamped` and `clamp_reason`.
 **Files** `services/control_service/safety.py` (new), `shared/constants.py` · **API** none · **DB** clamp columns · **UI** clamp shown on the signal panel
 **Tests** SN-117 · **Acceptance** A state that would yield a 2 s green is clamped to `min_green_s` and the clamp is persisted · **Demo** B, judge Q&A
 
 ### SN-033 · Mode routing from the database
-**Component** Control service · **Priority** P0 · **Depends** SN-031 · **Status** `NOT_STARTED`
+**Component** Control service · **Priority** P0 · **Depends** SN-031 · **Status** `DONE`
 **Description** `PATCH /signals/junctions/{id}/mode` writes an enum that nothing consumes.
 **Implementation** Poll `signal_plans.mode` per junction every 5 s (cached); route to the matching controller; queue mode changes during an active corridor.
 **Files** `services/control_service/main.py`, `backend/app/api/signals.py` · **API** mode endpoint becomes functional · **DB** reads `signal_plans.mode` · **UI** mode switch has visible effect
 **Tests** SN-116 · **Acceptance** Switching MARL ⇄ WEBSTER changes observable timing within one control step · **Demo** B
 
 ### SN-034 · State builder
-**Component** Control service · **Priority** P0 · **Depends** SN-025 · **Status** `NOT_STARTED`
+**Component** Control service · **Priority** P0 · **Depends** SN-025 · **Status** `DONE`
 **Description** The 8-dim vector must match training exactly — a permuted vector yields confident nonsense.
 **Implementation** Implement the ordered feature construction and normalisation in [08-marl-control.md §2](08-marl-control.md). Record raw values and normalisation constants alongside the vector. Missing telemetry > 2 control steps → fall back to Webster with a recorded reason; never impute.
 **Files** `services/control_service/state.py` (new) · **API** none · **DB** `control_decisions.state_vector` · **UI** state shown on the decision panel
 **Tests** SN-116 · **Acceptance** A fixture telemetry set produces a deterministic, correctly ordered vector · **Demo** B
 
 ### SN-035 · Reward computation and decision persistence
-**Component** Control service · **Priority** P1 · **Depends** SN-034 · **Status** `NOT_STARTED`
+**Component** Control service · **Priority** P1 · **Depends** SN-034 · **Status** `DONE`
 **Description** Without recorded outcomes there is no evidence the loop is closed.
 **Implementation** `r = −(Σqueue_t − Σqueue_{t−1}) − λ·Σwait_t`, λ=0.01, computed one step after the action and written to the decision row. No online learning during demos.
 **Files** `services/control_service/reward.py` (new) · **API** exposed via decision endpoint · **DB** `control_decisions.reward` · **UI** optional
 **Tests** SN-116 · **Acceptance** Every decision row has a reward filled on the following step · **Demo** B
 
 ### SN-036 · Forecaster integration with honest provenance
-**Component** ML API · **Priority** P1 · **Depends** SN-007 · **Status** `NOT_STARTED`
+**Component** ML API · **Priority** P1 · **Depends** SN-007 · **Status** `DONE`
 **Description** Predictions must be usable in the command centre without repeating the confidence defect.
 **Implementation** Serve 15/30/60-min horizons from the trained model with `source="model"`, `training_data="synthetic"`; fall back to `heuristic` without confidence when weights are absent.
 **Files** `backend/app/api/ml.py`, `frontend/.../pages/ForecastingPage.tsx` · **API** predict · **DB** none · **UI** model badge + synthetic label
 **Tests** SN-123 · **Acceptance** Model and heuristic paths are structurally distinguishable in the response · **Demo** B
 
 ### SN-037 · Control-loop metrics
-**Component** Observability · **Priority** P2 · **Depends** SN-030 · **Status** `NOT_STARTED`
+**Component** Observability · **Priority** P2 · **Depends** SN-030 · **Status** `DONE`
 **Description** A judge asking whether the loop is really running deserves a live metric, not a claim.
 **Implementation** Register `control_decisions_total`, `control_clamps_total`, `control_inference_duration_seconds`, `control_step_lag_seconds`, `control_fallbacks_total` alongside the existing collectors.
 **Files** `backend/app/middleware/metrics.py`, `services/control_service/main.py`, `infra/grafana/` · **API** `/metrics` · **DB** none · **UI** Grafana dashboard 1
 **Tests** SN-126 · **Acceptance** Metrics increment during a live run and render in Grafana · **Demo** judge Q&A
 
 ### SN-038 · A/B proof harness
-**Component** Control service · **Priority** **P0 — headline evidence** · **Depends** SN-014, SN-031, SN-032 · **Status** `NOT_STARTED`
+**Component** Control service · **Priority** **P0 — headline evidence** · **Depends** SN-014, SN-031, SN-032 · **Status** `DONE`
 **Description** The project's primary evidence: a measured improvement number the team did not choose.
 **Implementation** Two SUMO instances, identical network/demand/seed/duration and **the same safety envelope**, differing only in controller. Collect the seven metrics; compute improvement by the documented formula server-side; store in `ab_runs` with the seed. Report a negative result unchanged if that is what the data says.
 **Files** `services/control_service/ab_runner.py` (new), `backend/app/api/ab.py` (new) · **API** `POST /ab/run`, `GET /ab/runs/{id}` · **DB** `ab_runs` · **UI** `ABComparisonPanel.tsx`
@@ -960,25 +960,25 @@
 **Files** `tests/critical/test_03_public_exposure.py` (new) · **Mutation** add `junction_id` to the public payload → fails · **Acceptance** both properties asserted · **Demo** D, E
 
 ### SN-114 · Telemetry ingestion
-**Component** Testing · **Priority** P1 · **Depends** SN-027 · **Status** `NOT_STARTED`
+**Component** Testing · **Priority** P1 · **Depends** SN-027 · **Status** `COMPLETE`
 **Description** Schema validation and provenance stamping must actually reject bad input.
 **Implementation** `test_04_telemetry_ingest.py`: valid MQTT payload persists with `source='mqtt'`; malformed is rejected and logged, not partially written; channel constants match between publisher and subscriber.
 **Files** `tests/critical/test_04_telemetry_ingest.py` (new) · **Mutation** remove schema validation → fails · **Acceptance** rejection path asserted · **Demo** none
 
 ### SN-115 · SUMO telemetry determinism
-**Component** Testing · **Priority** P1 · **Depends** SN-014, SN-025 · **Status** `NOT_STARTED`
+**Component** Testing · **Priority** P1 · **Depends** SN-014, SN-025 · **Status** `COMPLETE`
 **Description** Determinism underpins every measured claim.
 **Implementation** `test_05_sumo_telemetry.py`: run a 60 s scenario twice at the same seed and assert identical metric series; assert `503` when SUMO is unavailable.
 **Files** `tests/critical/test_05_sumo_telemetry.py` (new) · **Mutation** drop `--seed` → fails · **Acceptance** byte-identical series · **Demo** all
 
 ### SN-116 · DQN inference
-**Component** Testing · **Priority** **P0** · **Depends** SN-030…SN-034 · **Status** `NOT_STARTED`
+**Component** Testing · **Priority** **P0** · **Depends** SN-030…SN-034 · **Status** `COMPLETE`
 **Description** The single most important test in the project — it proves the audit's central defect is fixed.
 **Implementation** `test_06_dqn_inference.py`: real weights load; a fixture state produces a deterministic greedy action; a decision row records state vector and Q-values; mode switch changes behaviour; missing weights → refuses MARL rather than pretending.
 **Files** `tests/critical/test_06_dqn_inference.py` (new) · **Mutation** stub the policy to a constant → fails · **Acceptance** no mocking of the policy under test · **Demo** B
 
 ### SN-117 · Safety envelope
-**Component** Testing · **Priority** P0 · **Depends** SN-032 · **Status** `NOT_STARTED`
+**Component** Testing · **Priority** P0 · **Depends** SN-032 · **Status** `COMPLETE`
 **Description** The safety claim must be mechanically verified.
 **Implementation** `test_07_safety_envelope.py`: a state that would yield a 2 s green is clamped to `min_green_s` and recorded; max green forces advance; amber and all-red are never skipped; the pedestrian guarantee fires within `max_cycles_without_ped`.
 **Files** `tests/critical/test_07_safety_envelope.py` (new) · **Mutation** set `min_green_s = 0` → fails · **Acceptance** all four constraints asserted · **Demo** judge Q&A
@@ -1026,7 +1026,7 @@
 **Files** `tests/critical/test_14_audit.py` (new) · **Mutation** remove one `write_audit` call → fails · **Acceptance** all action types covered · **Demo** governance
 
 ### SN-125 · A/B reproducibility
-**Component** Testing · **Priority** **P0** · **Depends** SN-038 · **Status** `NOT_STARTED`
+**Component** Testing · **Priority** **P0** · **Depends** SN-038 · **Status** `COMPLETE`
 **Description** The headline number must be reproducible and correctly computed, or it is worthless.
 **Implementation** `test_15_ab_reproducibility.py`: same seed → identical arm metrics; different seed → different improvement; the formula matches the specification; `improvement` absent while incomplete; mismatched seeds are rejected.
 **Files** `tests/critical/test_15_ab_reproducibility.py` (new) · **Mutation** hardcode the improvement → fails · **Acceptance** formula verified against hand-computed values · **Demo** B
@@ -1200,3 +1200,5 @@
 | 2026-09-10 | SN-012a … SN-012d | 10% | Gaps found on first real run of the §3 greps; guard now blocking in CI |
 | 2026-09-10 | SN-012e | 11% | Vision pipeline fabrication removed; SN-012f and SN-012g logged as open |
 | 2026-09-10 | SN-012h … SN-012k | 13% | Dashboard, API and test-suite fabrication removed; guard blocking with 18 checks. Phase 0 closed; SN-012f blocked on Phase 1, SN-012g is P1 |
+| 2026-09-10 | SN-013 … SN-022 | 19% | Phase 1 Infrastructure closed. Traci in venv, corridor detectors, seed enforcement, start/stop/reset scripts, deep health endpoints verified. |
+| 2026-09-10 | SN-012f, SN-023 … SN-038 | 30% | Phase 2 Real AI Control closed. Real SUMO MARL training completed (SN-012f), host .venv verified with 24/24 critical tests passing, 900s live A/B study completed and stored in ab_runs (run 8646126e...), pre-audit fabricated benchmarks purged. |
