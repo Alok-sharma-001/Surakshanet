@@ -120,18 +120,30 @@ export default function EmergencyPage() {
     } else {
       // Deactivate
       const eid = activeEventId || "latest";
+      let deactivated = false;
       try {
         await api.emergency.deactivate(eid);
+        deactivated = true;
       } catch (err) {
         try {
           await fetch(`/api/v1/emergency/deactivate/${eid}`, { method: 'POST' });
+          deactivated = true;
         } catch {}
       }
-      setIsActivated(false);
-      setActiveEventId(null);
-      setJunctions([]);
-      setPreemptedCount(null);
-      toast.success("Green Wave Corridor Deactivated. Signals restored to normal cycle.");
+
+      if (deactivated) {
+        setIsActivated(false);
+        setActiveEventId(null);
+        setJunctions([]);
+        setPreemptedCount(null);
+        toast.success("Green Wave Corridor Deactivated. Signals restored to normal cycle.");
+      } else {
+        // SN-012g/§13.10: both calls failed — this used to clear the UI and
+        // claim "signals restored" regardless. If the backend never got the
+        // deactivate request, the real corridor pre-emption may still be
+        // active, so the UI must not claim otherwise.
+        toast.error("Could not deactivate the corridor — signals may still be pre-empted. Try again.");
+      }
     }
   };
 

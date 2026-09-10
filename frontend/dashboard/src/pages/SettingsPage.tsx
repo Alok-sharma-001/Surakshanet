@@ -1,11 +1,23 @@
 import { Settings, Bell, Code, Monitor, AlertTriangle } from 'lucide-react';
 
+// SN-012g/§13.10: this page has no backend to read from or write to — every
+// control here is decorative (no onClick/onChange handler touches state or
+// an API). It previously also showed a fake-but-realistic API key
+// ("sk-live-1234567890abcdef") and a fabricated gov.in endpoint URL, which
+// could plausibly be mistaken for a real committed credential. Removed those
+// two and added an explicit banner instead of quietly leaving ~15 inert
+// controls (toggles, selects, "Regenerate", "Reset to Defaults", "Clear All
+// Data") for a reviewer to discover are non-functional one at a time.
 export default function SettingsPage() {
   return (
     <div className="p-6 space-y-6 max-w-4xl mx-auto w-full">
       <div className="flex flex-col">
         <h1 className="text-2xl font-bold text-slate-900">Settings</h1>
         <p className="text-sm text-slate-500">System Configuration</p>
+      </div>
+
+      <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
+        These settings are not yet wired to a backend — nothing below is saved or applied.
       </div>
 
       <div className="space-y-6">
@@ -69,13 +81,13 @@ export default function SettingsPage() {
           <div className="px-6 py-5 space-y-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">API Endpoint</label>
-              <div className="font-mono text-sm bg-slate-50 p-3 rounded-lg border border-slate-200 text-slate-700">https://api.surakshanet.gov.in/v2</div>
+              <div className="font-mono text-sm bg-slate-50 p-3 rounded-lg border border-slate-200 text-slate-500">Not configured</div>
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">API Key</label>
               <div className="flex gap-2">
-                <input type="password" value="sk-live-1234567890abcdef" readOnly className="font-mono flex-1 border border-slate-200 rounded-lg px-4 py-3 bg-slate-50 text-sm focus:outline-none text-slate-700" />
-                <button className="bg-sky-600 hover:bg-sky-700 text-white rounded-lg px-4 py-2 font-medium transition-colors">Regenerate</button>
+                <input type="password" value="" placeholder="No key issued" readOnly className="font-mono flex-1 border border-slate-200 rounded-lg px-4 py-3 bg-slate-50 text-sm focus:outline-none text-slate-400" />
+                <button disabled className="bg-slate-200 text-slate-400 rounded-lg px-4 py-2 font-medium cursor-not-allowed">Regenerate</button>
               </div>
             </div>
             <div>

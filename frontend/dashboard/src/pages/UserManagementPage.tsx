@@ -1,26 +1,50 @@
-import React from 'react';
-import { Shield, Plus, MoreVertical } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Shield, MoreVertical } from 'lucide-react';
+import { toast } from 'react-hot-toast';
 import clsx from 'clsx';
+import { api } from '../services/api';
+import { User } from '../types';
 
-type Role = 'ADMIN' | 'OPERATOR' | 'VIEWER';
-type Status = 'Active' | 'Inactive';
-
-interface User {
-  id: string;
-  name: string;
-  email: string;
-  role: Role;
-  status: Status;
-  joined: string;
-}
-
-const MOCK_USERS: User[] = [
-  { id: '1', name: 'Alok Sharma', email: 'alok.s@surakshanet.in', role: 'ADMIN', status: 'Active', joined: 'Oct 12, 2025' },
-  { id: '2', name: 'Priya Singh', email: 'priya.singh@surakshanet.in', role: 'OPERATOR', status: 'Active', joined: 'Nov 04, 2025' },
-  { id: '3', name: 'Rahul Verma', email: 'rahul.v@surakshanet.in', role: 'VIEWER', status: 'Inactive', joined: 'Dec 15, 2025' },
-];
-
+// SN-012g/§13.10: this page previously listed three hardcoded MOCK_USERS
+// (one literally named after this project's own developer) with no API call
+// anywhere in the file, and both the "Invite User" button and the per-row
+// action button had no onClick handler — clicking did nothing. A real
+// GET /users, PATCH /users/{id}/role and PATCH /users/{id}/status already
+// exist (backend/app/api/users.py, wrapped in services/api.ts), so this now
+// lists real users and the per-row menu performs a real status toggle.
+// There is no admin-invite endpoint, so "Invite User" is left out rather
+// than faked — registration is self-service (POST /auth/register).
 const UserManagementPage: React.FC = () => {
+  const [users, setUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+
+  const fetchUsers = async () => {
+    try {
+      const res = await api.users.getAll();
+      setUsers(res.data);
+    } catch (err) {
+      toast.error('Could not load users from the backend.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchUsers();
+  }, []);
+
+  const handleToggleActive = async (user: User) => {
+    setOpenMenuId(null);
+    try {
+      await api.users.updateStatus(user.id, !user.is_active);
+      setUsers(prev => prev.map(u => u.id === user.id ? { ...u, is_active: !u.is_active } : u));
+      toast.success(`${user.name} ${!user.is_active ? 'activated' : 'deactivated'}.`);
+    } catch (err) {
+      toast.error(`Could not update status for ${user.name}.`);
+    }
+  };
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -32,10 +56,6 @@ const UserManagementPage: React.FC = () => {
             <span>Admin access only</span>
           </div>
         </div>
-        <button className="flex items-center gap-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg px-4 py-2.5 font-medium transition-colors shadow-sm">
-          <Plus className="w-5 h-5" />
-          <span>Invite User</span>
-        </button>
       </div>
 
       {/* Users Table */}
@@ -52,7 +72,14 @@ const UserManagementPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {MOCK_USERS.map((user) => (
+              {!loading && users.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-6 py-10 text-center text-sm text-slate-400">
+                    No users found.
+                  </td>
+                </tr>
+              )}
+              {users.map((user) => (
                 <tr key={user.id} className="hover:bg-slate-50 transition-colors">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-4">
@@ -78,18 +105,31 @@ const UserManagementPage: React.FC = () => {
                   <td className="px-6 py-4">
                     <span className={clsx(
                       "px-2.5 py-1 text-xs font-semibold rounded-full",
-                      user.status === 'Active' ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
+                      user.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
                     )}>
-                      {user.status}
+                      {user.is_active ? 'Active' : 'Inactive'}
                     </span>
                   </td>
                   <td className="px-6 py-4 text-sm text-slate-600">
-                    {user.joined}
+                    {new Date(user.created_at).toLocaleDateString()}
                   </td>
-                  <td className="px-6 py-4 text-right">
-                    <button className="p-2 text-slate-400 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition-colors inline-flex">
+                  <td className="px-6 py-4 text-right relative">
+                    <button
+                      onClick={() => setOpenMenuId(openMenuId === user.id ? null : user.id)}
+                      className="p-2 text-slate-400 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition-colors inline-flex"
+                    >
                       <MoreVertical className="w-5 h-5" />
                     </button>
+                    {openMenuId === user.id && (
+                      <div className="absolute right-6 top-12 z-10 bg-white border border-slate-200 rounded-lg shadow-lg py-1 w-40 text-left">
+                        <button
+                          onClick={() => handleToggleActive(user)}
+                          className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                        >
+                          {user.is_active ? 'Deactivate' : 'Activate'}
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}

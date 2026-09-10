@@ -91,8 +91,13 @@ export default function SignalControlPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ mode: mode.toUpperCase() })
         });
-      } catch {}
-      toast.success(`Signal mode switched to ${mode.toUpperCase()}`);
+        toast.success(`Signal mode switched to ${mode.toUpperCase()}`);
+      } catch {
+        // SN-012g/§13.10: both the primary call and the raw-fetch fallback
+        // failed — this used to still show a success toast, telling the
+        // operator a mode switch was applied when it wasn't.
+        toast.error(`Could not switch signal mode to ${mode.toUpperCase()}.`);
+      }
     }
   };
 
@@ -110,9 +115,13 @@ export default function SignalControlPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action, value })
         });
-      } catch {}
-      toast.success(`Action Executed: ${action}`);
-      setTelemetry(prev => [`[MANUAL OVERRIDE] Sent: ${action} to SUMO ${target}`, ...prev.slice(0, 25)]);
+        toast.success(`Action Executed: ${action}`);
+        setTelemetry(prev => [`[MANUAL OVERRIDE] Sent: ${action} to SUMO ${target}`, ...prev.slice(0, 25)]);
+      } catch {
+        // SN-012g/§13.10: both calls failed — this used to still claim the
+        // override was executed and log a fake "[MANUAL OVERRIDE] Sent" line.
+        toast.error(`Could not execute override: ${action}.`);
+      }
     }
   };
 
