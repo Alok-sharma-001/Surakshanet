@@ -68,7 +68,108 @@ jobs:
             echo "Pulling latest code..."
             git pull origin main
 
-            export DOCKER_USERNAME="${{ secrets.DOCKER_USERNAME }}"
+            echo "Configuring production environment variables..."
+
+            # 1. Load existing server-side environment file if available
+            if [ -f .env.production ]; then
+              echo "Loading existing .env.production on server..."
+              set -a
+              # shellcheck disable=SC1091
+              . ./.env.production
+              set +a
+            elif [ -f .env ]; then
+              echo "Loading existing .env on server..."
+              set -a
+              # shellcheck disable=SC1091
+              . ./.env
+              set +a
+            fi
+
+            # 2. Export environment variables from GitHub Secrets (take precedence if defined)
+            [ -n "${{ secrets.DOCKER_USERNAME }}" ] && export DOCKER_USERNAME="${{ secrets.DOCKER_USERNAME }}"
+            [ -n "${{ secrets.POSTGRES_USER }}" ] && export POSTGRES_USER="${{ secrets.POSTGRES_USER }}"
+            [ -n "${{ secrets.POSTGRES_PASSWORD }}" ] && export POSTGRES_PASSWORD="${{ secrets.POSTGRES_PASSWORD }}"
+            [ -n "${{ secrets.POSTGRES_DB }}" ] && export POSTGRES_DB="${{ secrets.POSTGRES_DB }}"
+            [ -n "${{ secrets.REDIS_PASSWORD }}" ] && export REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}"
+            [ -n "${{ secrets.DATABASE_URL }}" ] && export DATABASE_URL="${{ secrets.DATABASE_URL }}"
+            [ -n "${{ secrets.REDIS_URL }}" ] && export REDIS_URL="${{ secrets.REDIS_URL }}"
+            [ -n "${{ secrets.JWT_SECRET_KEY }}" ] && export JWT_SECRET_KEY="${{ secrets.JWT_SECRET_KEY }}"
+            [ -n "${{ secrets.ADMIN_EMAIL }}" ] && export ADMIN_EMAIL="${{ secrets.ADMIN_EMAIL }}"
+            [ -n "${{ secrets.ADMIN_PASSWORD }}" ] && export ADMIN_PASSWORD="${{ secrets.ADMIN_PASSWORD }}"
+            [ -n "${{ secrets.MQTT_BROKER_HOST }}" ] && export MQTT_BROKER_HOST="${{ secrets.MQTT_BROKER_HOST }}"
+            [ -n "${{ secrets.MQTT_BROKER_PORT }}" ] && export MQTT_BROKER_PORT="${{ secrets.MQTT_BROKER_PORT }}"
+            [ -n "${{ secrets.MQTT_USERNAME }}" ] && export MQTT_USERNAME="${{ secrets.MQTT_USERNAME }}"
+            [ -n "${{ secrets.MQTT_PASSWORD }}" ] && export MQTT_PASSWORD="${{ secrets.MQTT_PASSWORD }}"
+            [ -n "${{ secrets.CORS_ORIGINS }}" ] && export CORS_ORIGINS="${{ secrets.CORS_ORIGINS }}"
+
+            # 3. Provision production secrets if missing
+            if [ -z "${POSTGRES_PASSWORD:-}" ] || [ -z "${REDIS_PASSWORD:-}" ] || [ -z "${JWT_SECRET_KEY:-}" ]; then
+              echo "Required production secrets missing. Running generate_secrets.sh..."
+              chmod +x ./infra/scripts/generate_secrets.sh
+              ./infra/scripts/generate_secrets.sh
+              set -a
+              # shellcheck disable=SC1091
+              . ./.env.production
+              set +a
+            fi
+
+            # 4. Export all variables and defaults required by docker-compose.prod.yml
+            export DOCKER_USERNAME="${DOCKER_USERNAME:-surakshanet}"
+            export POSTGRES_USER="${POSTGRES_USER:-surakshanet}"
+            export POSTGRES_DB="${POSTGRES_DB:-surakshanet}"
+            export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in production}"
+            export REDIS_PASSWORD="${REDIS_PASSWORD:?REDIS_PASSWORD must be set in production}"
+            export DATABASE_URL="${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB}}"
+            export REDIS_URL="${REDIS_URL:-redis://:${REDIS_PASSWORD}@redis:6379/0}"
+            export JWT_SECRET_KEY="${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set in production}"
+            export ADMIN_EMAIL="${ADMIN_EMAIL:-admin@surakshanet.local}"
+            export ADMIN_PASSWORD="${ADMIN_PASSWORD:-${POSTGRES_PASSWORD}}"
+            export MQTT_BROKER_HOST="${MQTT_BROKER_HOST:-mosquitto}"
+            export MQTT_BROKER_PORT="${MQTT_BROKER_PORT:-1883}"
+            export MQTT_USERNAME="${MQTT_USERNAME:-surakshanet_operator}"
+            export MQTT_PASSWORD="${MQTT_PASSWORD:-${POSTGRES_PASSWORD}}"
+            export CORS_ORIGINS="${CORS_ORIGINS:-https://localhost}"
+
+            # 5. Ensure Mosquitto password file exists
+            if [ ! -f infra/mosquitto/password_file ]; then
+              echo "Provisioning Mosquitto password file..."
+              mkdir -p infra/mosquitto
+              if [ -f infra/mosquitto/password_file.example ]; then
+                cp infra/mosquitto/password_file.example infra/mosquitto/password_file
+                chmod 600 infra/mosquitto/password_file
+              fi
+            fi
+
+            # 6. Synchronize .env.production and .env files on the host
+            cat <<EOF > .env.production
+ENVIRONMENT=production
+DEBUG=false
+APP_NAME=Surakshanet
+APP_VERSION=1.0.0
+CORS_ORIGINS=${CORS_ORIGINS}
+JWT_SECRET_KEY=${JWT_SECRET_KEY}
+JWT_ALGORITHM=HS256
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES=30
+JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
+ADMIN_EMAIL=${ADMIN_EMAIL}
+ADMIN_PASSWORD=${ADMIN_PASSWORD}
+POSTGRES_USER=${POSTGRES_USER}
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+POSTGRES_DB=${POSTGRES_DB}
+DATABASE_URL=${DATABASE_URL}
+REDIS_PASSWORD=${REDIS_PASSWORD}
+REDIS_URL=${REDIS_URL}
+MQTT_BROKER_HOST=${MQTT_BROKER_HOST}
+MQTT_BROKER_PORT=${MQTT_BROKER_PORT}
+MQTT_USERNAME=${MQTT_USERNAME}
+MQTT_PASSWORD=${MQTT_PASSWORD}
+DOCKER_USERNAME=${DOCKER_USERNAME}
+HOST=0.0.0.0
+PORT=8000
+WORKERS=2
+EOF
+            chmod 600 .env.production
+            cp -f .env.production .env 2>/dev/null || true
 
             echo "Pulling updated images..."
             docker compose -f infra/docker-compose.prod.yml pull
