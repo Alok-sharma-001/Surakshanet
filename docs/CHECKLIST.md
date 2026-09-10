@@ -6,12 +6,12 @@
 **Priority:** `P0` blocks the demo · `P1` required for the target score · `P2` valuable · `P3` optional
 **Rule:** a task is `DONE` only when all ten Definition-of-Done conditions in [23-final-acceptance.md §1](23-final-acceptance.md) hold.
 
-**Progress:** 21 / 161 DONE — **13%** *(Phase 0 closed. SN-012a…SN-012k were added as the SN-140 greps were run for the first time and then extended into a systematic sweep; every one of them found a live fabrication. SN-012f is blocked on Phase 1 and SN-012g is a P1 completeness gap. Baseline at audit time was 42% overall project completion.)*
+**Progress:** 31 / 161 DONE — **19%** *(Phases 0 and 1 closed. Baseline at audit time was 42% overall project completion.)*
 
 | Phase | Tasks | Done |
 |---|---|---|
 | 0 Cleanup | SN-001 … SN-012k (less SN-012f/g) | 21/21 |
-| 1 Infrastructure | SN-013 … SN-022 | 0/10 |
+| 1 Infrastructure | SN-013 … SN-022 | 10/10 |
 | 2 Real AI control | SN-012f, SN-023 … SN-038 | 0/17 |
 | 3 Emergency corridor | SN-039 … SN-050 | 0/12 |
 | 4 Event + citizen | SN-051 … SN-068 | 0/18 |
@@ -216,7 +216,7 @@
 # PHASE 1 — INFRASTRUCTURE
 
 ### SN-013 · Fix traci in the virtualenv
-**Component** Environment · **Priority** **P0 — highest** · **Depends** — · **Status** `NOT_STARTED`
+**Component** Environment · **Priority** **P0 — highest** · **Depends** — · **Status** `DONE`
 **Description** `import traci` succeeds under `/usr/bin/python3` but **fails inside `.venv`**. `sumo_live_bridge.py` calls `sys.exit(1)` on import failure. This is a guaranteed live-demo failure.
 **Implementation** `pip install eclipse-sumo traci sumolib` into the venv, or recreate with `--system-site-packages`. See [04-environment-setup.md §2](04-environment-setup.md). Pin versions in `requirements.txt`.
 **Files** `requirements.txt`, `.venv`, `.env` (`SUMO_HOME`)
@@ -224,7 +224,7 @@
 **Tests** SN-126 · **Acceptance** `source .venv/bin/activate && python -c "import traci"` succeeds, and succeeds inside the backend container · **Demo** all
 
 ### SN-014 · Enforce fixed seed on all SUMO runs
-**Component** Simulation · **Priority** P0 · **Depends** SN-013 · **Status** `NOT_STARTED`
+**Component** Simulation · **Priority** P0 · **Depends** SN-013 · **Status** `DONE`
 **Description** No `--seed` is passed today, so runs are not reproducible — which breaks both the A/B claim and demo rehearsal.
 **Implementation** Add `DEMO_SEED = 42` to `shared/constants.py`; pass `--seed` and `--random false` in `SumoEnvironment.start` command assembly and in `corridor.sumocfg`.
 **Files** `shared/constants.py`, `simulation/sumo_env.py`, `simulation/networks/corridor.sumocfg`
@@ -232,7 +232,7 @@
 **Tests** SN-115, SN-125 · **Acceptance** Two runs at the same seed produce identical metric series · **Demo** all
 
 ### SN-015 · Add lane-area detectors
-**Component** Simulation · **Priority** P0 · **Depends** SN-013 · **Status** `NOT_STARTED`
+**Component** Simulation · **Priority** P0 · **Depends** SN-013 · **Status** `DONE`
 **Description** The 8-dim DQN state needs per-approach queue, speed, occupancy and accumulated wait; no detectors are defined.
 **Implementation** Create `simulation/networks/corridor.det.xml` with one `<laneAreaDetector>` per approach lane of `J0..J3`, IDs `det_{junction}_{direction}_{lane}`. Reference from `corridor.sumocfg`.
 **Files** `simulation/networks/corridor.det.xml`, `corridor.sumocfg`
@@ -240,7 +240,7 @@
 **Tests** SN-115 · **Acceptance** All 16 detectors report values via TraCI; the state builder resolves direction from the ID convention · **Demo** all
 
 ### SN-016 · Loud import guards
-**Component** Environment · **Priority** P0 · **Depends** SN-013 · **Status** `NOT_STARTED`
+**Component** Environment · **Priority** P0 · **Depends** SN-013 · **Status** `DONE`
 **Description** A silent or cryptic failure on a missing `traci` is what makes SN-013 dangerous rather than merely inconvenient.
 **Implementation** Add a guard to the backend startup, the bridge and the control service that raises with the interpreter path and a pointer to `docs/04-environment-setup.md §2`.
 **Files** `backend/app/main.py`, `simulation/sumo_live_bridge.py`, `services/control_service/main.py`
@@ -248,7 +248,7 @@
 **Tests** SN-126 · **Acceptance** With `traci` removed, each process exits with a message naming the interpreter and the fix · **Demo** none
 
 ### SN-017 · Pin and standardise Python dependencies
-**Component** Environment · **Priority** P1 · **Depends** SN-013 · **Status** `NOT_STARTED`
+**Component** Environment · **Priority** P1 · **Depends** SN-013 · **Status** `DONE`
 **Description** `__pycache__` shows Python 3.11, 3.13 and 3.14 artefacts — three interpreters have run this code.
 **Implementation** Standardise on 3.11. Pin `requirements.txt` and add `requirements-dev.txt`. Document in [04-environment-setup.md §1](04-environment-setup.md).
 **Files** `requirements.txt`, `requirements-dev.txt`, `backend/Dockerfile`
@@ -256,7 +256,7 @@
 **Tests** SN-126 · **Acceptance** A fresh venv from `requirements.txt` runs the critical test suite · **Demo** none
 
 ### SN-018 · Write start.sh
-**Component** Ops · **Priority** P0 · **Depends** SN-013, SN-019 · **Status** `NOT_STARTED`
+**Component** Ops · **Priority** P0 · **Depends** SN-013, SN-019 · **Status** `DONE`
 **Description** Five processes must come up in order; there is no orchestrated startup today.
 **Implementation** Implement the ten-step contract in [04-environment-setup.md §5](04-environment-setup.md), with per-step timeout, named failure cause, logging to `logs/`, `--profile` flag and a seed banner.
 **Files** `start.sh`, `infra/docker-compose.demo.yml`
@@ -264,7 +264,7 @@
 **Tests** SN-126 · **Acceptance** Succeeds three consecutive times from clean; with Redis stopped, exits non-zero naming Redis within 60 s · **Demo** all
 
 ### SN-019 · Health endpoints
-**Component** Backend · **Priority** P0 · **Depends** — · **Status** `NOT_STARTED`
+**Component** Backend · **Priority** P0 · **Depends** — · **Status** `DONE`
 **Description** No readiness endpoint exists, so `start.sh` cannot gate on real health.
 **Implementation** `GET /health` (liveness) and `GET /health/deep` (per-dependency, measured — postgres, redis, mqtt, sumo, traci, control_service, vision_worker, marl_weights, forecast_weights). `vision_worker: unavailable` is a correct state, not a failure to hide.
 **Files** `backend/app/main.py`, `backend/app/api/health.py` (new)
@@ -272,7 +272,7 @@
 **Tests** SN-126 · **Acceptance** Every dependency status is measured, not assumed; `status` is `ok` only when all are ok · **Demo** all
 
 ### SN-020 · Compose health checks
-**Component** Ops · **Priority** P1 · **Depends** SN-019 · **Status** `NOT_STARTED`
+**Component** Ops · **Priority** P1 · **Depends** SN-019 · **Status** `DONE`
 **Description** Containers report started, not ready, so dependent services race.
 **Implementation** Add `healthcheck` to every service in `infra/docker-compose.demo.yml` per [21-deployment.md §2](21-deployment.md), with `depends_on: condition: service_healthy`.
 **Files** `infra/docker-compose.demo.yml`
@@ -280,7 +280,7 @@
 **Tests** SN-126 · **Acceptance** `docker compose ps` shows healthy for every service after `start.sh` · **Demo** all
 
 ### SN-021 · stop.sh and reset.sh
-**Component** Ops · **Priority** P1 · **Depends** SN-018 · **Status** `NOT_STARTED`
+**Component** Ops · **Priority** P1 · **Depends** SN-018 · **Status** `DONE`
 **Description** Rehearsals need a repeatable return to a known state.
 **Implementation** `stop.sh` shuts down in reverse dependency order, releasing SUMO junctions to base programs first. `reset.sh` drops and recreates the DB, re-seeds (SN-134), restores SUMO to step 0.
 **Files** `stop.sh`, `reset.sh`
@@ -288,7 +288,7 @@
 **Tests** SN-126 · **Acceptance** `./reset.sh && ./start.sh` reaches the known demo state in under 3 minutes · **Demo** all
 
 ### SN-022 · Document exact environment
-**Component** Docs · **Priority** P2 · **Depends** SN-013…SN-021 · **Status** `NOT_STARTED`
+**Component** Docs · **Priority** P2 · **Depends** SN-013…SN-021 · **Status** `DONE`
 **Description** Setup steps must be reproducible on a fresh machine by someone who did not build this.
 **Implementation** Complete [04-environment-setup.md](04-environment-setup.md) with verified versions and the troubleshooting table.
 **Files** `docs/04-environment-setup.md`

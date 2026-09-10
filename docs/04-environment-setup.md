@@ -8,16 +8,16 @@ Covers **SN-013 … SN-022**. The `traci` defect (SN-013) is the highest-priorit
 
 | Component | Required version | Verify with | Current status |
 |---|---|---|---|
-| Python | 3.11+ (repo shows 3.11/3.13/3.14 pycache — standardise on **3.11**) | `python --version` | mixed — standardise (SN-017) |
-| Eclipse SUMO | 1.19+ | `sumo --version` | installed at `/usr/bin/sumo` |
-| `traci` | matching SUMO | `python -c "import traci"` | **FAILS in `.venv`** (SN-013) |
-| `libsumo` | optional, faster | `python -c "import libsumo"` | optional |
-| PostgreSQL | 15 + TimescaleDB 2.x + PostGIS 3.x | `docker exec surakshanet-timescaledb psql -c "\dx"` | present |
-| Redis | 7.x | `redis-cli ping` | present |
-| Mosquitto | 2.x with password file | `mosquitto_sub -h localhost -t '#' -u ...` | present |
-| Node | 20 LTS | `node --version` | present |
-| PyTorch | 2.x (CPU is sufficient) | `python -c "import torch"` | present |
-| ultralytics | 8.x | `python -c "import ultralytics"` | present |
+| Python | 3.11+ (repo shows 3.11/3.13/3.14 pycache — standardise on **3.11**) | `python --version` | Standardized via requirements.txt (SN-017) |
+| Eclipse SUMO | 1.19+ | `sumo --version` | Installed at `/usr/bin/sumo` |
+| `traci` | matching SUMO | `python -c "import traci"` | VERIFIED in `.venv` & system (SN-013) |
+| `libsumo` | optional, faster | `python -c "import libsumo"` | Available |
+| PostgreSQL | 15 + TimescaleDB 2.x + PostGIS 3.x | `docker exec surakshanet-timescaledb psql -c "\dx"` | Present and healthy |
+| Redis | 7.x | `docker exec surakshanet-redis redis-cli ping` | Present and healthy |
+| Mosquitto | 2.x with password file | `docker exec surakshanet-mosquitto timeout 2 mosquitto_sub ...` | Present and healthy |
+| Node | 20 LTS | `node --version` | Present |
+| PyTorch | 2.x (CPU is sufficient) | `python -c "import torch"` | Present |
+| ultralytics | 8.x | `python -c "import ultralytics"` | Present |
 
 ---
 

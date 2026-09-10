@@ -20,10 +20,13 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # 1. Back-fill existing rows with 'live' or NULL to 'mqtt'
+    # 1. Back-fill existing rows: map 'sim' to 'sumo', and any others/NULL to 'mqtt'
+    op.execute(
+        "UPDATE traffic_readings SET source = 'sumo' WHERE source = 'sim';"
+    )
     op.execute(
         "UPDATE traffic_readings SET source = 'mqtt' "
-        "WHERE source IS NULL OR source = 'live';"
+        "WHERE source IS NULL OR source NOT IN ('sumo', 'vision', 'mqtt', 'model', 'heuristic', 'manual');"
     )
 
     # 2. Alter column to NOT NULL with server_default='mqtt'

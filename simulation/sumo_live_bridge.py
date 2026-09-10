@@ -39,21 +39,22 @@ for p in candidate_paths:
         sys.path.insert(0, p)
 
 try:
-    from shared.constants import MQTT_JUNCTION_TELEMETRY_TOPIC
+    from shared.constants import MQTT_JUNCTION_TELEMETRY_TOPIC, DEMO_SEED
 except ImportError:
     MQTT_JUNCTION_TELEMETRY_TOPIC = "surakshanet/junctions/{junction_id}/telemetry"
+    DEMO_SEED = 42
 
 if "SUMO_HOME" not in os.environ and os.path.exists("/usr/share/sumo"):
     os.environ["SUMO_HOME"] = "/usr/share/sumo"
 
 try:
     import traci
-except ImportError:
-    try:
-        from tools import traci
-    except ImportError:
-        logger.error("TraCI module not found. Make sure SUMO is installed on the system.")
-        sys.exit(1)
+except ImportError as exc:
+    raise SystemExit(
+        "FATAL: 'traci' is not importable from this interpreter.\n"
+        f"  interpreter: {sys.executable}\n"
+        "  fix: see docs/04-environment-setup.md §2 (SN-013)"
+    ) from exc
 
 def publish_redis_raw(channel: str, message: str, host: str = "127.0.0.1", port: int = 6379) -> bool:
     """Publishes a message to Redis using raw TCP socket (zero external pip dependencies)."""
@@ -78,11 +79,13 @@ class SumoLiveBridge:
         redis_host: str = "127.0.0.1",
         redis_port: int = 6379,
         mqtt_host: str = "127.0.0.1",
-        mqtt_port: int = 1883
+        mqtt_port: int = 1883,
+        seed: int = DEMO_SEED
     ):
         self.config_path = os.path.abspath(config_path)
         self.gui = gui
         self.step_delay_ms = step_delay_ms
+        self.seed = seed
         self.redis_host = "127.0.0.1" if redis_host == "localhost" else redis_host
         self.redis_port = redis_port
         self.mqtt_host = "127.0.0.1" if mqtt_host == "localhost" else mqtt_host
@@ -163,7 +166,9 @@ class SumoLiveBridge:
             "--start",
             "--quit-on-end",
             "--delay", str(self.step_delay_ms),
-            "--step-length", "1.0"
+            "--step-length", "1.0",
+            "--seed", str(self.seed),
+            "--random", "false"
         ]
 
         logger.info(f"Starting SUMO with command: {' '.join(cmd)}")
@@ -208,6 +213,11 @@ class SumoLiveBridge:
 
                 traci.simulationStep()
                 self.step_count += 1
+                if self.redis_client:
+                    try:
+                        self.redis_client.set("sumo:step", str(self.step_count))
+                    except Exception:
+                        pass
 
                 # 1. Collect live vehicle data from TraCI
                 veh_ids = traci.vehicle.getIDList()
@@ -452,12 +462,14 @@ if __name__ == "__main__":
     parser.add_argument("--no-gui", action="store_true", help="Run SUMO in headless mode without GUI")
     parser.add_argument("--delay", type=int, default=50, help="Step delay in milliseconds (default: 50)")
     parser.add_argument("--redis-port", type=int, default=6379, help="Redis port (default: 6379)")
+    parser.add_argument("--seed", type=int, default=DEMO_SEED, help=f"Simulation seed (default: {DEMO_SEED})")
     args = parser.parse_args()
 
     bridge = SumoLiveBridge(
         config_path=args.config,
         gui=not args.no_gui,
         step_delay_ms=args.delay,
-        redis_port=args.redis_port
+        redis_port=args.redis_port,
+        seed=args.seed
     )
     bridge.start()

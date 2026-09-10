@@ -1,0 +1,16 @@
+[1/10] Check dependencies             ... OK
+[2/10] Start infrastructure           ... 
+[2/10] Start infrastructure           FAILED
+       cause:  docker compose up failed
+       detail: time="2026-09-10T12:30:01+05:30" level=warning msg="Found orphan containers ([surakshanet-nginx surakshanet-frontend surakshanet-postgres]) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up."
+ Container surakshanet-redis  Running
+ Container surakshanet-timescaledb  Running
+ Container surakshanet-mosquitto  Running
+ Container surakshanet-prometheus  Running
+ Container surakshanet-grafana  Recreate
+ Container surakshanet-grafana  Recreated
+ Container surakshanet-prometheus  Waiting
+ Container surakshanet-prometheus  Healthy
+ Container surakshanet-grafana  Starting
+Error response from daemon: failed to set up container networking: driver failed programming external connectivity on endpoint surakshanet-grafana (3ee7fb2b996f332243b179b19a9b2143a9157758cc985deb26cb6cbceeb4f9db): Bind for 0.0.0.0:3000 failed: port is already allocated
+       fix:    docs/04-environment-setup.md §7

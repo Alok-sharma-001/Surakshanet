@@ -1,9 +1,31 @@
+import os
+import sys
 import asyncio
 import json
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import redis.asyncio as aioredis
+
+# Ensure SUMO tools are in sys.path
+candidate_paths = [
+    os.path.join(os.environ.get("SUMO_HOME", "/usr/share/sumo"), "tools"),
+    "/usr/share/sumo/tools",
+    "/usr/lib/python3/dist-packages",
+    "/usr/local/share/sumo/tools",
+]
+for p in candidate_paths:
+    if os.path.exists(p) and p not in sys.path:
+        sys.path.insert(0, p)
+
+try:
+    import traci  # noqa: F401
+except ImportError as exc:
+    raise SystemExit(
+        "FATAL: 'traci' is not importable from this interpreter.\n"
+        f"  interpreter: {sys.executable}\n"
+        "  fix: see docs/04-environment-setup.md §2 (SN-013)"
+    ) from exc
 
 from app.config import get_settings
 from app.database import init_db
@@ -168,13 +190,17 @@ app.include_router(api_router, prefix=settings.API_PREFIX)
 app.include_router(ws_router)
 
 
+from app.api.health import router as health_router
+
+app.include_router(health_router)
+app.include_router(health_router, prefix=settings.API_PREFIX)
+
+
 @app.get("/", tags=["Health"])
-@app.get("/health", tags=["Health"])
-@app.get("/api/v1/health", tags=["Health"])
-async def health_check() -> dict:
-    """Root health check endpoint."""
+async def root_check() -> dict:
+    """Root endpoint."""
     return {
-        "status": "healthy",
+        "status": "ok",
         "app": settings.APP_NAME,
         "version": settings.APP_VERSION,
     }

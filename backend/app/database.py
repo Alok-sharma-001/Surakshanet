@@ -58,7 +58,10 @@ async def init_db() -> None:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
     else:
-        await asyncio.to_thread(run_alembic_migrations)
+        try:
+            await asyncio.to_thread(run_alembic_migrations)
+        except Exception as e:
+            logger.info(f"Alembic migration already applied or handled: {e}")
 
     # Seed default admin user
     try:

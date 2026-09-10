@@ -11,6 +11,11 @@ class DataSource(str, enum.Enum):
     MANUAL = "manual"      # entered or seeded by a human
 
 
+# SN-014: Deterministic seed for reproducible simulation and A/B evaluation
+DEMO_SEED: int = 42
+
+
+
 PCU_FACTORS: Dict[str, float] = {
     'car': 1.0,
     'motorcycle': 0.5,

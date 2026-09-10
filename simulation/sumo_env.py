@@ -4,19 +4,33 @@ import json
 import logging
 from typing import Optional, Dict, Any, List
 
+# Ensure SUMO tools and dist-packages are in sys.path
+candidate_paths = [
+    os.path.join(os.environ.get("SUMO_HOME", "/usr/share/sumo"), "tools"),
+    "/usr/share/sumo/tools",
+    "/usr/lib/python3/dist-packages",
+    "/usr/local/share/sumo/tools",
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+]
+for p in candidate_paths:
+    if os.path.exists(p) and p not in sys.path:
+        sys.path.insert(0, p)
+
 try:
-    import libsumo as traci
-except ImportError:
-    try:
-        import traci
-    except ImportError:
-        traci = None
+    import traci
+except ImportError as exc:
+    raise SystemExit(
+        "FATAL: 'traci' is not importable from this interpreter.\n"
+        f"  interpreter: {sys.executable}\n"
+        "  fix: see docs/04-environment-setup.md §2 (SN-013)"
+    ) from exc
 
 logger = logging.getLogger(__name__)
 
 try:
-    from shared.constants import PCU_FACTORS
+    from shared.constants import PCU_FACTORS, DEMO_SEED
 except ImportError:
+    DEMO_SEED = 42
     PCU_FACTORS = {
         'car': 1.0,
         'motorcycle': 0.5,
@@ -38,7 +52,7 @@ class SumoEnvironment:
     
     def __init__(self, net_file: str, route_file: str, config_file: Optional[str] = None,
                  gui: bool = False, step_length: float = 1.0, begin: int = 0, end: int = 3600,
-                 additional_files: Optional[list] = None):
+                 additional_files: Optional[list] = None, seed: Optional[int] = None):
         self.net_file = net_file
         self.route_file = route_file
         self.config_file = config_file
@@ -47,6 +61,7 @@ class SumoEnvironment:
         self.begin = begin
         self.end = end
         self.additional_files = additional_files or []
+        self.seed = seed if seed is not None else DEMO_SEED
         
         self.junction_ids: List[str] = []
         self.tl_ids: List[str] = []
@@ -57,8 +72,8 @@ class SumoEnvironment:
         self.step_count = 0
         self._is_running = False
         
-        if 'SUMO_HOME' not in os.environ:
-            logger.warning("SUMO_HOME not set in environment. TraCI might fail.")
+        if 'SUMO_HOME' not in os.environ and os.path.exists("/usr/share/sumo"):
+            os.environ["SUMO_HOME"] = "/usr/share/sumo"
             
     def start(self):
         """Start SUMO simulation with TraCI connection."""
@@ -80,16 +95,11 @@ class SumoEnvironment:
             "--step-length", str(self.step_length),
             "-b", str(self.begin),
             "-e", str(self.end),
-            "--waiting-time-memory", "10000"
+            "--waiting-time-memory", "10000",
+            "--seed", str(self.seed),
+            "--random", "false"
         ])
         
-        if traci is None:
-            self._is_running = True
-            self.junction_ids = ["DEL-CP-01", "DEL-ITO-02", "DEL-ASH-04", "DEL-LAJ-06"]
-            self.tl_ids = ["DEL-CP-01", "DEL-ITO-02", "DEL-ASH-04", "DEL-LAJ-06"]
-            logger.info("SUMO TraCI unavailable. Operating in microscopic simulation fallback mode.")
-            return
-
         try:
             traci.start(cmd)
             self._is_running = True
@@ -111,13 +121,6 @@ class SumoEnvironment:
         """Advance simulation by n steps and return current state."""
         if not self._is_running:
             raise RuntimeError("Simulation is not running.")
-            
-        if traci is None:
-            self.step_count += n_steps
-            self.total_departed += 12 * n_steps
-            self.total_arrived += 10 * n_steps
-            self.total_waiting_time += 18.5 * n_steps
-            return self.get_state()
 
         for _ in range(n_steps):
             traci.simulationStep()
@@ -137,27 +140,6 @@ class SumoEnvironment:
         """Get current state of all junctions."""
         if not self._is_running:
             return {}
-            
-        if traci is None:
-            return {
-                "simulation_time": self.step_count * 1.0,
-                "step_count": self.step_count,
-                "junctions": {
-                    jid: {
-                        "queue_length": round(15.0 + (self.step_count % 10) * 1.5, 1),
-                        "speed": round(32.0 - (self.step_count % 8) * 0.8, 1),
-                        "vehicles": 18 + (self.step_count % 12),
-                        "current_phase": 0 if (self.step_count // 30) % 2 == 0 else 2,
-                        "phase_elapsed": (self.step_count % 30) * 1.0
-                    }
-                    for jid in self.junction_ids
-                },
-                "global_metrics": {
-                    "total_vehicles": max(10, self.total_departed - self.total_arrived),
-                    "total_waiting_time": round(self.total_waiting_time, 1),
-                    "throughput": self.total_arrived
-                }
-            }
             
         state = {
             "simulation_time": traci.simulation.getTime(),

@@ -10,7 +10,7 @@ COPY backend/requirements.txt requirements.txt
 # Pre-install CPU PyTorch wheels to keep image lightweight and fast
 RUN pip install --no-cache-dir --default-timeout=120 --retries 5 --user --extra-index-url https://download.pytorch.org/whl/cpu torch torchvision
 # Install remaining dependencies
-RUN pip install --no-cache-dir --default-timeout=120 --retries 5 --user -r requirements.txt
+RUN pip install --no-cache-dir --default-timeout=120 --retries 5 --user --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
 
 # Runtime stage
 FROM python:3.11-slim
