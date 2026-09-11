@@ -32,10 +32,24 @@ class WebsterFallback:
         """Get signal timing plan for a specific time of day."""
         return self.plans.get(time_of_day, self.plans['afternoon_offpeak'])
         
-    def get_current_plan(self) -> Dict[str, int]:
-        """Determine plan based on current time of day."""
-        current_hour = datetime.datetime.now().hour
-        
+    def get_current_plan(self, sim_time_s: "float | None" = None) -> Dict[str, int]:
+        """Determine plan based on time of day.
+
+        SN-127: during a SUMO run, "time of day" must derive from the
+        simulation clock (sim_time_s, seconds since the scenario started),
+        never the real wall clock — otherwise which Webster plan gets
+        applied (and therefore the whole demo's timing behaviour) would
+        depend on what real-world hour the demo happens to be rehearsed or
+        presented at, breaking reproducibility of exactly the kind of
+        headline number SN-129 depends on. Falls back to the real wall
+        clock only when no simulation clock is available at all (e.g. a
+        genuine physical deployment with no SUMO simulation running).
+        """
+        if sim_time_s is not None:
+            current_hour = int((sim_time_s // 3600) % 24)
+        else:
+            current_hour = datetime.datetime.now().hour
+
         if 7 <= current_hour < 10:
             return self.get_plan('morning_peak')
         elif 10 <= current_hour < 16:

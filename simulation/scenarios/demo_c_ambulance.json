@@ -1,0 +1,23 @@
+{
+    "id": "C",
+    "name": "Ambulance",
+    "description": "The strongest emotional beat. Scenario A's baseline demand, plus a live-operator-triggered emergency green-wave corridor for an ambulance entering at W_entry, bound beyond J3.",
+    "net_file": "corridor.net.xml",
+    "route_file": "corridor.rou.xml",
+    "duration_s": 300,
+    "seed": 42,
+    "mechanism": "live_operator_action",
+    "demand_profile": null,
+    "scripted_events": [],
+    "live_action": {
+        "time_s": 120,
+        "endpoint": "POST /api/v1/emergency/activate",
+        "payload_template": {
+            "priority": "CRITICAL",
+            "vehicle_type": "AMBULANCE",
+            "origin": {"lat": 22.71960, "lon": 75.85770, "name": "Palasia Square Approach (W_entry)"},
+            "destination": {"lat": 22.71895, "lon": 75.86841, "name": "Geeta Bhawan Exit / Hospital (E_exit)"}
+        },
+        "note": "This is deliberately NOT a scripted SUMO route-file event. The real Phase 3 green-wave corridor system (ml/emergency/green_wave.py, simulation/sumo_live_bridge.py) drives capture/pre-emption/restore end-to-end from this live API call, exactly as it would for a genuine dispatch — reusing the same code path already live-verified against real TraCI in Phase 3, not a demo-only shortcut. origin/destination are the real, sourced W_entry and E_exit coordinates from shared/corridor_topology.py (never a fabricated pair). The presenter triggers this call ~120s into the Scenario A run so the beat lands at the same point in the corridor's state every rehearsal."
+    }
+}

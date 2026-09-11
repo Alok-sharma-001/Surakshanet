@@ -1,0 +1,19 @@
+{
+    "id": "B",
+    "name": "Surge",
+    "description": "Produces the headline number. Evening-peak-weighted demand with a genuine step increase on J1's east approach at t=180s. The controller's green extension in response must be an emergent consequence of this real demand (visible in control_decisions), never a demo-only code path.",
+    "net_file": "corridor.net.xml",
+    "route_file": "corridor_scenario_b_surge.rou.xml",
+    "duration_s": 300,
+    "seed": 42,
+    "mechanism": "sumo_route_file",
+    "demand_profile": null,
+    "demand_note": "Base flows are evening-peak-weighted (heavier E-W movement) matching the character of simulation/scenarios/demand_profiles.py::EVENING_PEAK, but are hand-authored SUMO <flow> probabilities in corridor_scenario_b_surge.rou.xml rather than programmatically generated from that dict.",
+    "scripted_events": [
+        {
+            "time_s": 180,
+            "edge": "E_J2_to_J1",
+            "description": "Real SUMO <flow> demand step-up begins on J1's east approach (vehicles arriving at J1 from J2), live-verified via TraCI to produce a real, measured increase in approach vehicle count/occupancy on E_J2_to_J1_0."
+        }
+    ]
+}

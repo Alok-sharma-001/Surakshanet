@@ -1,0 +1,29 @@
+{
+    "id": "D",
+    "name": "Rally",
+    "description": "The pivot from reactive to predictive. A pre-created event — 25,000 expected attendees, tomorrow 16:00-20:00, J1<->J2 affected with one closure — run through the real Phase 4 what-if SUMO prediction, then approved and published as a citizen advisory.",
+    "net_file": "corridor.net.xml",
+    "route_file": "corridor.rou.xml",
+    "duration_s": null,
+    "seed": 42,
+    "mechanism": "pre_seeded_event",
+    "demand_profile": null,
+    "scripted_events": [],
+    "pre_seeded_event": {
+        "create_endpoint": "POST /api/v1/events",
+        "predict_endpoint": "POST /api/v1/events/{id}/predict",
+        "approve_endpoint": "POST /api/v1/events/{id}/approve",
+        "publish_endpoint": "POST /api/v1/events/{id}/publish",
+        "payload_template": {
+            "name": "Rally at Geeta Bhawan Grounds",
+            "event_type": "RALLY",
+            "starts_at": "<tomorrow's date>T16:00:00",
+            "ends_at": "<tomorrow's date>T20:00:00",
+            "expected_crowd": 25000,
+            "affected_links": ["E_J1_to_J2", "E_J2_to_J1"],
+            "closure_links": ["E_J2_to_J1"],
+            "intensity": "HIGH"
+        },
+        "note": "starts_at/ends_at are deliberately left as a relative template ('tomorrow 16:00-20:00', matching the checklist's own SN-131 wording) rather than a baked absolute timestamp — a hardcoded past date would silently go stale and misrepresent the event as historic on every rehearsal after the day it was written. The presenter (or run-book automation) substitutes the real current date at demo time. affected_links/closure_links are real corridor edge ids from shared/corridor_topology.py, matching the same J1<->J2 link referenced in SN-131."
+    }
+}

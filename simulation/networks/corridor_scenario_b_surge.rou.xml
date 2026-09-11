@@ -1,0 +1,63 @@
+<?xml version="1.0" ?>
+<!--
+SN-129: Scenario B — Surge.
+
+Base corridor demand (identical to corridor.rou.xml) plus one additional
+real SUMO <flow> injecting extra vehicles onto J1's east approach
+(edge E_J2_to_J1, i.e. arriving at J1 from J2) starting at t=180s. This is a
+genuine change in real measured demand at that approach, not a scripted
+"demo-only" control-service code path — any green extension a controller
+produces in response is a real, emergent consequence of this real flow
+(SN-129's acceptance line), verifiable afterwards in control_decisions the
+same way any other real decision is.
+-->
+<routes>
+    <vType id="car" vClass="passenger" length="4.5" width="1.8" maxSpeed="16.6" accel="2.6" decel="4.5" sigma="0.5" color="0.9,0.2,0.2" guiShape="passenger"/>
+    <vType id="motorcycle" vClass="motorcycle" length="2.2" width="0.8" maxSpeed="18.0" accel="3.2" decel="5.0" sigma="0.5" color="1.0,0.85,0.0" guiShape="motorcycle"/>
+    <vType id="bus" vClass="bus" length="12.0" width="2.5" maxSpeed="13.8" accel="1.2" decel="3.5" sigma="0.5" color="0.1,0.5,1.0" guiShape="bus"/>
+    <vType id="truck" vClass="truck" length="10.0" width="2.5" maxSpeed="12.5" accel="1.0" decel="3.0" sigma="0.5" color="0.95,0.55,0.1" guiShape="truck"/>
+    <vType id="auto_rickshaw" vClass="passenger" length="3.0" width="1.5" maxSpeed="14.0" accel="2.0" decel="4.0" sigma="0.5" color="0.0,0.85,0.4" guiShape="delivery"/>
+    <vType id="ambulance" vClass="emergency" length="5.5" width="2.0" maxSpeed="22.0" accel="3.5" decel="5.5" sigma="0.2" color="1.0,1.0,1.0" guiShape="emergency"/>
+
+    <route id="r_WE" edges="E_W_to_J0 E_J0_to_J1 E_J1_to_J2 E_J2_to_J3 E_J3_to_E"/>
+    <route id="r_EW" edges="E_E_to_J3 E_J3_to_J2 E_J2_to_J1 E_J1_to_J0 E_J0_to_W"/>
+    <route id="r_N0S0" edges="E_N0_to_J0 E_J0_to_S0"/>
+    <route id="r_S0N0" edges="E_S0_to_J0 E_J0_to_N0"/>
+    <route id="r_N1S1" edges="E_N1_to_J1 E_J1_to_S1"/>
+    <route id="r_S1N1" edges="E_S1_to_J1 E_J1_to_N1"/>
+    <route id="r_N2S2" edges="E_N2_to_J2 E_J2_to_S2"/>
+    <route id="r_S2N2" edges="E_S2_to_J2 E_J2_to_N2"/>
+    <route id="r_N3S3" edges="E_N3_to_J3 E_J3_to_S3"/>
+    <route id="r_S3N3" edges="E_S3_to_J3 E_J3_to_N3"/>
+    <!-- Surge-specific route: enters at the E_exit side, passes through J2
+         into J1's real east approach, continues out W_entry. -->
+    <route id="r_surge_j2_to_j1" edges="E_E_to_J3 E_J3_to_J2 E_J2_to_J1 E_J1_to_J0 E_J0_to_W"/>
+
+    <!-- Base evening-peak-weighted demand (EVENING_PEAK profile: more E-W
+         flow, 0.30 car / 0.35 motorcycle / 0.15 auto / 0.10 bus / 0.10 truck
+         mix per simulation/scenarios/demand_profiles.py) -->
+    <flow id="f_we_cars" type="car" route="r_WE" begin="0" end="900" probability="0.30"/>
+    <flow id="f_we_autos" type="auto_rickshaw" route="r_WE" begin="0" end="900" probability="0.15"/>
+    <flow id="f_we_bikes" type="motorcycle" route="r_WE" begin="0" end="900" probability="0.35"/>
+    <flow id="f_we_buses" type="bus" route="r_WE" begin="0" end="900" probability="0.10"/>
+
+    <flow id="f_ew_cars" type="car" route="r_EW" begin="0" end="900" probability="0.30"/>
+    <flow id="f_ew_autos" type="auto_rickshaw" route="r_EW" begin="0" end="900" probability="0.15"/>
+    <flow id="f_ew_bikes" type="motorcycle" route="r_EW" begin="0" end="900" probability="0.35"/>
+    <flow id="f_ew_trucks" type="truck" route="r_EW" begin="0" end="900" probability="0.10"/>
+
+    <flow id="f_n0s0" type="car" route="r_N0S0" begin="0" end="900" probability="0.20"/>
+    <flow id="f_s0n0" type="auto_rickshaw" route="r_S0N0" begin="0" end="900" probability="0.20"/>
+    <flow id="f_n1s1" type="car" route="r_N1S1" begin="0" end="900" probability="0.20"/>
+    <flow id="f_s1n1" type="bus" route="r_S1N1" begin="0" end="900" probability="0.10"/>
+    <flow id="f_n2s2" type="motorcycle" route="r_N2S2" begin="0" end="900" probability="0.25"/>
+    <flow id="f_s2n2" type="car" route="r_S2N2" begin="0" end="900" probability="0.20"/>
+    <flow id="f_n3s3" type="auto_rickshaw" route="r_N3S3" begin="0" end="900" probability="0.20"/>
+    <flow id="f_s3n3" type="car" route="r_S3N3" begin="0" end="900" probability="0.20"/>
+
+    <!-- The surge itself: a real step increase in demand specifically on
+         J1's east approach, starting at t=180s (SN-129), at roughly double
+         the base r_EW car probability. -->
+    <flow id="f_surge_j1_east" type="car" route="r_surge_j2_to_j1" begin="180" end="900" probability="0.55"/>
+    <flow id="f_surge_j1_east_bikes" type="motorcycle" route="r_surge_j2_to_j1" begin="180" end="900" probability="0.40"/>
+</routes>

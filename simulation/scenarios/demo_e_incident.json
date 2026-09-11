@@ -1,0 +1,20 @@
+{
+    "id": "E",
+    "name": "Incident",
+    "description": "Carries the honesty beat. Scenario B's surge demand, plus a genuine lane blockage on J1->J2 at t=240s. Indicators must fire from real measurement, and nothing may automate before an operator confirms.",
+    "net_file": "corridor.net.xml",
+    "route_file": "corridor_scenario_e_incident.rou.xml",
+    "duration_s": 300,
+    "seed": 42,
+    "mechanism": "sumo_route_file",
+    "demand_profile": null,
+    "demand_note": "Same base + surge demand as Scenario B (see demo_b_surge.json's demand_note).",
+    "scripted_events": [
+        {
+            "time_s": 240,
+            "edge": "E_J1_to_J2",
+            "lane": "E_J1_to_J2_0",
+            "description": "One auto-rickshaw departs directly onto E_J1_to_J2 and stops on lane 0 for 300s — a real SUMO <stop>, not a scripted 'pretend incident' flag. Live-verified via TraCI: lane mean speed collapses from a ~13.9 m/s free-flow baseline to nearly 0 m/s and detector occupancy (det_J2_W_0) spikes to 25-55% for the duration of the blockage, giving the real anomaly/incident-detection pipeline (Phase 6) genuine measurements to fire indicators from."
+        }
+    ]
+}

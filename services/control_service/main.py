@@ -337,7 +337,8 @@ class ControlService:
             junction_id=tl_id,
             state_vector=state_result.numpy_vector,
             current_phase=telemetry.current_phase,
-            phase_elapsed_s=telemetry.phase_elapsed_s
+            phase_elapsed_s=telemetry.phase_elapsed_s,
+            sim_time_s=telemetry.sim_time_s
         )
         inf_duration = time.perf_counter() - t_start
         CONTROL_INFERENCE_DURATION_SECONDS.labels(controller=controller_name).observe(inf_duration)

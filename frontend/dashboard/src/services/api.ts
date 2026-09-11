@@ -51,6 +51,8 @@ export const api = {
   },
   simulation: {
     start: (scenario: string = 'morning_peak') => axiosInstance.post('/simulation/start', { scenario_profile: scenario }),
+    startScenario: (scenarioId: string) => axiosInstance.post('/simulation/start', { scenario_id: scenarioId }),
+    getScenarios: () => axiosInstance.get('/simulation/scenarios'),
     step: (steps: number = 1) => axiosInstance.post('/simulation/step', { steps }),
     stop: () => axiosInstance.post('/simulation/stop'),
     getState: () => axiosInstance.get('/simulation/state'),

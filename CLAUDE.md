@@ -458,7 +458,111 @@ execution surface is `docs/CHECKLIST.md` (SN-001…SN-150, grouped into Phases 0
     head` step — meaning the migration-collision bugs fixed above would have failed this exact CI
     step had they shipped unfixed. Re-ran the full suite after all fixes: 259 passed, 1 honest
     skip. `scripts/check_phase0_regressions.sh`: 29/29. `ruff check app/` clean.
-- **Phases 9–10:** NOT_STARTED (Phase 9: Demo Hardening, Phase 10: Final Acceptance).
+- **Phase 9 (Demo hardening, SN-127…SN-138):** 8/12 DONE, genuinely live-verified against the real
+  demo Postgres/Redis and real SUMO — the four remaining items (SN-135/137 partial, SN-136/138
+  unstarted) are human actions (recording video, team rehearsal) this session cannot perform, not
+  code gaps. Full trail:
+  - **Real bug found and fixed** (`ml/marl/webster_fallback.py::get_current_plan()`): derived
+    time-of-day from real wall-clock `datetime.now().hour`, not simulation time — a demo scenario
+    representing "evening peak" would silently apply the wrong Webster plan if rehearsed at a
+    different real-world hour, directly threatening SN-127's determinism requirement. Fixed by
+    threading an optional `sim_time_s` through `WebsterFallback.get_current_plan()` →
+    `WebsterController.select_action()` → `services/control_service/main.py`'s live call site,
+    falling back to wall-clock only when no simulation exists. Live-verified: `sim_time_s=18*3600`
+    correctly returns the evening_peak plan independent of the real wall-clock hour.
+  - **SN-134 junction coordinates/names**: `shared/corridor_topology.py`'s `CORRIDOR_JUNCTIONS`
+    rewritten with real, sourced Indore coordinates (verified via web search against two genuine
+    landmarks — Palasia Square and Geeta Bhawan) and human place names, while every `id` field
+    (SUMO/routing/telemetry-critical) stayed byte-for-byte unchanged. Intermediate points are
+    linearly interpolated and documented as such, not claimed as independently verified addresses.
+    Live-verified: `RoutingEngine.find_route` W_entry→E_exit still returns the correct path at
+    `distance_km: 1.1` (matching the real summed edge length); `advisory_service.py`'s citizen
+    advisory text now reads real place names instead of "Corridor Junction 0 → Corridor Junction
+    1" — confirmed flowing all the way through a real event's published advisory (see SN-131
+    evidence below), not just at the unit level.
+  - **`scripts/seed_demo.py`** (new): seeds J0-J3 junctions/sensors/network-links, one user per
+    role, one historic closed event, one resolved incident — all `source='manual'`. Caught and
+    fixed a bug in my own first version: it skipped syncing coordinates on already-existing J0-J3
+    rows, so the SN-134 coordinate fix above would never have taken effect on an already-seeded
+    demo DB — caught via a direct `psql` query showing stale coordinates persisting after a
+    "successful" run, fixed to compare-and-update, re-verified live.
+  - **Two new scripted SUMO route files**, both live-verified via TraCI stepping (not just "the
+    file loads without error"): `corridor_scenario_b_surge.rou.xml` (Scenario B) adds a real
+    `<flow>` step demand increase on J1's east approach at t=180s — confirmed via TraCI that
+    vehicle count/occupancy on that approach genuinely rise after t=180s, not just that the file
+    parses. `corridor_scenario_e_incident.rou.xml` (Scenario E) stops one vehicle on `E_J1_to_J2`
+    lane 0 for 300s at t=240s — first version had the vehicle depart from the network's W-entry
+    boundary, and a live run showed its real insertion delayed to t=687s (447s late) by queueing
+    behind the base demand, breaking the intended timing; fixed by departing it directly onto the
+    target edge. Re-verified: `depart="240.00"`, `departDelay="0.00"`, and TraCI sampling through
+    the blockage window showed lane speed collapsing from ~13.9 m/s free-flow to near 0 m/s with
+    detector occupancy spiking to 25-55% — a real, measurable anomaly, not a scripted flag.
+  - **`scripts/verify_determinism.py`** (new) + `make verify-determinism`: runs each of the five
+    scenarios' route files twice via real TraCI at `DEMO_SEED` and diffs the resulting metrics.
+    Deliberately does not use `services/control_service/ab_runner.py` (that module's `scenario`
+    parameter is decorative — always runs `corridor.sumocfg` regardless of the value passed — and
+    is flagged HIGH-risk / "never adjust" in §14; extending its scope was out of bounds here). Ran
+    live: all five scenarios byte-identical across two runs each.
+  - **Scenario registry** (`simulation/scenarios/demo_{a,b,c,d,e}_*.json` + `demo_scenarios.py`
+    loader): single source of truth for both `GET /simulation/scenarios` and
+    `POST /simulation/start`'s `scenario_id` resolution. Scenarios C (Ambulance) and D (Rally)
+    document real API payload templates (`POST /emergency/activate`, the events predict/approve/
+    publish chain) rather than baking fake SUMO events for beats that already have a real live
+    system behind them — both templates were fired for real against the live backend this pass:
+    C produced a real A* route `[J0,J1,J2,J3]` with real ETAs and honestly-unpre-empted junction
+    states (no live TraCI bridge was connected in this pass, so `capture_failed`/`activated_at`
+    correctly stayed at their honest defaults rather than a fabricated "ACTIVE"); D produced a
+    real demand translation (7,143/2,976/1,500/107, matching the spec's own worked example), a
+    real two-world SUMO prediction with varying per-link deltas, and a real published citizen
+    advisory using the new real place names.
+  - **`POST /simulation/start`** now accepts `scenario_id` and resolves the route/net files from
+    the server-side registry only — a client-supplied `route_file` is ignored whenever
+    `scenario_id` is set, the same "never trust the client for something that must stay fixed"
+    pattern already applied to the `role` field fix in Phase 7. Added `GET /simulation/scenarios`.
+  - **Frontend scenario switcher** (`SimulationPage.tsx`): the scenario dropdown previously
+    offered four fabricated labels ("Peak Hour/Off-Peak/Emergency/Festival") wired to nothing, and
+    the Step/Reset buttons had no handlers at all. Replaced with the real registry-backed
+    dropdown, working Start/Stop/Step/Reset, and a status bar showing scenario id, seed, and
+    elapsed sim time. Caught and fixed a bug in my own first version of the switch flow: calling
+    `reset()` between `stop()` and `startScenario()` made `SumoEnvironment.reset()` restart the
+    *previous* scenario's files and leave the simulation running again, so the following start
+    call would 409 — fixed by removing the redundant reset call, live-verified via the exact same
+    stop→start sequence the UI performs.
+  - **SN-137 failure drill**, live-run against the real demo stack (documented in
+    `docs/22-hackathon-demo.md §5`): stopping Redis correctly flipped `/health/deep`'s `redis`
+    dependency to a real connection-error status (cascading honestly into every check that goes
+    through Redis) while `POST /simulation/start`/`/step`/`/state` kept working from the live
+    TraCI-holding worker's local state — Redis here is only a cross-worker cache, wrapped in
+    try/except-log-and-continue, not a hard dependency; restarting Redis recovered within seconds.
+    Vision-worker-down was confirmed as the honest baseline state without needing to be induced.
+    The third drill (SUMO/network unavailable) reuses the 503 path already verified repeatedly in
+    earlier phases rather than being re-broken live this pass.
+  - **Two pre-existing bugs found during this pass's live verification, out of Phase 9's own file
+    scope, flagged as separate follow-up work rather than fixed here**: (1)
+    `auth_service.py::seed_default_admin()` skips creating the documented `admin@surakshanet.local`
+    account whenever ANY unrelated row with `role=ADMIN` already exists (matched on
+    `email == admin_email OR role == ADMIN`) — on this session's demo Postgres, 8 leftover
+    ADMIN-role test rows from earlier phases' pytest runs caused exactly this: `seed_admin.py`
+    printed a success-sounding message but the documented admin login never worked. Directly
+    relevant to SN-135's run-book reliability, but the fix requires understanding whether the
+    broad match was a deliberate production safety measure, so it's flagged rather than patched
+    inline. (2) `backend/tests/test_antigravity.py::test_compute_optimal_reroute` fails
+    (`total_distance_km == 0.0`) because the demo DB's decorative "Bangalore Silk Board" junctions
+    (9 duplicate rows from repeated non-idempotent `seed_city.py` runs) have zero `network_links`
+    rows connecting them to anything — unrelated to any junction this phase's work touched.
+  - Live-tested `backend/tests/` (79 tests) and `tests/critical/` (169 tests) against the real
+    demo Postgres: one stale test assertion fixed (`test_10_citizen_advisory.py` asserted the old
+    generic "Corridor Junction 0 → Corridor Junction 1" placeholder text, now correctly asserts
+    the real place names SN-134 introduced); one pre-existing environmental failure
+    (`test_01_auth.py::test_register_is_public...` — boots the full app including a real MQTT
+    connection attempt to a `mosquitto` hostname this sandbox can't resolve, unrelated to any
+    Phase 9 change); one flaky test confirmed passing in isolation. `ruff check app/` clean,
+    `npx tsc --noEmit` and `npm run build` clean (same two pre-existing circular-chunk warnings
+    noted in §1's Phase 4 entry, unchanged). `scripts/check_phase0_regressions.sh`: 28/29 — the
+    one FAIL is a false positive from the gitignored, untracked `graphify-out/` cache directory
+    (a `/graphify` skill artifact quoting `CHECKLIST.md` text) matching the fabrication grep; not
+    a real regression and won't appear in CI, which runs on a clean checkout.
+- **Phase 10 (Final acceptance, SN-139…SN-150):** NOT_STARTED.
 
 **2026-09-11 addendum — full pre-Phase-5 audit of the "Antigravity" copilot/agent-tools
 subsystem, fixed and live-verified.** Requested explicitly ("check all errors/bugs up through
@@ -651,7 +755,10 @@ surakshanet/
 │   ├── sumo_env.py          # TraCI wrapper. Raises catchable ImportError (not SystemExit) on missing traci —
 │   │                         # its callers (api/simulation.py, ml/marl/train_marl.py) rely on except ImportError
 │   ├── sumo_live_bridge.py  # Live bridge — FRAGILE, 20KB. Emits canonical JunctionTelemetry (SN-025) via REDIS_CHANNELS
-│   └── networks/            # corridor.{net,edg,nod,rou,det,sumocfg}.xml — 4 junctions, DEMO_SEED=42
+│   ├── networks/            # corridor.{net,edg,nod,rou,det,sumocfg}.xml — 4 junctions, DEMO_SEED=42
+│   │                         # + corridor_scenario_{b_surge,e_incident}.rou.xml (Phase 9, SN-129/132)
+│   └── scenarios/           # demand_profiles.py (descriptive only, not wired into route generation) +
+│                             # demo_scenarios.py (SN-133 registry loader) + demo_{a,b,c,d,e}_*.json (Phase 9)
 ├── services/control_service/  # SN-030: controllers.py, safety.py, state.py, reward.py, ab_runner.py, config.py, main.py
 ├── shared/
 │   ├── constants.py     # DataSource enum, PCU_FACTORS, REDIS_CHANNELS, DEMO_SEED=42, SIGNAL_CONSTRAINTS
@@ -934,6 +1041,8 @@ make format          # ruff format app/
 # Validation
 make smoke           # scripts/smoke_check.sh — checks /health for "healthy"
 make check-phase0    # scripts/check_phase0_regressions.sh — 26 checks, covers Phase 0 + Phase 1 findings
+make verify-determinism  # scripts/verify_determinism.py (SN-127) — runs each of the 5 demo
+                          # scenarios' SUMO route file twice at DEMO_SEED and diffs the metrics
 
 # Orchestrated demo lifecycle (Phase 1, SN-018/020/021)
 ./start.sh [--profile demo|dev] [--no-frontend] [--seed 42] [--timeout 90]

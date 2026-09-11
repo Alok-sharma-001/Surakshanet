@@ -20,8 +20,12 @@ interface SimState {
   running?: boolean;
   step?: number;
   sim_time?: string;
+  simulation_time?: number;
   vehicles?: number;
   source?: string;
+  scenario?: string;
+  scenario_id?: string;
+  seed?: number;
 }
 
 interface SimMetrics {
@@ -33,12 +37,28 @@ interface SimMetrics {
   source?: string;
 }
 
+interface DemoScenario {
+  id: string;
+  name: string;
+  description: string;
+  seed: number;
+  duration_s: number | null;
+  mechanism: string;
+}
+
+// SN-133: the dropdown lists whatever GET /simulation/scenarios returns —
+// never a hardcoded label set. The page previously offered "Peak Hour /
+// Off-Peak / Emergency / Festival", none of which corresponded to a real
+// scenario or did anything when selected.
 export default function SimulationPage() {
-  const [speed, setSpeed] = useState('1x');
   const [state, setState] = useState<SimState | null>(null);
   const [metrics, setMetrics] = useState<SimMetrics | null>(null);
   const [unavailable, setUnavailable] = useState<string | null>(null);
   const [throughputHistory, setThroughputHistory] = useState<{ step: number; throughput: number }[]>([]);
+  const [scenarios, setScenarios] = useState<DemoScenario[]>([]);
+  const [selectedScenarioId, setSelectedScenarioId] = useState<string>('');
+  const [switching, setSwitching] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const isRunning = state?.running === true;
 
@@ -71,6 +91,17 @@ export default function SimulationPage() {
     return () => clearInterval(t);
   }, []);
 
+  useEffect(() => {
+    api.simulation.getScenarios()
+      .then((res) => {
+        const list: DemoScenario[] = res.data?.scenarios ?? [];
+        setScenarios(list);
+        if (list.length && !selectedScenarioId) setSelectedScenarioId(list[0].id);
+      })
+      .catch(() => setScenarios([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Built from measured samples as they arrive, never pre-filled.
   useEffect(() => {
     if (!isRunning || metrics?.throughput === null || metrics?.throughput === undefined) return;
@@ -80,10 +111,64 @@ export default function SimulationPage() {
     ]);
   }, [metrics?.throughput, state?.step, isRunning]);
 
-  const toggleRun = async () => {
+  // SN-133: select -> state reset -> start at seed 42 (server-enforced,
+  // never client-supplied). Completes in one click.
+  //
+  // Only stop() before starting, never a separate reset() in between:
+  // SumoEnvironment.reset() (called by POST /simulation/reset) itself
+  // stops then immediately restarts the PREVIOUS net/route files, which
+  // leaves the simulation "running" again and makes the follow-up
+  // startScenario() call fail with 409 "already running". POST
+  // /simulation/start already tears down and replaces sim_instance with a
+  // fresh SumoEnvironment for the newly selected scenario, so a bare
+  // stop() is the correct and sufficient reset here.
+  const switchScenario = async () => {
+    if (!selectedScenarioId) return;
+    setSwitching(true);
+    setActionError(null);
+    setThroughputHistory([]);
     try {
       if (isRunning) await api.simulation.stop();
-      else await api.simulation.start();
+      await api.simulation.startScenario(selectedScenarioId);
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail;
+      setActionError(typeof detail === 'object' ? (detail?.reason ?? JSON.stringify(detail)) : (detail ?? 'Failed to start scenario.'));
+    }
+    setSwitching(false);
+    refresh();
+  };
+
+  const toggleRun = async () => {
+    setActionError(null);
+    try {
+      if (isRunning) {
+        await api.simulation.stop();
+      } else if (selectedScenarioId) {
+        await api.simulation.startScenario(selectedScenarioId);
+      } else {
+        await api.simulation.start();
+      }
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail;
+      setActionError(typeof detail === 'object' ? (detail?.reason ?? JSON.stringify(detail)) : (detail ?? 'Action failed.'));
+    }
+    refresh();
+  };
+
+  const stepOnce = async () => {
+    try {
+      await api.simulation.step(1);
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail;
+      setActionError(typeof detail === 'object' ? (detail?.reason ?? JSON.stringify(detail)) : (detail ?? 'Step failed.'));
+    }
+    refresh();
+  };
+
+  const resetSim = async () => {
+    setThroughputHistory([]);
+    try {
+      await api.simulation.reset();
     } catch {
       /* refresh() reports the resulting state */
     }
@@ -99,14 +184,27 @@ export default function SimulationPage() {
         </div>
         
         <div className="flex items-center gap-3 bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-2">
-          <select className="border border-slate-200 rounded-lg px-3 py-2 bg-white text-sm focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none">
-            <option>Peak Hour</option>
-            <option>Off-Peak</option>
-            <option>Emergency</option>
-            <option>Festival</option>
+          <select
+            className="border border-slate-200 rounded-lg px-3 py-2 bg-white text-sm focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none min-w-[220px]"
+            value={selectedScenarioId}
+            onChange={(e) => setSelectedScenarioId(e.target.value)}
+            disabled={!scenarios.length}
+          >
+            {!scenarios.length && <option value="">Scenarios unavailable</option>}
+            {scenarios.map((s) => (
+              <option key={s.id} value={s.id}>{s.id} — {s.name}</option>
+            ))}
           </select>
+          <button
+            className="px-3 py-2 rounded-lg text-sm font-medium bg-sky-100 text-sky-700 hover:bg-sky-200 transition-colors disabled:opacity-50"
+            onClick={switchScenario}
+            disabled={!selectedScenarioId || switching}
+            title="Reset state and start the selected scenario at seed 42"
+          >
+            {switching ? 'Switching…' : 'Switch Scenario'}
+          </button>
           <div className="w-px h-6 bg-slate-200 mx-1"></div>
-          <button 
+          <button
             className={clsx(
               "p-2 rounded-lg transition-colors",
               isRunning ? "bg-red-100 text-red-600 hover:bg-red-200" : "bg-emerald-100 text-emerald-600 hover:bg-emerald-200"
@@ -116,25 +214,33 @@ export default function SimulationPage() {
           >
             {isRunning ? <Square className="w-5 h-5" fill="currentColor" /> : <Play className="w-5 h-5" fill="currentColor" />}
           </button>
-          <button className="p-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors" title="Step">
+          <button
+            className="p-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50"
+            title="Step"
+            onClick={stepOnce}
+            disabled={!isRunning}
+          >
             <FastForward className="w-5 h-5" />
           </button>
-          <select 
-            className="border-none rounded-lg px-2 py-1 bg-slate-50 text-sm font-medium focus:ring-0 outline-none w-16"
-            value={speed}
-            onChange={(e) => setSpeed(e.target.value)}
-          >
-            <option value="1x">1x</option>
-            <option value="2x">2x</option>
-            <option value="5x">5x</option>
-            <option value="10x">10x</option>
-          </select>
           <div className="w-px h-6 bg-slate-200 mx-1"></div>
-          <button className="p-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors" title="Reset">
+          <button className="p-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors" title="Reset" onClick={resetSim}>
             <RotateCcw className="w-5 h-5" />
           </button>
         </div>
       </div>
+
+      {scenarios.length > 0 && selectedScenarioId && (
+        <p className="text-xs text-slate-500 -mt-2">
+          {scenarios.find((s) => s.id === selectedScenarioId)?.description}
+        </p>
+      )}
+
+      {actionError && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+          <h3 className="text-sm font-bold text-amber-800">Action failed</h3>
+          <p className="text-sm text-amber-700 mt-1">{actionError}</p>
+        </div>
+      )}
 
       {unavailable && (
         <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
@@ -146,12 +252,22 @@ export default function SimulationPage() {
       <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm px-6 py-5 flex items-center justify-between">
         <div className="flex gap-8">
           <div>
+            <div className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Scenario</div>
+            <div className="font-mono text-xl font-bold text-slate-900">{state?.scenario_id ?? state?.scenario ?? DASH}</div>
+          </div>
+          <div>
+            <div className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Seed</div>
+            <div className="font-mono text-xl font-bold text-slate-900">{fmt(state?.seed)}</div>
+          </div>
+          <div>
             <div className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Current Step</div>
             <div className="font-mono text-xl font-bold text-slate-900">{fmt(state?.step)}</div>
           </div>
           <div>
-            <div className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Sim Time</div>
-            <div className="font-mono text-xl font-bold text-slate-900">{state?.sim_time ?? DASH}</div>
+            <div className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Elapsed Sim Time</div>
+            <div className="font-mono text-xl font-bold text-slate-900">
+              {state?.simulation_time !== undefined ? `${fmt(state.simulation_time)}s` : (state?.sim_time ?? DASH)}
+            </div>
           </div>
         </div>
         <div>

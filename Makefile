@@ -1,4 +1,4 @@
-.PHONY: help build up down dev test test-critical test-unit test-integration test-sumo test-backend test-frontend test-e2e lint format migrate smoke clean
+.PHONY: help build up down dev test test-critical test-unit test-integration test-sumo test-backend test-frontend test-e2e lint format migrate smoke check-phase0 verify-determinism clean
 
 help:
 	@echo "Surakshanet ITS - Development & Operations Commands"
@@ -54,6 +54,9 @@ test-e2e:
 
 check-phase0:
 	./scripts/check_phase0_regressions.sh
+
+verify-determinism:
+	@if [ -f .venv/bin/python3 ]; then .venv/bin/python3 scripts/verify_determinism.py; else python3 scripts/verify_determinism.py; fi
 
 lint:
 	docker exec surakshanet-backend ruff check app/

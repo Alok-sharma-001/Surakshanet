@@ -141,13 +141,14 @@ class WebsterController(BaseController):
         current_phase: int,
         phase_elapsed_s: float,
         demands: Optional[Dict[str, float]] = None,
+        sim_time_s: Optional[float] = None,
         **kwargs
     ) -> ControllerDecision:
         # Determine plan based on current demands or time of day
         if demands:
             plan = self.webster.calculate_webster_optimal(demands)
         else:
-            plan = self.webster.get_current_plan()
+            plan = self.webster.get_current_plan(sim_time_s=sim_time_s)
 
         ns_green = plan.get("ns_green", 40)
         ew_green = plan.get("ew_green", 40)

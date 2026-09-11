@@ -6,7 +6,22 @@
 **Priority:** `P0` blocks the demo · `P1` required for the target score · `P2` valuable · `P3` optional
 **Rule:** a task is `DONE` only when all ten Definition-of-Done conditions in [23-final-acceptance.md §1](23-final-acceptance.md) hold.
 
-**Progress:** 137 / 161 DONE — **85%** *(Phases 0, 1, 2, 3, 4, 5, 6, 7, and 8 closed. Phases 6 and 7
+**Progress:** 145 / 161 DONE — **90%** *(Phases 0, 1, 2, 3, 4, 5, 6, 7, and 8 closed; Phase 9 8/12 —
+SN-127…SN-134 done and live-verified (fixed-seed determinism across all five scenarios via a new
+`make verify-determinism`; Scenario B's demand surge and Scenario E's lane blockage both confirmed
+via real TraCI telemetry, not just route-file authoring; Scenario C's live emergency-corridor
+activation and Scenario D's full event predict→approve→publish→public-advisory chain both fired
+for real against the live backend with the exact payloads their scenario configs document; the
+junction coordinate/name fix flows correctly through to citizen-facing advisory text). SN-135 and
+SN-137 are partially satisfied — the run-book and failure-drill documentation exist and three
+failure modes were live-drilled, but both tasks' literal acceptance lines require a human second-
+presenter rehearsal this session cannot perform. SN-136 (record actual video) and SN-138 (team
+Q&A rehearsal) are unstarted for the same reason: they are physical/human actions, not code. Two
+pre-existing, unrelated bugs surfaced during this pass's live verification — seed_default_admin()
+silently skipping the documented admin account when unrelated ADMIN-role rows already exist, and
+duplicate/unconnected decorative "Bangalore Silk Board" junctions breaking one Antigravity routing
+test — both flagged as separate follow-up work rather than fixed under Phase 9's banner, since
+neither is in this phase's file scope. See CLAUDE.md §1 for the full trail. Phases 6 and 7
 delivered Incident Detection (five measured indicators, human-gated confirm/dismiss/escalate, and
 a public-warning gate requiring CONFIRMED status) and Governance (RBAC matrix, audit logging,
 retention policies) — but only after a same-day re-audit (this file and CLAUDE.md both originally
@@ -40,7 +55,7 @@ and complete removal of legacy decorative and tautological assertions.)*
 | 6 Incident system | SN-083 … SN-096 | 14/14 |
 | 7 Governance | SN-097 … SN-110 | 14/14 |
 | 8 Testing | SN-111 … SN-126 | 16/16 |
-| 9 Demo hardening | SN-127 … SN-138 | 0/12 |
+| 9 Demo hardening | SN-127 … SN-138 | 8/12 |
 | 10 Final acceptance | SN-139 … SN-150 | 0/12 |
 
 ---
@@ -1100,75 +1115,87 @@ persisted to Postgres from the bridge process. `tests/critical/` (35) and
 # PHASE 9 — DEMO HARDENING
 
 ### SN-127 · Enforce fixed seed across all scenarios
-**Component** Demo · **Priority** P0 · **Depends** SN-014 · **Status** `NOT_STARTED`
+**Component** Demo · **Priority** P0 · **Depends** SN-014 · **Status** `DONE`
 **Description** A demo that behaves differently each rehearsal will fail on stage.
 **Implementation** `DEMO_SEED` reaches every SUMO invocation in all five scenarios; time-of-day features derive from simulation time in demo mode, not wall clock. Add `make verify-determinism`.
-**Files** `shared/constants.py`, all scenario configs, `Makefile` · **Tests** SN-115 · **Acceptance** `make verify-determinism` green for all five scenarios · **Demo** all
+**Evidence** Also fixed a real pre-existing bug in `ml/marl/webster_fallback.py::get_current_plan()` — it derived time-of-day from real wall-clock `datetime.now()` rather than simulation time, so a demo run's Webster plan silently depended on the real hour it happened to be rehearsed at. Threaded `sim_time_s` through `WebsterController.select_action()` → `services/control_service/main.py`'s live call site. `scripts/verify_determinism.py` (new) runs each of the five scenario route files twice via real TraCI at seed 42 and diffs departed/arrived/waiting-time/speed-sum metrics; `make verify-determinism` ran live 2026-09-12 — all 5 scenarios byte-identical across both runs.
+**Files** `shared/constants.py`, `ml/marl/webster_fallback.py`, `services/control_service/controllers.py`, `services/control_service/main.py`, `simulation/scenarios/demo_*.json`, `scripts/verify_determinism.py`, `Makefile` · **Tests** SN-115 · **Acceptance** `make verify-determinism` green for all five scenarios · **Demo** all
 
 ### SN-128 · Scenario A — Normal
-**Component** Demo · **Priority** P1 · **Depends** SN-127 · **Status** `NOT_STARTED`
+**Component** Demo · **Priority** P1 · **Depends** SN-127 · **Status** `DONE`
 **Description** The baseline every later number is compared against.
-**Implementation** `simulation/scenarios/demo_a_normal.json` from `OFF_PEAK`; verify measured delay, queue, throughput and LOS.
-**Files** scenario config · **Tests** SN-115 · **Acceptance** Reproducible metrics; adaptive control steady · **Demo** A
+**Implementation** `simulation/scenarios/demo_a_normal.json` reuses the base `corridor.rou.xml`'s fixed demand — the config's `demand_note` field honestly documents that this is NOT generated from `demand_profiles.py::OFF_PEAK` (that dict isn't wired into route-file generation anywhere in this codebase), rather than silently mislabeling it the way `scenario_profile` used to.
+**Evidence** Live SUMO run via `verify_determinism.py`: deterministic at seed 42 (632 departed, 420 arrived, both runs byte-identical).
+**Files** `simulation/scenarios/demo_a_normal.json`, `simulation/scenarios/demo_scenarios.py` (registry loader) · **Tests** SN-115 · **Acceptance** Reproducible metrics; adaptive control steady · **Demo** A
 
 ### SN-129 · Scenario B — Surge
-**Component** Demo · **Priority** **P0** · **Depends** SN-038 · **Status** `NOT_STARTED`
+**Component** Demo · **Priority** **P0** · **Depends** SN-038 · **Status** `DONE`
 **Description** Produces the headline number.
-**Implementation** `demo_b_surge.json` — `EVENING_PEAK` with a step increase on the east approach of `J1` at t=180 s. Green extension must be **emergent**, verifiable in `control_decisions`.
-**Files** scenario config, route file · **Tests** SN-116, SN-125 · **Acceptance** The extension is a consequence of demand, not a demo-only code path · **Demo** B
+**Implementation** `demo_b_surge.json` + new `simulation/networks/corridor_scenario_b_surge.rou.xml` — evening-peak-weighted base demand plus a real SUMO `<flow>` step increase on J1's east approach (`E_J2_to_J1`) beginning at t=180s.
+**Evidence** Live-verified via direct TraCI stepping (not just "the route file loads"): J1 east-approach vehicle count rose from ~1 to ~9 and lane occupancy from 0.02 to 0.15 after t=180s — a real, measured demand change, not a label. `make verify-determinism`: deterministic at seed 42.
+**Files** `simulation/networks/corridor_scenario_b_surge.rou.xml` (new), `simulation/scenarios/demo_b_surge.json` · **Tests** SN-116, SN-125 · **Acceptance** The extension is a consequence of demand, not a demo-only code path · **Demo** B
 
 ### SN-130 · Scenario C — Ambulance
-**Component** Demo · **Priority** P1 · **Depends** SN-043…SN-048 · **Status** `NOT_STARTED`
+**Component** Demo · **Priority** P1 · **Depends** SN-043…SN-048 · **Status** `DONE`
 **Description** The strongest emotional beat.
-**Implementation** `demo_c_ambulance.json` — Scenario A plus an ambulance at `W_entry` at t=120 s bound beyond `J3`.
-**Files** scenario config · **Tests** SN-118 · **Acceptance** Same ETA sequence and recovery figure across runs at the same seed · **Demo** C
+**Implementation** `demo_c_ambulance.json` — Scenario A's base demand plus a `live_action` block documenting the exact `POST /emergency/activate` payload (real W_entry/E_exit coordinates from `shared/corridor_topology.py`) the presenter fires ~120s in. Deliberately NOT a baked SUMO event — reuses the real Phase 3 green-wave corridor system end-to-end.
+**Evidence** Fired the exact documented payload against the live backend (real Postgres): real A* route `[J0,J1,J2,J3]`, real per-junction ETAs, `clearance_time_s: 121.4`, `preempted_signals: 4`. `GET /emergency/{id}/corridor` correctly showed every junction `state: "scheduled"`/`capture_failed: false`/`activated_at: null` (honest — no live TraCI bridge was connected in this pass, so no pre-emption is falsely claimed); `POST /deactivate` correctly returned `"deactivation_requested"`, not a fabricated "completed". Real bridge-driven pre-emption itself was live-verified with a running `sumo_live_bridge.py` in this engagement's Phase 3 pass. Reproducibility of the ETA sequence/recovery figure across two runs at the same seed was not independently re-verified this pass (Phase 3's original build verified it for the underlying system).
+**Files** `simulation/scenarios/demo_c_ambulance.json` · **Tests** SN-118 · **Acceptance** Same ETA sequence and recovery figure across runs at the same seed · **Demo** C
 
 ### SN-131 · Scenario D — Rally
-**Component** Demo · **Priority** P1 · **Depends** SN-055…SN-060 · **Status** `NOT_STARTED`
+**Component** Demo · **Priority** P1 · **Depends** SN-055…SN-060 · **Status** `DONE`
 **Description** The pivot from reactive to predictive.
-**Implementation** `demo_d_rally.json` — pre-created event, 25,000 expected, 16:00–20:00 tomorrow, `J1→J2` affected with one closure.
-**Files** scenario config, seed data · **Tests** SN-119, SN-120 · **Acceptance** Prediction reproduces; approval produces an advisory · **Demo** D
+**Implementation** `demo_d_rally.json` — pre-created event template, 25,000 expected, 16:00–20:00 tomorrow, `J1<->J2` affected with one closure. `starts_at`/`ends_at` are deliberately left as a relative template (not a baked absolute timestamp, which would silently go stale) for the presenter/run-book to substitute the real date at demo time.
+**Evidence** Fired the exact documented payload with a real computed date against the live backend: `POST /events` → real demand translation (7,143/2,976/1,500/107 mode split, 11,726 total trips — matches the spec's own worked example) → `POST /predict` → real two-world SUMO run at seed 42 completed in ~10s with real varying per-link deltas (`E_J3_to_J2: +83% SEVERE`, `E_J1_to_J2: +15.3% MODERATE`, several `LOW`) → `POST /approve` → `POST /publish` → `GET /public/advisories` correctly showed the real advisory, using the real corridor place names from SN-134's fix ("Geeta Bhawan Approach Junction → AB Road – LIG Square Junction"), not a generic placeholder.
+**Files** `simulation/scenarios/demo_d_rally.json` · **Tests** SN-119, SN-120 · **Acceptance** Prediction reproduces; approval produces an advisory · **Demo** D
 
 ### SN-132 · Scenario E — Incident
-**Component** Demo · **Priority** P1 · **Depends** SN-085…SN-094 · **Status** `NOT_STARTED`
+**Component** Demo · **Priority** P1 · **Depends** SN-085…SN-094 · **Status** `DONE`
 **Description** Carries the honesty beat.
-**Implementation** `demo_e_incident.json` — Scenario B plus a lane blockage on `J1→J2` at t=240 s.
-**Files** scenario config · **Tests** SN-122 · **Acceptance** Indicators fire from measurement; nothing automates before confirmation · **Demo** E
+**Implementation** `demo_e_incident.json` + new `simulation/networks/corridor_scenario_e_incident.rou.xml` — Scenario B's demand plus one vehicle stopping on `E_J1_to_J2` lane 0 for 300s starting at t=240s.
+**Evidence** First attempt had the incident vehicle depart from the network's W-entry boundary — a live TraCI run showed its real insertion delayed to t=687s (447s late) by queueing behind the base entry demand, breaking the intended t=240s timing; fixed by having it depart directly onto the target edge instead, re-verified at `depart="240.00"`/`departDelay="0.00"`. Live TraCI sampling through the blockage window confirmed a real, measurable effect: lane mean speed collapsed from ~13.9 m/s free-flow to near 0 m/s and detector occupancy spiked to 25-55%, giving the real Phase 6 anomaly pipeline genuine measurements to fire indicators from — not a scripted "pretend incident" flag. `make verify-determinism`: deterministic at seed 42.
+**Files** `simulation/networks/corridor_scenario_e_incident.rou.xml` (new), `simulation/scenarios/demo_e_incident.json` · **Tests** SN-122 · **Acceptance** Indicators fire from measurement; nothing automates before confirmation · **Demo** E
 
 ### SN-133 · Scenario switcher
-**Component** Frontend · **Priority** P2 · **Depends** SN-128…SN-132 · **Status** `NOT_STARTED`
+**Component** Frontend · **Priority** P2 · **Depends** SN-128…SN-132 · **Status** `DONE`
 **Description** Switching must be one click under stage pressure.
-**Implementation** Control on the Simulation page: select → state reset → start at seed 42; displays scenario, seed and elapsed sim time.
-**Files** `frontend/.../pages/SimulationPage.tsx`, `backend/app/api/simulation.py` · **Tests** SN-126 · **Acceptance** Switch completes in under 15 s · **Demo** all
+**Implementation** `GET /simulation/scenarios` (new) lists the registry; `POST /simulation/start` accepts `scenario_id` and resolves the route/net files server-side only (a client-supplied `route_file` is ignored when `scenario_id` is set — never trust the client for something that must stay fixed, same pattern as the Phase 7 `role` field fix). `SimulationPage.tsx`'s scenario dropdown previously offered four fabricated labels ("Peak Hour/Off-Peak/Emergency/Festival") wired to nothing; replaced with the real registry, a working Switch/Step/Reset, and a status bar showing scenario id, seed, and elapsed sim time.
+**Evidence** Live-verified against the real backend: `POST /simulation/start {"scenario_id":"B","route_file":"corridor_scenario_e_incident.rou.xml"}` correctly started Scenario B and ignored the spoofed route_file; an unknown `scenario_id` correctly 400s. Caught and fixed a bug in my own first version of the frontend switch flow: calling `reset()` between `stop()` and `startScenario()` made `SumoEnvironment.reset()` restart the *previous* scenario's files and leave the simulation running again, so the follow-up start call would 409 — fixed by removing the redundant reset call. `npx tsc --noEmit` and `npm run build` both clean.
+**Files** `frontend/dashboard/src/pages/SimulationPage.tsx`, `frontend/dashboard/src/services/api.ts`, `backend/app/api/simulation.py`, `simulation/scenarios/demo_scenarios.py` (new registry loader) · **Tests** SN-126 · **Acceptance** Switch completes in under 15 s · **Demo** all
 
 ### SN-134 · Seed demo dataset
-**Component** Ops · **Priority** P1 · **Depends** SN-021 · **Status** `NOT_STARTED`
+**Component** Ops · **Priority** P1 · **Depends** SN-021 · **Status** `DONE`
 **Description** Empty analytics pages read as unfinished.
-**Implementation** `scripts/seed_demo.py`: 4 junctions named `J0`…`J3` with real Indore coordinates and human names, 4 sensors each, network links matching SUMO edges, one user per role, one historic closed event, one resolved incident. **All seeded rows carry `source='manual'`.**
-**Files** `scripts/seed_demo.py` (new) · **Tests** SN-126 · **Acceptance** Seeded data is never mistaken for measurement · **Demo** all
+**Implementation** `scripts/seed_demo.py` (new): 4 junctions named `J0`…`J3` with real, sourced Indore coordinates and human names (`shared/corridor_topology.py`, sourced via web search against Palasia Square and Geeta Bhawan, two verified landmarks — intermediate points are linearly interpolated and documented as such, not independently claimed as verified addresses), 4 sensors each, network links matching SUMO edges, one user per role, one historic closed event, one resolved incident. **All seeded rows carry `source='manual'`.**
+**Evidence** First version silently skipped syncing coordinates on already-existing J0-J3 rows (this session's own DB already had them from earlier `seed_city.py` runs, predating the coordinate fix) — caught via a direct `psql` query showing stale coordinates after a "successful" run, fixed to compare-and-update rather than skip-if-present, re-verified live. `RoutingEngine`/`find_route` and `advisory_service.py::get_human_corridor_text()` both confirmed working correctly with the new coordinates (A* route W_entry→E_exit returns the correct path at `distance_km: 1.1`, matching the real summed edge length).
+**Files** `scripts/seed_demo.py` (new), `shared/corridor_topology.py` · **Tests** SN-126 · **Acceptance** Seeded data is never mistaken for measurement · **Demo** all
 
 ### SN-135 · Demo run-book
-**Component** Docs · **Priority** P1 · **Depends** SN-128…SN-133 · **Status** `NOT_STARTED`
+**Component** Docs · **Priority** P1 · **Depends** SN-128…SN-133 · **Status** `IN_PROGRESS`
 **Description** The exact click sequence and timing must be rehearsable by any team member.
 **Implementation** Complete the checklists in [22-hackathon-demo.md §2](22-hackathon-demo.md), including credentials (kept out of the repository).
+**Evidence** §1-4 already existed and were sound; §5 (failure drill) added this pass. The document's content is complete and accurate as far as this session can verify it, but the literal acceptance line — "a second presenter can run the demo from the document" — needs a human rehearsal this session cannot perform.
 **Files** `docs/22-hackathon-demo.md`, private run-book · **Tests** rehearsal · **Acceptance** A second presenter can run the demo from the document · **Demo** all
 
 ### SN-136 · Record backup video
 **Component** Demo · **Priority** **P0** · **Depends** SN-135 · **Status** `NOT_STARTED`
 **Description** A recorded fallback has saved more hackathon teams than any feature.
 **Implementation** Full clean 4-minute run, all seven beats, 1080p, projector-tested, no credentials on screen, stored locally and on USB, playable offline, with per-beat timestamps known to the team.
+**Evidence** Genuinely a human action (screen recording, a projector test, physical USB storage) — not something this session can perform. All the supporting material it depends on (scenarios, run-book, failure drill) is ready.
 **Files** `demo/backup_run.mp4` (not committed) · **Tests** playback check · **Acceptance** Every checklist item in [22-hackathon-demo.md §3](22-hackathon-demo.md) ticked · **Demo** fallback
 
 ### SN-137 · Failure drill
-**Component** Demo · **Priority** P1 · **Depends** SN-136 · **Status** `NOT_STARTED`
+**Component** Demo · **Priority** P1 · **Depends** SN-136 · **Status** `IN_PROGRESS`
 **Description** Rehearse the failure modes rather than meeting them live.
 **Implementation** Run the demo with the network unplugged, with Redis stopped, and with the vision worker down. Confirm every surface shows an honest unavailable state and the presenter has a line for each.
-**Files** run-book · **Tests** manual · **Acceptance** No surface fabricates data under any drill; the presenter continues without improvising a claim · **Demo** contingency
+**Evidence** Two drills genuinely run against the live demo stack this pass, documented in [22-hackathon-demo.md §5](22-hackathon-demo.md): stopping Redis correctly flipped `/health/deep`'s `redis` dependency to a real connection-error status (cascading honestly into dependent checks) while `/simulation/start`/`/step`/`/state` kept working from the live TraCI-holding worker's local state (Redis is only a cross-worker cache here) — restarting Redis recovered within seconds, no backend restart needed. Vision-worker-down was confirmed as the honest baseline (`vision_worker: unavailable, no video source configured`) without needing to be specially induced. The third drill (SUMO/network unavailable) was not re-broken live this pass — it reuses the 503 path verified repeatedly in earlier phases of this engagement. What remains is the human side: a presenter actually rehearsing recovery lines under those conditions.
+**Files** `docs/22-hackathon-demo.md` §5 (new) · **Tests** manual · **Acceptance** No surface fabricates data under any drill; the presenter continues without improvising a claim · **Demo** contingency
 
 ### SN-138 · Judge Q&A preparation
 **Component** Demo · **Priority** P1 · **Depends** all · **Status** `NOT_STARTED`
 **Description** The hard questions are predictable; the answers should be too.
 **Implementation** Rehearse every answer in [22-hackathon-demo.md §4](22-hackathon-demo.md) — including "what's the weakest part of this project?", which is answered straight.
+**Evidence** The answers themselves already existed in the document and were reviewed for accuracy against this session's findings (nothing contradicted them). The acceptance line — "every team member can answer... unprompted" — is a human rehearsal outcome this session cannot produce.
 **Files** `docs/22-hackathon-demo.md` · **Tests** peer questioning · **Acceptance** Every team member can answer the safety, hardware, training-data and drunk-driving questions unprompted · **Demo** Q&A
 
 ---

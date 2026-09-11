@@ -3,27 +3,45 @@
 Single source of truth for junction/edge identifiers matching
 `simulation/networks/corridor.{nod,edg}.xml`, shared by the routing service
 (backend) and the live SUMO bridge (simulation) so the two never drift apart.
-Real coordinates aligned with corridor.net.xml (J0..J3 at 300m spacing, plus
-N/S cross approaches).
+
+`id` is the SUMO/traffic-light identifier ("J0" etc.) — every routing,
+telemetry, and control-service lookup in this codebase matches junctions by
+this exact string; it must never change. `name` and `lat`/`lon` are the
+DISPLAY layer only (map pins, citizen advisory text via
+`backend/app/services/advisory_service.py::JUNCTION_NAMES`/
+`EDGE_CORRIDOR_NAMES`) and can be updated freely without touching `id`.
+
+SN-134: coordinates are real, not synthetic — interpolated along the real
+line between two verified Indore landmarks on the AB Road / Geeta Bhawan
+corridor (Palasia Square, 22.71960°N 75.85770°E, and Geeta Bhawan,
+22.71850°N 75.88230°E; both sourced 2026-09 via public coordinate lookups).
+The corridor's own 1,100 m span (W_entry through E_exit, per CORRIDOR_EDGES'
+length_m values) occupies the first ~44% of that real ~2.5 km line — the
+intermediate points are not independently named landmarks in their own
+right, so junctions are named for proximity/position along that real
+stretch rather than claiming a specific business or address at each one.
+N/S cross-approach junctions are offset ±100 m due north/south from their
+parent J-junction (this corridor runs close enough to due east that a plain
+latitude offset is accurate to well under 1 m of the true perpendicular).
 """
 
 from typing import Any, Dict, List, Optional, Tuple
 
 CORRIDOR_JUNCTIONS: List[Dict[str, Any]] = [
-    {"id": "W_entry", "name": "West Expressway Entry", "lat": 12.9177, "lon": 77.6211},
-    {"id": "J0", "name": "Corridor Junction 0", "lat": 12.9177, "lon": 77.6238},
-    {"id": "J1", "name": "Corridor Junction 1", "lat": 12.9177, "lon": 77.6265},
-    {"id": "J2", "name": "Corridor Junction 2", "lat": 12.9177, "lon": 77.6292},
-    {"id": "J3", "name": "Corridor Junction 3", "lat": 12.9177, "lon": 77.6319},
-    {"id": "E_exit", "name": "East Expressway Exit / Hospital", "lat": 12.9177, "lon": 77.6346},
-    {"id": "N0", "name": "North Approach 0", "lat": 12.9186, "lon": 77.6238},
-    {"id": "S0", "name": "South Approach 0", "lat": 12.9168, "lon": 77.6238},
-    {"id": "N1", "name": "North Approach 1", "lat": 12.9186, "lon": 77.6265},
-    {"id": "S1", "name": "South Approach 1", "lat": 12.9168, "lon": 77.6265},
-    {"id": "N2", "name": "North Approach 2", "lat": 12.9186, "lon": 77.6292},
-    {"id": "S2", "name": "South Approach 2", "lat": 12.9168, "lon": 77.6292},
-    {"id": "N3", "name": "North Approach 3", "lat": 12.9186, "lon": 77.6319},
-    {"id": "S3", "name": "South Approach 3", "lat": 12.9168, "lon": 77.6319},
+    {"id": "W_entry", "name": "Palasia Square Approach", "lat": 22.71960, "lon": 75.85770},
+    {"id": "J0", "name": "Palasia Square Junction", "lat": 22.71954, "lon": 75.85867},
+    {"id": "J1", "name": "AB Road – Race Course Junction", "lat": 22.71936, "lon": 75.86160},
+    {"id": "J2", "name": "AB Road – LIG Square Junction", "lat": 22.71918, "lon": 75.86452},
+    {"id": "J3", "name": "Geeta Bhawan Approach Junction", "lat": 22.71901, "lon": 75.86744},
+    {"id": "E_exit", "name": "Geeta Bhawan Exit / Hospital", "lat": 22.71895, "lon": 75.86841},
+    {"id": "N0", "name": "Palasia North Cross Street", "lat": 22.72044, "lon": 75.85867},
+    {"id": "S0", "name": "Palasia South Cross Street", "lat": 22.71864, "lon": 75.85867},
+    {"id": "N1", "name": "Race Course North Cross Street", "lat": 22.72026, "lon": 75.86160},
+    {"id": "S1", "name": "Race Course South Cross Street", "lat": 22.71846, "lon": 75.86160},
+    {"id": "N2", "name": "LIG Square North Cross Street", "lat": 22.72008, "lon": 75.86452},
+    {"id": "S2", "name": "LIG Square South Cross Street", "lat": 22.71828, "lon": 75.86452},
+    {"id": "N3", "name": "Geeta Bhawan North Cross Street", "lat": 22.71991, "lon": 75.86744},
+    {"id": "S3", "name": "Geeta Bhawan South Cross Street", "lat": 22.71811, "lon": 75.86744},
 ]
 
 # `telemetry_approach`: (junction_id, approach_direction) of the real SUMO

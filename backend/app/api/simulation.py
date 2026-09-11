@@ -12,11 +12,14 @@ from app.services.auth_service import require_role
 try:
     from simulation.sumo_env import SumoEnvironment
     from simulation.scenarios.demand_profiles import get_profile
+    from simulation.scenarios.demo_scenarios import get_scenario, load_scenarios
     from shared.paths import resolve_repo_path
 except ImportError:
     SumoEnvironment = None
     resolve_repo_path = None
     def get_profile(name): return {}
+    def get_scenario(scenario_id): return None
+    def load_scenarios(): return {}
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/simulation", tags=["Simulation"])
@@ -60,6 +63,11 @@ settings = get_settings()
 sim_instance = None
 sim_mode = "sumo"
 sim_lock = asyncio.Lock()
+# Set once in start_simulation; SumoEnvironment.get_state() itself has no
+# concept of "which named scenario" or "which seed" — it's a generic SUMO
+# wrapper — so the scenario switcher's display (SN-133: "displays scenario,
+# seed and elapsed sim time") reads this alongside the live TraCI state.
+sim_scenario_info: Dict[str, Any] = {}
 
 
 async def get_redis_client():
@@ -94,6 +102,7 @@ async def set_redis_sim_state(state: Dict[str, Any]):
 class StartSimulationRequest(BaseModel):
     scenario_profile: str = "morning_peak"
     scenario: Optional[str] = None
+    scenario_id: Optional[str] = None
     duration: Optional[int] = Field(None, ge=0)
     net_file: str = "corridor.net.xml"
     route_file: str = "corridor.rou.xml"
@@ -112,12 +121,24 @@ async def broadcast_state(state: dict):
     await manager.broadcast("traffic", state)
 
 
+@router.get("/scenarios")
+async def list_scenarios(current_user: User = Depends(require_role("ADMIN", "OPERATOR", "VIEWER"))):
+    """SN-133: lists the five demo scenarios from the server-side registry
+    (simulation/scenarios/demo_*.json) for the frontend switcher — never a
+    hardcoded list in this file, so the registry stays the single source
+    of truth this endpoint and /simulation/start's scenario_id both read."""
+    scenarios = load_scenarios()
+    if not scenarios:
+        raise _unavailable("Scenario registry could not be loaded (simulation package unavailable).")
+    return {"scenarios": list(scenarios.values())}
+
+
 @router.post("/start")
 async def start_simulation(
     req: StartSimulationRequest,
     current_user: User = Depends(require_role("ADMIN", "OPERATOR"))
 ):
-    global sim_instance, sim_mode
+    global sim_instance, sim_mode, sim_scenario_info
     async with sim_lock:
         redis_state = await get_redis_sim_state()
         is_running = (sim_instance and getattr(sim_instance, "is_running", False)) or (redis_state and redis_state.get("running"))
@@ -130,15 +151,39 @@ async def start_simulation(
                 "See docs/04-environment-setup.md."
             )
 
+        net_file = req.net_file
+        route_file = req.route_file
+        scenario_label = req.scenario_profile
+        scenario_config: Optional[Dict[str, Any]] = None
+
+        if req.scenario_id is not None:
+            # SN-133: the route/net files for a named scenario come only from
+            # the server-side registry, never from the client-supplied
+            # net_file/route_file fields — same "don't trust the client for
+            # something that must be fixed" pattern already applied to the
+            # `role` field in Phase 7. This is also what keeps every scenario
+            # deterministic: the registry's files are the only ones a
+            # scenario_id can select, and SumoEnvironment's seed always
+            # defaults to DEMO_SEED regardless.
+            scenario_config = get_scenario(req.scenario_id)
+            if scenario_config is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unknown scenario_id '{req.scenario_id}'. See GET /simulation/scenarios.",
+                )
+            net_file = scenario_config["net_file"]
+            route_file = scenario_config["route_file"]
+            scenario_label = scenario_config["id"]
+
         try:
             NET_DIR_PARTS = ("simulation", "networks")
             if resolve_repo_path:
-                net_path = resolve_repo_path(*NET_DIR_PARTS, req.net_file) or req.net_file
-                route_path = resolve_repo_path(*NET_DIR_PARTS, req.route_file) or req.route_file
+                net_path = resolve_repo_path(*NET_DIR_PARTS, net_file) or net_file
+                route_path = resolve_repo_path(*NET_DIR_PARTS, route_file) or route_file
                 det_path = resolve_repo_path(*NET_DIR_PARTS, "corridor.det.xml")
             else:
-                net_path = req.net_file
-                route_path = req.route_file
+                net_path = net_file
+                route_path = route_file
                 det_path = None
 
             sim_instance = SumoEnvironment(
@@ -149,9 +194,25 @@ async def start_simulation(
             )
             sim_instance.start()
             sim_mode = "sumo"
-            initial_state = {"running": True, "step": 0, "scenario": req.scenario_profile, "engine": "sumo_traci"}
+            sim_scenario_info = {
+                "scenario": scenario_label,
+                "scenario_id": scenario_config["id"] if scenario_config else None,
+                "seed": sim_instance.seed,
+            }
+            initial_state = {
+                "running": True,
+                "step": 0,
+                "engine": "sumo_traci",
+                **sim_scenario_info,
+            }
             await set_redis_sim_state(initial_state)
-            return {"status": "started", "engine": "sumo_traci", "scenario": req.scenario_profile}
+            return {
+                "status": "started",
+                "engine": "sumo_traci",
+                "scenario": scenario_label,
+                "scenario_id": scenario_config["id"] if scenario_config else None,
+                "seed": sim_instance.seed,
+            }
         except Exception as e:
             # SN-005: previously fell back to the RNG engine here.
             logger.error(f"SUMO TraCI startup failed: {e}")
@@ -182,7 +243,7 @@ async def step_simulation(
                 "reach the worker that started the simulation."
             )
 
-        state = sim_instance.step(req.steps)
+        state = {**sim_instance.step(req.steps), "running": True, **sim_scenario_info}
         await set_redis_sim_state(state)
         background_tasks.add_task(broadcast_state, state)
         return {"status": "stepped", "state": state}
@@ -193,7 +254,7 @@ async def step_simulation(
 async def get_state(current_user: User = Depends(require_role("ADMIN", "OPERATOR", "VIEWER"))):
     global sim_instance
     if sim_instance and getattr(sim_instance, "is_running", False):
-        return sim_instance.get_state()
+        return {**sim_instance.get_state(), "running": True, **sim_scenario_info}
 
     redis_state = await get_redis_sim_state()
     if redis_state and redis_state.get("running"):
@@ -210,10 +271,11 @@ async def get_state(current_user: User = Depends(require_role("ADMIN", "OPERATOR
 
 @router.post("/stop")
 async def stop_simulation(current_user: User = Depends(require_role("ADMIN", "OPERATOR"))):
-    global sim_instance
+    global sim_instance, sim_scenario_info
     async with sim_lock:
         if sim_instance:
             sim_instance.stop()
+        sim_scenario_info = {}
 
         stopped_state = {"running": False, "status": "stopped"}
         await set_redis_sim_state(stopped_state)

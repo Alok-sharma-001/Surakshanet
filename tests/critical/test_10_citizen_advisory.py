@@ -193,7 +193,12 @@ async def test_advisory_build_from_approved_event():
 
     advisory = await build_advisory(db, AdvisoryOriginType.EVENT, event.id, admin_id)
 
-    assert "Corridor Junction 0 → Corridor Junction 1" in advisory.corridor_text
+    # SN-134: junction display names come from shared/corridor_topology.py's
+    # real, sourced Indore place names, not generic "Corridor Junction N"
+    # placeholders — advisory_service.py::JUNCTION_NAMES derives directly
+    # from that module, so this assertion tracks the real place name for
+    # J0->J1 (E_J0_to_J1), not a name invented in this test.
+    assert "Palasia Square Junction → AB Road – Race Course Junction" in advisory.corridor_text
     assert advisory.severity == AdvisorySeverity.SEVERE
     assert "Public event, 25,000 expected" in advisory.cause_text
     assert advisory.delay_min_low >= 0

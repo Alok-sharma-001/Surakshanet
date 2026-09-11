@@ -1,0 +1,13 @@
+{
+    "id": "A",
+    "name": "Normal",
+    "description": "The baseline every later number in the demo is compared against. Fixed-time signal plan against steady corridor demand.",
+    "net_file": "corridor.net.xml",
+    "route_file": "corridor.rou.xml",
+    "duration_s": 300,
+    "seed": 42,
+    "mechanism": "sumo_route_file",
+    "demand_profile": null,
+    "demand_note": "Reuses the base corridor.rou.xml's fixed, constant-probability demand (simulation/networks/corridor.rou.xml) rather than being generated from simulation/scenarios/demand_profiles.py::OFF_PEAK — that profile dict is descriptive reference data, not currently wired into route-file generation. Labeling this scenario 'OFF_PEAK' without that link would be exactly the decorative-label defect already found and fixed once in backend/app/api/simulation.py's scenario_profile field; this note exists so that mistake isn't repeated.",
+    "scripted_events": []
+}
