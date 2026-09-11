@@ -2,7 +2,7 @@ import json
 import uuid
 from datetime import datetime
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from pydantic import BaseModel
@@ -17,7 +17,9 @@ from app.models.alert import (
     EmergencyStatus
 )
 from app.models.user import User
-from app.services.auth_service import get_optional_current_user
+from app.models.audit import AuditActorType, AuditResult
+from app.services.auth_service import require_role, enforce_rate_limit
+from app.services.audit_service import write_audit
 from app.services.routing_service import routing_service
 from ml.emergency.green_wave import green_wave_ctrl
 from shared.constants import DataSource, REDIS_CHANNELS
@@ -82,10 +84,19 @@ class EmergencyActivateRequest(BaseModel):
 @router.post("/activate", status_code=status.HTTP_201_CREATED)
 async def activate_emergency(
     data: EmergencyActivateRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user)
+    current_user: User = Depends(require_role("ADMIN", "EMERGENCY_SERVICES", action="CORRIDOR_ACTIVATE")),
 ):
-    """Activate an emergency green wave along a designated junction route (SN-039..SN-049)."""
+    """Activate an emergency green wave along a designated junction route (SN-039..SN-049, SN-101, SN-104)."""
+    # Enforce rate limit (SN-101): 5/min/user
+    await enforce_rate_limit(
+        key=f"rate_limit:corridor:{current_user.id}",
+        limit=5,
+        window_seconds=60,
+        detail="Corridor activation limit exceeded"
+    )
+
     event_uuid = uuid.uuid4()
     event_id = str(event_uuid)
     route = data.resolve_route()
@@ -147,6 +158,26 @@ async def activate_emergency(
     )
     db.add(event)
     await db.commit()
+
+    # Audit log entry (SN-104)
+    corr_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID")
+    try:
+        await write_audit(
+            db=db,
+            action="CORRIDOR_ACTIVATE",
+            actor_type=AuditActorType.USER,
+            actor_id=current_user.id,
+            target_type="emergency_event",
+            target_id=event_uuid,
+            input_payload={"route": route, "priority": data.priority, "vehicle_type": data.vehicle_type, "vehicle_id": vehicle_id},
+            output_payload={"event_id": event_id, "preempted_signals": len(route), "etas": result.get("route_etas")},
+            result=AuditResult.SUCCESS,
+            source="manual",
+            correlation_id=corr_id,
+        )
+        await db.commit()
+    except Exception:
+        pass
 
     # 3. Broadcast to Redis for live WebSocket push
     try:
@@ -219,18 +250,11 @@ def _corridor_status_from_db_event(event: EmergencyEvent) -> Dict[str, Any]:
 @router.post("/deactivate/{event_id}")
 async def deactivate_emergency(
     event_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user)
+    current_user: User = Depends(require_role("ADMIN", "EMERGENCY_SERVICES", action="CORRIDOR_DEACTIVATE")),
 ):
-    """Requests early deactivation of an active corridor (SN-045/SN-048).
-
-    This only signals intent. It does NOT itself mark the event COMPLETED or
-    set restored_at: only the bridge process — which holds the live TraCI
-    connection and can actually restore and verify each junction's captured
-    program — may make that claim, once it has genuinely done so. Claiming
-    completion here would be exactly the kind of unverified success this
-    endpoint exists to avoid.
-    """
+    """Requests early deactivation of an active corridor (SN-045/SN-048, SN-100, SN-104)."""
     try:
         event_uuid = uuid.UUID(event_id)
     except ValueError:
@@ -255,6 +279,26 @@ async def deactivate_emergency(
     except Exception:
         pass
 
+    # Audit log (SN-104)
+    corr_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID")
+    try:
+        await write_audit(
+            db=db,
+            action="CORRIDOR_DEACTIVATE",
+            actor_type=AuditActorType.USER,
+            actor_id=current_user.id,
+            target_type="emergency_event",
+            target_id=event_uuid,
+            input_payload={"event_id": event_id},
+            output_payload={"status": "deactivation_requested"},
+            result=AuditResult.SUCCESS,
+            source="manual",
+            correlation_id=corr_id,
+        )
+        await db.commit()
+    except Exception:
+        pass
+
     return {
         "status": "deactivation_requested",
         "event_id": event_id,
@@ -263,7 +307,11 @@ async def deactivate_emergency(
 
 
 @router.get("/{event_id}/corridor")
-async def get_emergency_corridor(event_id: str, db: AsyncSession = Depends(get_db)):
+async def get_emergency_corridor(
+    event_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER")),
+):
     """Get live rolling corridor status with per-junction states and countdown (SN-043)."""
     try:
         event_uuid = uuid.UUID(event_id)
@@ -278,7 +326,11 @@ async def get_emergency_corridor(event_id: str, db: AsyncSession = Depends(get_d
 
 
 @router.get("/{event_id}/eta")
-async def get_emergency_eta(event_id: str, db: AsyncSession = Depends(get_db)):
+async def get_emergency_eta(
+    event_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER")),
+):
     """Get per-junction ETA sequence for active corridor (SN-042)."""
     try:
         event_uuid = uuid.UUID(event_id)
@@ -298,12 +350,12 @@ async def get_emergency_eta(event_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{event_id}/recovery")
-async def get_emergency_recovery(event_id: str, db: AsyncSession = Depends(get_db)):
-    """Get measured cross-traffic delay recovery curve; returns 503 while ACTIVE (SN-048).
-
-    recovery_s is null until the bridge has actually measured it from real
-    samples — never a placeholder number.
-    """
+async def get_emergency_recovery(
+    event_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER")),
+):
+    """Get measured cross-traffic delay recovery curve; returns 503 while ACTIVE (SN-048)."""
     try:
         event_uuid = uuid.UUID(event_id)
     except ValueError:
@@ -334,7 +386,10 @@ async def get_emergency_recovery(event_id: str, db: AsyncSession = Depends(get_d
 
 @router.get("/status")
 @router.get("/active")
-async def get_active_emergencies(db: AsyncSession = Depends(get_db)):
+async def get_active_emergencies(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER")),
+):
     """Get all currently active emergency corridors from DB."""
     stmt = (
         select(EmergencyEvent)
@@ -369,7 +424,11 @@ async def get_active_emergencies(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/status/{event_id}")
-async def get_emergency_status(event_id: str, db: AsyncSession = Depends(get_db)):
+async def get_emergency_status(
+    event_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER")),
+):
     """Get status of a specific emergency corridor."""
     try:
         event_uuid = uuid.UUID(event_id)
@@ -387,8 +446,10 @@ async def get_emergency_status(event_id: str, db: AsyncSession = Depends(get_db)
 async def get_emergency_history(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER")),
 ):
+
     """Query historical emergency events from database."""
     stmt = (
         select(EmergencyEvent)

@@ -20,7 +20,7 @@ from app.schemas.ml import (
     ModelHealth,
     PredictionItem
 )
-from app.services.auth_service import get_current_user
+from app.services.auth_service import require_role
 from app.models.user import User
 from shared.constants import DataSource
 
@@ -121,7 +121,7 @@ _training_status: Optional[dict] = None
 @router.post("/detect", response_model=DetectionResult)
 async def detect_vehicles(
     file: UploadFile = File(...),
-    current_user: Optional[User] = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER"))
 ):
     """
     Run YOLOv8 object detection on uploaded camera frame.
@@ -157,7 +157,7 @@ async def detect_vehicles(
 async def get_prediction(
     junction_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER"))
 ):
     """
     Get 15/30/60 min traffic flow predictions and spillback risk for a specific junction.
@@ -272,7 +272,7 @@ async def get_prediction(
 @router.post("/train/start", status_code=status.HTTP_501_NOT_IMPLEMENTED)
 async def start_training(
     req: TrainingStartRequest,
-    current_user: Optional[User] = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN", action="ML_TRAIN"))
 ):
     """
     Not implemented. MARL training is an offline activity.
@@ -294,7 +294,7 @@ async def start_training(
 
 
 @router.post("/train/stop", status_code=status.HTTP_501_NOT_IMPLEMENTED)
-async def stop_training(current_user: Optional[User] = Depends(get_current_user)):
+async def stop_training(current_user: User = Depends(require_role("ADMIN", action="ML_TRAIN"))):
     """Not implemented. See start_training."""
     raise HTTPException(
         status_code=501,
@@ -303,7 +303,7 @@ async def stop_training(current_user: Optional[User] = Depends(get_current_user)
 
 
 @router.get("/train/status", response_model=TrainingStatus)
-async def get_training_status(current_user: Optional[User] = Depends(get_current_user)):
+async def get_training_status(current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER"))):
     """
     Report real training state, or state plainly that none is available.
 
@@ -324,7 +324,7 @@ async def get_training_status(current_user: Optional[User] = Depends(get_current
 @router.get("/models", response_model=ModelHealth)
 @router.get("/health", response_model=ModelHealth)
 @router.get("/models/health", response_model=ModelHealth)
-async def get_models_health(current_user: Optional[User] = Depends(get_current_user)):
+async def get_models_health(current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER"))):
     """Check health and availability of all AI models."""
     import shutil
     has_sumo = shutil.which("sumo") is not None or os.path.exists("/usr/bin/sumo")

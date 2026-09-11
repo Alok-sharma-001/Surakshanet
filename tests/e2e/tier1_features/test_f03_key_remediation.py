@@ -31,7 +31,6 @@ def test_surakshanet_key_untracked_in_git():
 def test_gitignore_ignores_pem_and_key_extensions():
     """TC-F03-02: Verify .gitignore contains *.pem and *.key rules."""
     path = os.path.join(PROJECT_ROOT, ".gitignore")
-    assert os.path.exists(path), ".gitignore missing"
     with open(path, "r", encoding="utf-8") as f:
         content = f.read()
 

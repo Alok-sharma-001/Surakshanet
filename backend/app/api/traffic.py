@@ -12,7 +12,7 @@ from app.schemas.traffic import (
 )
 from app.models.user import User
 
-from app.services.auth_service import get_optional_current_user, require_role
+from app.services.auth_service import require_role
 from app.services import traffic_service
 from shared.constants import compute_pcu
 
@@ -22,6 +22,7 @@ router = APIRouter(prefix="/traffic", tags=["traffic"])
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Junctions - Spatial Queries (MUST be placed before /junctions/{id})
 # ---------------------------------------------------------------------------
 
@@ -30,7 +31,7 @@ async def get_nearest_junction(
     latitude: float = Query(..., description="Latitude coordinate", ge=-90.0, le=90.0),
     longitude: float = Query(..., description="Longitude coordinate", ge=-180.0, le=180.0),
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user)
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER"))
 ) -> Any:
     junction = await traffic_service.get_nearest_junction(db, latitude=latitude, longitude=longitude)
     if not junction:
@@ -44,7 +45,7 @@ async def get_junctions_within_radius(
     longitude: float = Query(..., description="Center longitude", ge=-180.0, le=180.0),
     radius_meters: float = Query(5000.0, ge=0.0, description="Radius in meters"),
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user)
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER"))
 ) -> Any:
     return await traffic_service.get_junctions_within_radius(
         db, latitude=latitude, longitude=longitude, radius_meters=radius_meters
@@ -58,7 +59,7 @@ async def get_junctions_in_bbox(
     max_lat: float = Query(..., description="Maximum latitude"),
     max_lon: float = Query(..., description="Maximum longitude"),
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user)
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER"))
 ) -> Any:
     return await traffic_service.get_junctions_in_bbox(
         db, min_lat=min_lat, min_lon=min_lon, max_lat=max_lat, max_lon=max_lon
@@ -74,7 +75,7 @@ async def list_junctions(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user)
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER"))
 ) -> Any:
     return await traffic_service.get_junctions(db, skip=skip, limit=limit)
 
@@ -83,7 +84,7 @@ async def list_junctions(
 async def get_junction(
     id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user)
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER"))
 ) -> Any:
     junction = await traffic_service.get_junction(db, junction_id=id)
     if not junction:
@@ -95,7 +96,7 @@ async def get_junction(
 async def create_junction(
     junction_in: JunctionCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role("ADMIN"))
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR"))
 ) -> Any:
     return await traffic_service.create_junction(db, data=junction_in)
 
@@ -105,7 +106,7 @@ async def update_junction(
     id: UUID,
     junction_in: JunctionUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role("ADMIN"))
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR"))
 ) -> Any:
     junction = await traffic_service.update_junction(db, junction_id=id, data=junction_in)
     if not junction:
@@ -123,7 +124,7 @@ async def list_sensors(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user)
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER"))
 ) -> Any:
     return await traffic_service.get_sensors(db, junction_id=junction_id, skip=skip, limit=limit)
 
@@ -132,7 +133,7 @@ async def list_sensors(
 async def create_sensor(
     sensor_in: SensorCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role("ADMIN"))
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR"))
 ) -> Any:
     sensor = await traffic_service.create_sensor(db, data=sensor_in)
     st_val = sensor.sensor_type.value if hasattr(sensor.sensor_type, "value") else str(sensor.sensor_type)
@@ -162,7 +163,7 @@ async def list_readings(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user)
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER"))
 ) -> Any:
     return await traffic_service.get_readings(
         db,
@@ -180,7 +181,7 @@ async def get_latest_readings(
     junction_id: UUID,
     limit: int = Query(10, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user)
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER"))
 ) -> Any:
     return await traffic_service.get_latest_readings(db, junction_id=junction_id, limit=limit)
 
@@ -190,7 +191,7 @@ async def create_reading(
     reading_in: TrafficReadingCreate,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user)
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR"))
 ) -> Any:
     source = None
     try:
@@ -212,7 +213,7 @@ async def create_reading_singular(
     reading_in: TrafficReadingCreate,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user)
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR"))
 ) -> Any:
     return await create_reading(reading_in, request, db, current_user)
 
@@ -224,7 +225,7 @@ async def get_traffic_history(
     end_time: Optional[datetime] = None,
     limit: int = Query(100, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user)
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER"))
 ) -> Any:
     j_id = None
     if junction_id:
@@ -245,7 +246,7 @@ async def get_traffic_history(
 async def get_latest_traffic(
     junction_id: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user)
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER"))
 ) -> Any:
     if junction_id:
         try:
@@ -259,7 +260,7 @@ async def get_latest_traffic(
 @router.post("/pcu")
 async def calculate_pcu(
     data: dict,
-    current_user: Optional[User] = Depends(get_optional_current_user)
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER"))
 ) -> Any:
     total_pcu = compute_pcu(data)
     return {"pcu": total_pcu, "total_pcu": total_pcu}

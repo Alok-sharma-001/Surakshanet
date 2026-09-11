@@ -28,7 +28,7 @@ const LIVE_INSIGHTS = [
   {
     id: 4,
     category: 'RISK FORECAST',
-    text: 'Accident probability elevated near Intersection 07 due to wet pavement friction sensors.',
+    text: 'Incident risk elevated near Intersection 07 due to wet pavement friction sensors.',
     type: 'danger',
     timestamp: '5m ago',
     impact: 'VMS speed advisory posted',

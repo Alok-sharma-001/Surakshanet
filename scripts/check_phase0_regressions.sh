@@ -117,6 +117,22 @@ check "no derived speed in the vision worker" \
 check "no fabricated 0.0 default for unresolved vision speed" \
   grep -n "else (0\.0 if camera\.mpp is None else 0\.0)" services/vision_worker/main.py
 
+# Phase 7's require_role() guard was once applied to POST /auth/register
+# itself, meaning no one — not even the first non-seeded user — could ever
+# register (a require_role dependency requires an already-authenticated
+# caller of that role, and there is no way to become authenticated before
+# registering). Invariant §13.4 / docs/16-rbac.md §2: registration is PUB,
+# and always forces OPERATOR server-side regardless of any client-submitted
+# role — never gated behind an existing account.
+check "auth/register does not require an existing account to reach it" \
+  grep -n 'current_user: User = Depends(require_role' backend/app/api/auth.py
+
+# A self-registering caller must never be able to choose their own role —
+# register_user() previously read UserCreate.role straight off the request
+# body, letting any anonymous caller submit role: ADMIN and get it.
+check "register_user() does not trust a client-submitted role" \
+  grep -n 'role = getattr(user_data, "role"' backend/app/services/auth_service.py
+
 # Unreported fields must persist as null, never as a plausible-looking default.
 check "no invented defaults on the ingest path" \
   bash -c 'grep -n "data.get(.*, *[0-9]" backend/app/services/mqtt_consumer.py | grep -v "^[0-9]*: *#"' 

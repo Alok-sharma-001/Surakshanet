@@ -105,6 +105,16 @@ jobs:
           cd backend
           pytest tests/ -v --cov=app --cov-report=term-missing
 
+      - name: Run Critical Path Test Suite (SN-111..SN-126)
+        env:
+          DATABASE_URL: postgresql+asyncpg://surakshanet:test_password@localhost:5432/surakshanet_test
+          REDIS_URL: redis://localhost:6379/0
+          JWT_SECRET_KEY: test-secret-key-that-is-at-least-32-characters-long
+          ENVIRONMENT: testing
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/backend
+        run: |
+          pytest tests/critical/ -v
+
   frontend:
     name: Frontend Lint, Typecheck, Test, and Build
     runs-on: ubuntu-latest

@@ -187,13 +187,12 @@ def test_combo_f12_f13_workload_decoupling_with_websocket_stream(
 
 @pytest.mark.tier3
 def test_combo_f17_f18_sumo_corridor_18_link_webster_control():
-    """TC-C07: Pairwise - F17 (18-link Corridor Network) + F18 (18-char Webster Signal Control)."""
-    # Corridor network link count
-    corridor_links = 18
-    # Webster controller generates matching 18-char phase string
-    webster_phase = "rrrrGGGggrrrrGGGgg"
-    assert len(webster_phase) == corridor_links, \
-        f"Phase string length {len(webster_phase)} does not match corridor link count {corridor_links}"
+    """TC-C07: Pairwise - F17 (Corridor Network) + F18 (Webster Signal Control)."""
+    from ml.marl.webster_fallback import WebsterFallback
+    webster = WebsterFallback(junction_id="J1")
+    timing = webster.compute_timing(approach_demands={"N": 30.0, "S": 25.0, "E": 20.0, "W": 15.0})
+    assert timing["cycle_length_s"] >= 45.0
+    assert "splits" in timing
 
 
 @pytest.mark.tier3
@@ -211,7 +210,7 @@ def test_combo_f21_f11_topology_green_wave_and_mqtt_event_tagging(
     # 2. Publish emergency telemetry with verified source tag
     mqtt_res = mqtt_client.publish(
         "surakshanet/junctions/J1/control",
-        {"command": "PREEMPTION_GREEN", "source": "live", "phase": 0}
+        {"command": "PREEMPTION_GREEN", "source": "mqtt", "phase": 0}
     )
     assert mqtt_res is True
 
@@ -246,12 +245,10 @@ def test_combo_f24_f25_openapi_typing_and_route_splitting(
 @pytest.mark.tier3
 def test_combo_f26_f11_websocket_reconnect_and_telemetry_source_badge():
     """TC-C11: Pairwise - F26 (UI Source Badge) + F11 (MQTT/WS Source Tagging)."""
-    # Event with source="mock" maps to warning/amber badge
-    sample_packet = {"junction_id": "J1", "pcu": 40.0, "source": "mock"}
-    assert sample_packet["source"] == "mock"
-    # Badge maps mock to amber indicator
-    badge_color = "amber" if sample_packet["source"] == "mock" else "green"
-    assert badge_color == "amber"
+    from shared.constants import DataSource
+    sample_packet = {"junction_id": "J1", "pcu": 40.0, "source": DataSource.MQTT.value}
+    assert sample_packet["source"] == "mqtt"
+    assert sample_packet["source"] in [s.value for s in DataSource]
 
 
 @pytest.mark.tier3

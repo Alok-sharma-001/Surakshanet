@@ -187,25 +187,27 @@ class RoutingEngine:
         self,
         start_node: str,
         end_node: str,
-        profile: str = "emergency"
+        profile: str = "emergency",
+        penalties: Optional[Dict[Tuple[str, str], float]] = None,
     ) -> Dict[str, Any]:
         """Find route directly between two known junction node IDs."""
         if start_node not in self.graph or end_node not in self.graph:
             return {"error": f"Invalid nodes {start_node} or {end_node}", "path": []}
-        return self._astar_search(start_node, end_node, profile=profile)
+        return self._astar_search(start_node, end_node, profile=profile, penalties=penalties)
 
     def find_alternatives(
         self,
         origin: Tuple[float, float],
         destination: Tuple[float, float],
         num_routes: int = 3,
-        profile: str = "citizen"
+        profile: str = "citizen",
+        penalties: Optional[Dict[Tuple[str, str], float]] = None,
     ) -> Dict[str, Any]:
         """Find up to K alternative routes ensuring diverse paths (< 70% edge overlap).
 
         Returns dict with 'primary', 'alternatives', and 'advice'.
         """
-        primary = self.find_route(origin, destination, profile=profile)
+        primary = self.find_route(origin, destination, profile=profile, penalties=penalties)
         if "error" in primary or not primary.get("path"):
             return {
                 "primary": primary,
@@ -217,18 +219,19 @@ class RoutingEngine:
         primary_edges = set(zip(primary_path[:-1], primary_path[1:]))
 
         alternatives: List[Dict[str, Any]] = []
-        penalties: Dict[Tuple[str, str], float] = {}
+        base_penalties: Dict[Tuple[str, str], float] = dict(penalties or {})
 
         # Successively penalize edges in found paths to find diverse alternatives
         for _ in range(num_routes):
+            iter_penalties = dict(base_penalties)
             # Accumulate 1.8x penalty on edges in previous routes
             for u, v in primary_edges:
-                penalties[(u, v)] = penalties.get((u, v), 1.0) * 1.8
+                iter_penalties[(u, v)] = iter_penalties.get((u, v), 1.0) * 1.8
             for alt in alternatives:
                 for u, v in zip(alt["path"][:-1], alt["path"][1:]):
-                    penalties[(u, v)] = penalties.get((u, v), 1.0) * 1.8
+                    iter_penalties[(u, v)] = iter_penalties.get((u, v), 1.0) * 1.8
 
-            alt_route = self.find_route(origin, destination, profile=profile, penalties=penalties)
+            alt_route = self.find_route(origin, destination, profile=profile, penalties=iter_penalties)
             if "error" in alt_route or not alt_route.get("path"):
                 break
 

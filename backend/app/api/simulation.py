@@ -3,8 +3,11 @@ import shutil
 import asyncio
 import logging
 from typing import Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, Depends
 from pydantic import BaseModel, Field
+
+from app.models.user import User
+from app.services.auth_service import require_role
 
 try:
     from simulation.sumo_env import SumoEnvironment
@@ -110,7 +113,10 @@ async def broadcast_state(state: dict):
 
 
 @router.post("/start")
-async def start_simulation(req: StartSimulationRequest):
+async def start_simulation(
+    req: StartSimulationRequest,
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR"))
+):
     global sim_instance, sim_mode
     async with sim_lock:
         redis_state = await get_redis_sim_state()
@@ -154,7 +160,11 @@ async def start_simulation(req: StartSimulationRequest):
 
 
 @router.post("/step")
-async def step_simulation(req: StepRequest, background_tasks: BackgroundTasks):
+async def step_simulation(
+    req: StepRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR"))
+):
     global sim_instance
     async with sim_lock:
         redis_state = await get_redis_sim_state()
@@ -180,7 +190,7 @@ async def step_simulation(req: StepRequest, background_tasks: BackgroundTasks):
 
 @router.get("/state")
 @router.get("/status")
-async def get_state():
+async def get_state(current_user: User = Depends(require_role("ADMIN", "OPERATOR", "VIEWER"))):
     global sim_instance
     if sim_instance and getattr(sim_instance, "is_running", False):
         return sim_instance.get_state()
@@ -199,7 +209,7 @@ async def get_state():
 
 
 @router.post("/stop")
-async def stop_simulation():
+async def stop_simulation(current_user: User = Depends(require_role("ADMIN", "OPERATOR"))):
     global sim_instance
     async with sim_lock:
         if sim_instance:
@@ -211,7 +221,7 @@ async def stop_simulation():
 
 
 @router.get("/metrics")
-async def get_metrics():
+async def get_metrics(current_user: User = Depends(require_role("ADMIN", "OPERATOR", "VIEWER"))):
     global sim_instance
     if sim_instance and getattr(sim_instance, "is_running", False):
         return sim_instance.get_metrics()
@@ -233,7 +243,7 @@ async def get_metrics():
 
 
 @router.post("/reset")
-async def reset_simulation():
+async def reset_simulation(current_user: User = Depends(require_role("ADMIN", "OPERATOR"))):
     global sim_instance
     async with sim_lock:
         if sim_instance:

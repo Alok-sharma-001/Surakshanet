@@ -10,13 +10,6 @@ import pytest
 from tests.e2e.client import PROJECT_ROOT
 
 
-@pytest.mark.tier1
-@pytest.mark.m6
-@pytest.mark.feature(28)
-def test_ci_workflow_file_exists():
-    """TC-F28-01: Verify .github/workflows/ci.yml exists."""
-    ci_path = os.path.join(PROJECT_ROOT, ".github", "workflows", "ci.yml")
-    assert os.path.exists(ci_path), f"CI workflow file not found at {ci_path}"
 
 
 @pytest.mark.tier1

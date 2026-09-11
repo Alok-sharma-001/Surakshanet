@@ -46,7 +46,6 @@ def test_postgis_extension_available(db_client: E2EDatabaseClient):
 def test_docker_compose_consolidated_service():
     """TC-F06-03: Verify docker-compose.yml configures timescaledb-ha engine."""
     compose_path = os.path.join(PROJECT_ROOT, "infra", "docker-compose.yml")
-    assert os.path.exists(compose_path), "docker-compose.yml missing"
     with open(compose_path, "r", encoding="utf-8") as f:
         content = f.read()
 

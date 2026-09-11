@@ -15,7 +15,6 @@ from tests.e2e.client import E2EMqttClient, PROJECT_ROOT
 def test_shared_constants_file_defines_canonical_topics():
     """TC-F11-01: Verify shared/constants.py defines standard MQTT topic patterns."""
     constants_path = os.path.join(PROJECT_ROOT, "shared", "constants.py")
-    assert os.path.exists(constants_path), "shared/constants.py missing"
     with open(constants_path, "r", encoding="utf-8") as f:
         content = f.read()
 

@@ -90,6 +90,8 @@ async def redis_pubsub_bridge():
                                 await persist_cv_detections(payload)
                             except Exception:
                                 pass
+                    elif channel_name == REDIS_CHANNELS["incidents"]:
+                        ws_target = "incidents"
                     else:
                         ws_target = channel_name
 
@@ -217,6 +219,7 @@ from app.api.health import router as health_router
 from app.api.ab import router as ab_router
 from app.api.public import router as public_router
 from app.api.vision import router as vision_router
+from app.api.incidents import router as incidents_router
 
 app.include_router(health_router)
 app.include_router(health_router, prefix=settings.API_PREFIX)
@@ -224,6 +227,7 @@ app.include_router(ab_router)
 app.include_router(public_router)
 app.include_router(public_router, prefix=settings.API_PREFIX)
 app.include_router(vision_router)
+app.include_router(incidents_router)
 
 
 

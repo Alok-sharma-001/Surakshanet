@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Any, List, Optional
+from typing import Any, List
 from uuid import UUID
 
 from app.database import get_db
 from app.schemas.traffic import JunctionCreate, JunctionResponse, JunctionUpdate
-from app.services.auth_service import get_optional_current_user, require_role
+from app.services.auth_service import require_role
 from app.models.user import User
 from app.services import traffic_service
 
@@ -18,7 +18,7 @@ async def get_junctions_nearby(
     longitude: float = Query(..., description="Longitude coordinate", ge=-180.0, le=180.0),
     radius: float = Query(1000.0, description="Radius in meters", ge=0.0),
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user)
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER"))
 ) -> Any:
     """Retrieve junctions within a radius using PostGIS ST_DWithin."""
     return await traffic_service.get_junctions_within_radius(
@@ -31,7 +31,7 @@ async def get_nearest_junction(
     latitude: float = Query(..., description="Latitude coordinate"),
     longitude: float = Query(..., description="Longitude coordinate"),
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user)
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER"))
 ) -> Any:
     junction = await traffic_service.get_nearest_junction(db, latitude=latitude, longitude=longitude)
     if not junction:
@@ -44,7 +44,7 @@ async def list_junctions(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user)
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER"))
 ) -> Any:
     return await traffic_service.get_junctions(db, skip=skip, limit=limit)
 
@@ -53,7 +53,7 @@ async def list_junctions(
 async def get_junction(
     id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user)
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER"))
 ) -> Any:
     junction = await traffic_service.get_junction(db, junction_id=id)
     if not junction:
@@ -65,7 +65,7 @@ async def get_junction(
 async def create_junction(
     junction_in: JunctionCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role("ADMIN"))
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR"))
 ) -> Any:
     return await traffic_service.create_junction(db, data=junction_in)
 
@@ -75,7 +75,7 @@ async def update_junction(
     id: UUID,
     junction_in: JunctionUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role("ADMIN"))
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR"))
 ) -> Any:
     junction = await traffic_service.update_junction(db, junction_id=id, data=junction_in)
     if not junction:

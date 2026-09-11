@@ -14,6 +14,8 @@ from app.api.copilot import router as copilot_router
 from app.api.ab import router as ab_router
 from app.api.events import router as events_router
 from app.api.vision import router as vision_router
+from app.api.incidents import router as incidents_router
+from app.api.audit import router as audit_router
 
 api_router = APIRouter()
 
@@ -31,4 +33,6 @@ api_router.include_router(copilot_router)
 api_router.include_router(ab_router)
 api_router.include_router(events_router)
 api_router.include_router(vision_router)
+api_router.include_router(incidents_router)
+api_router.include_router(audit_router)
 

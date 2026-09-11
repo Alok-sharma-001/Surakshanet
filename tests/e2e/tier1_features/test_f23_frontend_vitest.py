@@ -16,7 +16,6 @@ from tests.e2e.client import PROJECT_ROOT
 def test_frontend_package_json_has_test_script():
     """TC-F23-01: Verify frontend package.json defines test command."""
     pkg_path = os.path.join(PROJECT_ROOT, "frontend", "dashboard", "package.json")
-    assert os.path.exists(pkg_path), "package.json missing"
     with open(pkg_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 

@@ -45,6 +45,12 @@ async def control_ws(websocket: WebSocket):
     await handle_websocket(websocket, 'control')
 
 
+@ws_router.websocket('/ws/incidents')
+async def incidents_ws(websocket: WebSocket):
+    """SN-091: Live incident stream WebSocket."""
+    await handle_websocket(websocket, 'incidents')
+
+
 @ws_router.websocket('/api/v1/ws')
 async def root_ws(websocket: WebSocket):
     await handle_websocket(websocket, 'default')

@@ -17,15 +17,12 @@ describe('Frontend Store & Architecture Unit Tests', () => {
     assert.strictEqual(state.user, null);
   });
 
-  it('should verify telemetry source badge color contracts', () => {
-    const colorMap = {
-      live: 'emerald',
-      sim: 'sky',
-      mock: 'amber'
-    };
-    assert.strictEqual(colorMap.live, 'emerald');
-    assert.strictEqual(colorMap.sim, 'sky');
-    assert.strictEqual(colorMap.mock, 'amber');
+  it('should verify telemetry source badge color contracts against canonical DataSource', () => {
+    const canonicalSources = ['sumo', 'vision', 'mqtt', 'model', 'heuristic', 'manual'];
+    assert.strictEqual(canonicalSources.length, 6);
+    assert.ok(!canonicalSources.includes('mock'));
+    assert.ok(!canonicalSources.includes('live'));
+    assert.ok(!canonicalSources.includes('sim'));
   });
 
   it('should verify WebSocket backoff delay calculations', () => {

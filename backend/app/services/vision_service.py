@@ -51,6 +51,30 @@ async def persist_behavior_flag(payload: Dict[str, Any]) -> None:
                 source=payload.get("source", "vision"),
             )
             db.add(flag)
+            await db.flush()
+
+            # Audit AI behavior flag per SN-104 & SN-105
+            try:
+                from app.services.audit_service import write_audit
+                from app.models.audit import AuditActorType, AuditResult
+                await write_audit(
+                    db=db,
+                    action="AI_BEHAVIOR_FLAG",
+                    actor_type=AuditActorType.AI,
+                    actor_id=None,
+                    target_type="behavior_flag",
+                    target_id=flag.id,
+                    input_payload={"camera_id": flag.camera_id, "track_id": flag.track_id},
+                    output_payload={"flag_type": flag.flag_type.value, "evidence": flag.evidence},
+                    model="vision_detector",
+                    model_version="1.0.0",
+                    confidence=float(flag.confidence),
+                    result=AuditResult.SUCCESS,
+                    source=flag.source or "vision",
+                )
+            except Exception as audit_err:
+                logger.warning(f"Failed to log AI_BEHAVIOR_FLAG audit: {audit_err}")
+
             await db.commit()
     except Exception as e:
         logger.error(f"Failed to persist behavior flag ({flag_type_raw}): {e}")

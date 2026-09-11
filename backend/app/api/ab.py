@@ -12,13 +12,17 @@ import uuid
 import logging
 from datetime import datetime
 from typing import Optional, Dict, Any, List
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 
 from app.database import get_db, async_session_factory
 from app.models.control import ABRun
+from app.models.user import User
+from app.models.audit import AuditActorType, AuditResult
+from app.services.auth_service import require_role
+from app.services.audit_service import write_audit
 from services.control_service.ab_runner import (
     ABRunner,
     generate_ab_statement,
@@ -93,13 +97,25 @@ async def _execute_ab_simulation(run_id: uuid.UUID, scenario: str, seed: int, du
 @router.post("/run", response_model=ABRunResponse, status_code=status.HTTP_202_ACCEPTED)
 async def start_ab_run(
     req: ABRunRequest,
+    request: Request,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", action="AB_RUN")),
 ):
     """
     Launch a deterministic A/B comparison run (Webster vs MARL DQN).
-    Both arms run with identical seed, duration, network, and safety envelope.
+    Both arms run with identical seed, duration, network, and safety envelope (SN-100, SN-101, SN-104).
+    Enforces max 1 concurrent A/B run.
     """
+    # Enforce 1 concurrent run limit (SN-101)
+    running_res = await db.execute(select(ABRun).where(ABRun.status == "running"))
+    if running_res.scalars().first():
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Only 1 concurrent A/B run allowed. An experiment is currently in progress. retry_after_s: 30",
+            headers={"Retry-After": "30"}
+        )
+
     run_id = uuid.uuid4()
     now = datetime.utcnow()
 
@@ -120,6 +136,26 @@ async def start_ab_run(
     db.add(run_row)
     await db.commit()
     await db.refresh(run_row)
+
+    # Audit log (SN-104)
+    corr_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID")
+    try:
+        await write_audit(
+            db=db,
+            action="AB_RUN",
+            actor_type=AuditActorType.USER,
+            actor_id=current_user.id,
+            target_type="ab_run",
+            target_id=run_id,
+            input_payload={"scenario": req.scenario, "seed": req.seed, "duration_s": req.duration_s},
+            output_payload={"run_id": str(run_id), "status": "running"},
+            result=AuditResult.SUCCESS,
+            source="manual",
+            correlation_id=corr_id,
+        )
+        await db.commit()
+    except Exception:
+        pass
 
     background_tasks.add_task(
         _execute_ab_simulation,
@@ -147,7 +183,11 @@ async def start_ab_run(
 
 
 @router.get("/runs/{run_id}", response_model=ABRunResponse)
-async def get_ab_run(run_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def get_ab_run(
+    run_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "VIEWER")),
+):
     """Retrieve an A/B run by ID. Improvement is absent until complete."""
     run_obj = await db.get(ABRun, run_id)
     if not run_obj:
@@ -182,7 +222,10 @@ async def get_ab_run(run_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/runs", response_model=List[ABRunResponse])
-async def list_ab_runs(db: AsyncSession = Depends(get_db)):
+async def list_ab_runs(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "VIEWER")),
+):
     """List all historical A/B runs ordered by start time."""
     result = await db.execute(select(ABRun).order_by(desc(ABRun.started_at)).limit(50))
     runs = result.scalars().all()
@@ -215,3 +258,4 @@ async def list_ab_runs(db: AsyncSession = Depends(get_db)):
             completed_at=r.completed_at
         ))
     return responses
+

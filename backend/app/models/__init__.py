@@ -16,6 +16,13 @@ from app.models.vision import (
     BehaviorFlagStatus,
     NoParkingZone,
 )
+from app.models.incident import (
+    Incident,
+    IncidentIndicator,
+    IncidentType,
+    IncidentStatus,
+    IncidentIndicatorType,
+)
 
 __all__ = [
     "Base",
@@ -54,5 +61,10 @@ __all__ = [
     "BehaviorFlagType",
     "BehaviorFlagStatus",
     "NoParkingZone",
+    "Incident",
+    "IncidentIndicator",
+    "IncidentType",
+    "IncidentStatus",
+    "IncidentIndicatorType",
 ]
 

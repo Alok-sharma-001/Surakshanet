@@ -111,4 +111,7 @@ async def test_timescaledb_hypertable_metadata(db_session):
         ))
         job = jobs_result.mappings().first()
         assert job is not None, "Retention policy job must be registered on traffic_readings"
-        assert "90 days" in str(job["config"]), "Retention policy must be 90 days"
+        # SN-108 / docs/17-security-privacy.md §4: traffic_readings (derived
+        # counts, no personal data) is retained 1 year for trend analysis —
+        # not the earlier 90-day placeholder migration 001 originally set.
+        assert "1 year" in str(job["config"]), "Retention policy must be 1 year"

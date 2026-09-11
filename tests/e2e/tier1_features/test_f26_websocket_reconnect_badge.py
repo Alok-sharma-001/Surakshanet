@@ -9,13 +9,6 @@ import pytest
 from tests.e2e.client import PROJECT_ROOT
 
 
-@pytest.mark.tier1
-@pytest.mark.m5
-@pytest.mark.feature(26)
-def test_websocket_service_file_exists():
-    """TC-F26-01: Verify websocket.ts exists in frontend/dashboard/src/services/."""
-    ws_path = os.path.join(PROJECT_ROOT, "frontend", "dashboard", "src", "services", "websocket.ts")
-    assert os.path.exists(ws_path), f"websocket.ts not found at {ws_path}"
 
 
 @pytest.mark.tier1

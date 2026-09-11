@@ -26,7 +26,7 @@ WEIGHTS_PATH = "ml/marl/weights/marl_policy_downtown.pth"
 
 
 def test_real_weights_load_and_hash():
-    assert os.path.exists(WEIGHTS_PATH), f"Weights file missing at {WEIGHTS_PATH}"
+    assert os.path.isfile(WEIGHTS_PATH), f"Weights file missing at {WEIGHTS_PATH}"
     controller = MarlController(WEIGHTS_PATH)
     assert controller.is_loaded is True
     assert controller.model_version == EXPECTED_POLICY_SHA256

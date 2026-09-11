@@ -20,6 +20,7 @@ const SimulationPage = lazy(() => import('./pages/SimulationPage'));
 const UserManagementPage = lazy(() => import('./pages/UserManagementPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const EventsPage = lazy(() => import('./pages/EventsPage'));
+const AuditPage = lazy(() => import('./pages/AuditPage'));
 const PublicAdvisoryPage = lazy(() => import('./pages/PublicAdvisoryPage'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const StudioHomePage = lazy(() => import('./pages/StudioHomePage').then(m => ({ default: m.StudioHomePage })));
@@ -72,6 +73,7 @@ function App() {
             <Route path="edge-devices" element={<EdgeDevicesPage />} />
             <Route path="simulation" element={<SimulationPage />} />
             <Route path="events" element={<EventsPage />} />
+            <Route path="audit" element={<AuditPage />} />
             <Route path="users" element={<UserManagementPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>

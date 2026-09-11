@@ -90,10 +90,42 @@ _LENGTH_BY_SUMO_EDGE_ID: Dict[str, float] = {
     e["sumo_edge_id"]: e["length_m"] for e in CORRIDOR_EDGES
 }
 
+_EDGE_BY_SUMO_ID: Dict[str, Dict[str, Any]] = {
+    e["sumo_edge_id"]: e for e in CORRIDOR_EDGES
+}
+
+# The single arterial chain (W_entry - J0 - J1 - J2 - J3 - E_exit) — used to
+# find a real "immediately upstream" edge for FLOW_DROP (SN-088), rather than
+# deriving one from the same sample being evaluated.
+_ARTERIAL_SEQUENCE: List[str] = ["W_entry", "J0", "J1", "J2", "J3", "E_exit"]
+
 
 def edge_length_m_for_sumo_id(sumo_edge_id: str) -> Optional[float]:
     """Real edge length in meters for a SUMO edge id, or None if it isn't a known corridor edge."""
     return _LENGTH_BY_SUMO_EDGE_ID.get(sumo_edge_id)
+
+
+def upstream_edge_for_sumo_id(sumo_edge_id: str) -> Optional[str]:
+    """Real SUMO edge id immediately upstream of the given arterial edge (the
+    edge feeding traffic into its 'from' junction along the single W_entry -
+    J0 - J1 - J2 - J3 - E_exit chain), or None if this edge isn't part of
+    that chain or has no predecessor (e.g. the corridor's own entry edge).
+
+    Used by the anomaly service's FLOW_DROP indicator (SN-088) so "upstream
+    throughput" is a real measurement of a different, actual link — never
+    derived from the same sample being evaluated.
+    """
+    edge = _EDGE_BY_SUMO_ID.get(sumo_edge_id)
+    if not edge:
+        return None
+    frm = edge["from"]
+    if frm not in _ARTERIAL_SEQUENCE:
+        return None
+    idx = _ARTERIAL_SEQUENCE.index(frm)
+    if idx == 0:
+        return None
+    prev_junction = _ARTERIAL_SEQUENCE[idx - 1]
+    return _EDGE_ID_BY_PAIR.get((prev_junction, frm))
 
 
 def edge_id_for(from_junction: str, to_junction: str) -> Optional[str]:
@@ -121,6 +153,10 @@ _TELEMETRY_APPROACH_BY_SUMO_EDGE_ID: Dict[str, Tuple[str, str]] = {
     e["sumo_edge_id"]: e["telemetry_approach"] for e in CORRIDOR_EDGES if "telemetry_approach" in e
 }
 
+_SUMO_EDGE_ID_BY_TELEMETRY_APPROACH: Dict[Tuple[str, str], str] = {
+    e["telemetry_approach"]: e["sumo_edge_id"] for e in CORRIDOR_EDGES if "telemetry_approach" in e
+}
+
 
 def telemetry_approach_for_edge(sumo_edge_id: str) -> Optional[Tuple[str, str]]:
     """(junction_id, approach_direction) whose live telemetry describes this edge, or None.
@@ -129,6 +165,11 @@ def telemetry_approach_for_edge(sumo_edge_id: str) -> Optional[Tuple[str, str]]:
     no detector data and are never a source of live congestion, honestly.
     """
     return _TELEMETRY_APPROACH_BY_SUMO_EDGE_ID.get(sumo_edge_id)
+
+
+def edge_for_telemetry_approach(junction_id: str, direction: str) -> Optional[str]:
+    """Real SUMO edge ID whose approach is (junction_id, direction), or None."""
+    return _SUMO_EDGE_ID_BY_TELEMETRY_APPROACH.get((junction_id, direction))
 
 
 def route_to_edge_ids(route_junction_ids: List[str]) -> Optional[List[str]]:

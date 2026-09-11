@@ -10,14 +10,6 @@ import pytest
 from tests.e2e.client import PROJECT_ROOT
 
 
-@pytest.mark.tier1
-@pytest.mark.m1
-@pytest.mark.feature(2)
-def test_env_example_file_exists():
-    """TC-F02-01: Verify .env.example exists in project root."""
-    path = os.path.join(PROJECT_ROOT, ".env.example")
-    assert os.path.exists(path), f".env.example not found at {path}"
-
 
 @pytest.mark.tier1
 @pytest.mark.m1

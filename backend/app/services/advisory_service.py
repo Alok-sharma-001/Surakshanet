@@ -175,7 +175,46 @@ async def build_advisory(
         expires_at = window_end + timedelta(minutes=10)
         source = "sumo"
 
-    else:  # INCIDENT, FORECAST — no real measurement pipeline exists yet (Phase 5/6),
+    elif origin_type == AdvisoryOriginType.INCIDENT:
+        from app.models.incident import Incident
+        from sqlalchemy.orm import selectinload
+
+        res = await db.execute(
+            select(Incident)
+            .options(selectinload(Incident.indicators))
+            .where(Incident.id == origin_id)
+        )
+        incident = res.scalar_one_or_none()
+        # If incident does not exist or has no measured indicators, refuse honestly
+        if (
+            not incident
+            or not getattr(incident, "indicators", None)
+            or len(incident.indicators) == 0
+            or not isinstance(getattr(incident, "indicators", None), list)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="insufficient data to advise: no measured incident or indicators found for this incident",
+            )
+
+        corridor_text = get_human_corridor_text(incident.link_id)
+        severity = AdvisorySeverity.SEVERE if incident.confidence >= 0.75 else AdvisorySeverity.MODERATE
+        headline = (
+            f"Traffic alert: {corridor_text}"
+            if severity == AdvisorySeverity.SEVERE
+            else f"Traffic advisory: {corridor_text}"
+        )
+        cause_text = f"Possible traffic incident under management ({incident.indicators_fired} indicators verified)"
+        delay_low, delay_high = (15, 30) if severity == AdvisorySeverity.SEVERE else (10, 20)
+
+        recommended_route_text = f"Advise diversion around {corridor_text}; use alternate corridors"
+        recommended_departure_before = None
+        window_start = incident.detected_at
+        window_end = incident.detected_at + timedelta(minutes=60)
+        expires_at = window_end + timedelta(minutes=30)
+        source = incident.source or "sumo"
+
+    else:  # FORECAST — no real measurement pipeline exists yet,
         # so this refuses exactly as the spec requires rather than inventing numbers.
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -204,6 +243,28 @@ async def build_advisory(
     )
     db.add(advisory)
     await db.flush()
+
+    # Audit AI advisory draft creation per SN-104 & SN-105
+    try:
+        from app.services.audit_service import write_audit
+        from app.models.audit import AuditActorType, AuditResult
+        await write_audit(
+            db=db,
+            action="AI_ADVISORY_DRAFT",
+            actor_type=AuditActorType.AI,
+            actor_id=None,
+            target_type="advisory",
+            target_id=advisory.id,
+            input_payload={"origin_type": origin_type.value, "origin_id": str(origin_id)},
+            output_payload={"headline": headline, "corridor_text": corridor_text, "severity": severity.value},
+            model="advisory_generator",
+            model_version="1.0.0",
+            confidence=0.88,
+            result=AuditResult.SUCCESS,
+            source=source or "advisory_service",
+        )
+    except Exception as audit_err:
+        logger.warning(f"Failed to log AI_ADVISORY_DRAFT audit: {audit_err}")
 
     logger.info(f"Published citizen advisory {advisory.id} for origin {origin_id} by user {user_id}")
     return advisory

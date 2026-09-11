@@ -1,8 +1,14 @@
 import time
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import get_db
+from app.models.user import User
+from app.models.audit import AuditActorType, AuditResult
+from app.services.auth_service import require_role
+from app.services.audit_service import write_audit
 from app.services.routing_service import routing_service
 
 router = APIRouter(prefix="/routing", tags=["routing"])
@@ -58,7 +64,10 @@ class VMSBroadcastRequest(BaseModel):
 
 
 @router.post("/route")
-async def compute_route(data: RouteRequest):
+async def compute_route(
+    data: RouteRequest,
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER")),
+):
     """Compute optimal route between coordinates using A* search and live telemetry weights."""
     origin, destination = data.get_coords()
     profile = data.profile or "citizen"
@@ -84,7 +93,10 @@ async def compute_route(data: RouteRequest):
 
 
 @router.post("/alternatives")
-async def compute_alternatives(data: RouteRequest):
+async def compute_alternatives(
+    data: RouteRequest,
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER")),
+):
     """Compute primary and diverse alternative routes for dynamic diversion (SN-041/063)."""
     origin, destination = data.get_coords()
     profile = data.profile or "citizen"
@@ -103,14 +115,20 @@ async def compute_alternatives(data: RouteRequest):
 
 
 @router.get("/congestion")
-async def get_congestion():
+async def get_congestion(
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER")),
+):
     """Get current network edge congestion and staleness status (SN-041)."""
     edges_data = routing_service.get_congestion()
     return {"edges": edges_data}
 
 
 @router.post("/vms/broadcast")
-async def broadcast_vms(data: VMSBroadcastRequest):
+async def broadcast_vms(
+    data: VMSBroadcastRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR")),
+):
     """Publish message to Variable Message Sign panels."""
     new_broadcast = {
         "id": f"vms-{int(time.time())}",
@@ -122,17 +140,44 @@ async def broadcast_vms(data: VMSBroadcastRequest):
         "status": "ACTIVE"
     }
     vms_broadcasts.insert(0, new_broadcast)
+
+    # Audit route diversion broadcast (SN-104)
+    await write_audit(
+        db=db,
+        action="ROUTE_DIVERSION",
+        actor_type=AuditActorType.USER,
+        actor_id=current_user.id,
+        target_type="vms_panel",
+        input_payload={
+            "panel_cluster": data.panel_cluster,
+            "line1": data.line1,
+            "line2": data.line2,
+            "priority": data.priority,
+        },
+        output_payload={
+            "broadcast_id": new_broadcast["id"],
+            "panel_cluster": data.panel_cluster,
+            "status": "ACTIVE",
+        },
+        result=AuditResult.SUCCESS,
+        source="manual",
+    )
+
     return {"status": "broadcast_published", "broadcast": new_broadcast}
 
 
 @router.get("/vms/active")
-async def get_active_vms():
+async def get_active_vms(
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER")),
+):
     """Get currently active Variable Message Sign broadcasts."""
     active = [b for b in vms_broadcasts if b.get("status") == "ACTIVE"]
     return {"active_broadcasts": active}
 
 
 @router.get("/vms/history")
-async def get_vms_history():
+async def get_vms_history(
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER")),
+):
     """Get recent Variable Message Sign broadcast history."""
     return {"history": vms_broadcasts[:20]}

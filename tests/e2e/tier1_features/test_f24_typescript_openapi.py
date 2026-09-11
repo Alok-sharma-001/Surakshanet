@@ -41,7 +41,6 @@ def test_openapi_spec_contains_core_api_models(http_client: E2EHttpClient):
 def test_frontend_tsconfig_enforces_strict_types():
     """TC-F24-03: Verify frontend tsconfig.json has strict or noImplicitAny enabled."""
     tsconfig_path = os.path.join(PROJECT_ROOT, "frontend", "dashboard", "tsconfig.json")
-    assert os.path.exists(tsconfig_path), "tsconfig.json missing"
     with open(tsconfig_path, "r", encoding="utf-8") as f:
         content = f.read()
     assert "strict" in content or "noImplicitAny" in content or "compilerOptions" in content
@@ -62,6 +61,8 @@ def test_frontend_types_directory_exists():
 @pytest.mark.m5
 @pytest.mark.feature(24)
 def test_api_service_file_exists():
-    """TC-F24-05: Verify frontend/dashboard/src/services/api.ts exists."""
+    """TC-F24-05: Verify frontend/dashboard/src/services/api.ts exports API client definitions."""
     api_ts = os.path.join(PROJECT_ROOT, "frontend", "dashboard", "src", "services", "api.ts")
-    assert os.path.exists(api_ts), f"api.ts missing at {api_ts}"
+    with open(api_ts, "r", encoding="utf-8") as f:
+        content = f.read()
+    assert "api" in content or "axios" in content or "fetch" in content

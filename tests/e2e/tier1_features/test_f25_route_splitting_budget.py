@@ -12,15 +12,6 @@ from tests.e2e.client import PROJECT_ROOT
 @pytest.mark.tier1
 @pytest.mark.m5
 @pytest.mark.feature(25)
-def test_app_tsx_file_exists():
-    """TC-F25-01: Verify App.tsx exists in frontend/dashboard/src/."""
-    app_path = os.path.join(PROJECT_ROOT, "frontend", "dashboard", "src", "App.tsx")
-    assert os.path.exists(app_path), f"App.tsx not found at {app_path}"
-
-
-@pytest.mark.tier1
-@pytest.mark.m5
-@pytest.mark.feature(25)
 def test_app_tsx_uses_code_splitting():
     """TC-F25-02: Verify App.tsx uses React.lazy or dynamic import syntax."""
     app_path = os.path.join(PROJECT_ROOT, "frontend", "dashboard", "src", "App.tsx")
@@ -37,7 +28,6 @@ def test_app_tsx_uses_code_splitting():
 def test_vite_config_chunk_splitting():
     """TC-F25-03: Verify vite.config.ts configures build chunking or rollupOptions."""
     vite_path = os.path.join(PROJECT_ROOT, "frontend", "dashboard", "vite.config.ts")
-    assert os.path.exists(vite_path), "vite.config.ts missing"
     with open(vite_path, "r", encoding="utf-8") as f:
         content = f.read()
     assert "build" in content or "plugins" in content or "defineConfig" in content

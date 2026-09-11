@@ -12,6 +12,8 @@ class ConnectionManager:
             'emergency': set(),
             'training': set(),
             'simulation': set(),
+            'incidents': set(),
+            'control': set(),
         }
 
     async def connect(self, websocket: WebSocket, channel: str):

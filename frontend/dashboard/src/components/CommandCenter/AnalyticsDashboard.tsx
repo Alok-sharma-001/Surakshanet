@@ -80,7 +80,7 @@ export const AnalyticsDashboard: React.FC = () => {
         {/* Card 4: Road Safety & Incident Reduction */}
         <div className="bg-white rounded-3xl p-5 border border-studio-pink/40 shadow-studio-card relative overflow-hidden">
           <div className="flex items-center justify-between text-xs font-mono text-studio-muted">
-            <span>ACCIDENT RISK REDUCTION</span>
+            <span>INCIDENT RISK REDUCTION</span>
             <ShieldCheck className="w-4 h-4 text-emerald-600" />
           </div>
           <div className="my-3 flex items-baseline gap-2">

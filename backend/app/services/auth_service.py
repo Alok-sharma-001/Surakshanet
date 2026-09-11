@@ -4,7 +4,7 @@ import uuid
 from jose import JWTError, jwt
 import bcrypt
 import redis.asyncio as aioredis
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -214,13 +214,125 @@ async def get_optional_current_user(token: Optional[str] = Depends(oauth2_scheme
     return user
 
 
-def require_role(*roles: str):
-    def role_checker(current_user: User = Depends(get_current_user)):
+async def enforce_rate_limit(
+    key: str,
+    limit: int,
+    window_seconds: int = 60,
+    detail: str = "Rate limit exceeded"
+) -> None:
+    """Generic Redis-backed rate limiter (SN-101).
+    Raises 429 with retry_after_s when limit is exceeded.
+    """
+    try:
+        redis = get_redis_client()
+        count = await redis.incr(key)
+        if count == 1:
+            await redis.expire(key, window_seconds)
+
+        if count > limit:
+            ttl = await redis.ttl(key)
+            retry_after = max(int(ttl), 1)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"{detail}. retry_after_s: {retry_after}",
+                headers={"Retry-After": str(retry_after)},
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        # Best effort fail-open if Redis is unavailable
+        pass
+
+
+def _infer_action(request: Optional[Request]) -> str:
+    if not request:
+        return "OPERATION"
+    path = request.url.path.lower()
+    method = request.method.upper()
+    if "/emergency/activate" in path:
+        return "CORRIDOR_ACTIVATE"
+    if "/emergency/deactivate" in path:
+        return "CORRIDOR_DEACTIVATE"
+    if "/signals/" in path and "/mode" in path:
+        return "SIGNAL_MODE_CHANGE"
+    if "/signals/" in path and "/override" in path:
+        return "SIGNAL_OVERRIDE"
+    if "/signals/" in path and "/decision" in path:
+        return "SIGNAL_DECISION_READ"
+    if "/incidents/" in path and "/confirm" in path:
+        return "INCIDENT_CONFIRM"
+    if "/incidents/" in path and "/dismiss" in path:
+        return "INCIDENT_DISMISS"
+    if "/incidents/" in path and "/escalate" in path:
+        return "INCIDENT_ESCALATE"
+    if "/incidents/" in path and "/publish-warning" in path:
+        return "PUBLIC_WARNING_PUBLISH"
+    if "/events/" in path and "/approve" in path:
+        return "EVENT_APPROVE"
+    if "/events/" in path and "/publish" in path:
+        return "ADVISORY_PUBLISH"
+    if "/events/" in path and "/predict" in path:
+        return "EVENT_PREDICT"
+    if "/routing/vms/broadcast" in path:
+        return "ROUTE_DIVERSION"
+    if "/ml/train" in path:
+        return "ML_TRAIN"
+    if "/ab/run" in path:
+        return "AB_RUN"
+    if "/audit" in path:
+        return "AUDIT_READ"
+    return f"{method}_{path.strip('/').replace('/', '_').upper()}"
+
+
+def require_role(*roles: str, action: Optional[str] = None):
+    """Dependency enforcing role check, logging ACCESS_DENIED audit row on 403 (SN-099, SN-100)."""
+    async def role_checker(
+        request: Request = None,
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+    ) -> User:
         user_role = getattr(current_user.role, 'value', getattr(current_user.role, 'name', str(current_user.role)))
         if user_role not in roles:
+            action_name = action or _infer_action(request)
+
+            # Record ACCESS_DENIED audit row per SN-099 & SN-104
+            if db is not None:
+                try:
+                    from app.services.audit_service import write_audit
+                    from app.models.audit import AuditActorType, AuditResult
+                    corr_id = None
+                    path_str = ""
+                    method_str = ""
+                    if request:
+                        corr_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID") or request.headers.get("X-Correlation-ID")
+                        path_str = str(request.url.path)
+                        method_str = request.method
+
+                    await write_audit(
+                        db=db,
+                        action="ACCESS_DENIED",
+                        actor_type=AuditActorType.USER,
+                        actor_id=current_user.id,
+                        target_type="endpoint",
+                        input_payload={
+                            "role": user_role,
+                            "attempted_action": action_name,
+                            "path": path_str,
+                            "method": method_str,
+                            "required_roles": list(roles),
+                        },
+                        result=AuditResult.DENIED,
+                        source="rbac",
+                        correlation_id=corr_id,
+                    )
+                    await db.commit()
+                except Exception as e:
+                    import logging
+                    logging.getLogger("surakshanet.rbac").warning(f"Could not record ACCESS_DENIED audit log: {e}")
+
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Operation not permitted"
+                detail=f"Role {user_role} cannot perform {action_name}"
             )
         return current_user
     return role_checker
@@ -233,12 +345,16 @@ async def register_user(db: AsyncSession, user_data: UserCreate) -> User:
         raise HTTPException(status_code=400, detail="Email already registered")
 
     hashed_password = hash_password(user_data.password)
-    role = UserRole.OPERATOR
+    # Invariant §13.4: registration always creates OPERATOR — a role field
+    # on the request body (UserCreate.role) must never be trusted, or any
+    # anonymous caller could self-register as ADMIN. Promotion to a higher
+    # role is only ever a separate, explicit PATCH /users/{id}/role action
+    # by an existing ADMIN.
     db_user = User(
         email=user_data.email,
         password_hash=hashed_password,
         name=user_data.name,
-        role=role
+        role=UserRole.OPERATOR
     )
     db.add(db_user)
     await db.commit()

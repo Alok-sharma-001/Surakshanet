@@ -124,10 +124,42 @@ export const api = {
     publish: (id: string) => axiosInstance.post(`/events/${id}/publish`),
     cancel: (id: string) => axiosInstance.post(`/events/${id}/cancel`),
   },
+  incidents: {
+    getAll: (params?: { status?: string; link_id?: string; limit?: number; offset?: number }) =>
+      axiosInstance.get('/incidents', { params }),
+    getById: (id: string) => axiosInstance.get(`/incidents/${id}`),
+    confirm: (id: string) => axiosInstance.post(`/incidents/${id}/confirm`),
+    dismiss: (id: string, reason: string) => axiosInstance.post(`/incidents/${id}/dismiss`, { reason }),
+    escalate: (id: string) => axiosInstance.post(`/incidents/${id}/escalate`),
+    publishWarning: (id: string) => axiosInstance.post(`/incidents/${id}/publish-warning`),
+    resolve: (id: string, resolution?: string) => axiosInstance.post(`/incidents/${id}/resolve`, { resolution }),
+  },
   public: {
     getAdvisories: () => axios.get('/api/v1/public/advisories'),
     getAdvisoryById: (id: string) => axios.get(`/api/v1/public/advisories/${id}`),
     getStatus: () => axios.get('/api/v1/public/status'),
   },
+  audit: {
+    getAll: (params?: {
+      actor_type?: string;
+      action?: string;
+      result?: string;
+      target_type?: string;
+      limit?: number;
+      offset?: number;
+    }) => axiosInstance.get('/audit', { params }),
+    getById: (id: string) => axiosInstance.get(`/audit/${id}`),
+  },
+  vision: {
+    getStatus: () => axiosInstance.get('/vision/status'),
+    getDetections: (camId: string = 'CAM-01') => axiosInstance.get(`/vision/detections/latest?cam_id=${camId}`),
+    getFlags: (params?: { camera_id?: string; status?: string; flag_type?: string; limit?: number; offset?: number }) =>
+      axiosInstance.get('/vision/flags', { params }),
+    resolveFlag: (id: string, status: string, note?: string) =>
+      axiosInstance.patch(`/vision/flags/${id}/resolve`, { status, note }),
+    getFalsePositiveRate: () => axiosInstance.get('/vision/false-positive-rate'),
+    getModelLimitations: () => axiosInstance.get('/vision/model-limitations'),
+  },
 };
+
 

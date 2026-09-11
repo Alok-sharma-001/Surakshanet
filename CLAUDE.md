@@ -281,7 +281,155 @@ execution surface is `docs/CHECKLIST.md` (SN-001…SN-150, grouped into Phases 0
     `scripts/check_phase0_regressions.sh` extended to 27 checks, all pass. `ruff check app/` clean
     (fixed 3 pre-existing unused imports in the new `vision.py`). `npx tsc --noEmit` and a full
     `npm run build` clean.
-- **Phases 6–10:** NOT_STARTED.
+- **Phase 6 (Incident system, SN-083…SN-096) + Phase 7 (Governance, SN-097…SN-110) + the
+  accompanying Phase 8 critical-test rebuild:** DONE, genuinely live-verified — but only after a
+  same-day re-audit (the checklist and this file both originally claimed "fully verified" for all
+  three while the work was still uncommitted) found real fabrication, a genuine security
+  vulnerability combined with a total-lockout regression, and several bugs a real Postgres alone
+  could surface. Full trail:
+  - **Showstopper migration bug found and fixed**: `alembic upgrade head` could not succeed on a
+    genuinely fresh database. `006_incidents.py`'s `CREATE TABLE incidents` collided head-on with
+    an orphaned, never-model-backed `incidents` table `001_initial_schema.py` had already created
+    (`grep -rn "\"incidents\""` confirmed no SQLAlchemy model was ever mapped to that old shape);
+    `007_governance.py`'s `CREATE TABLE audit_logs` collided the same way with a "minimal" table
+    `004_events_and_advisories.py` created for Phase 4's `EVENT_APPROVE`/`ADVISORY_PUBLISH` calls,
+    since superseded by `AuditLog`'s richer `model`/`model_version`/`confidence`/composite-PK
+    schema. Fixed: `006`'s `upgrade()` drops the orphaned table before creating the real one and
+    recreates it verbatim at the end of `downgrade()` (so `001`'s own downgrade still has something
+    to drop); `007` does the same for the old minimal `audit_logs`. Also found and fixed:
+    `006`'s deferred-constraint-trigger DDL packed `DROP TRIGGER ...; CREATE CONSTRAINT TRIGGER
+    ...;` into one `op.execute()` call — asyncpg's extended query protocol rejects multiple
+    commands in one prepared statement — split into two calls; `007`'s enum columns raised "type
+    does not exist" when `sa.Enum(...)`'s implicit checkfirst-create didn't see a type the same
+    transaction had just dropped moments earlier — fixed with explicit `CREATE TYPE` statements and
+    `postgresql.ENUM(..., create_type=False)`; and `007`'s new "1 year" `traffic_readings`
+    retention policy silently no-opped against `001`'s pre-existing "90 day" one (TimescaleDB's
+    `if_not_exists => TRUE` treats "a policy already exists" as success) — fixed by removing the
+    old policy first. Live-verified: a full `downgrade base` → `upgrade head` round trip now
+    succeeds cleanly, confirmed against a real reset Postgres.
+  - **Critical security finding**: `POST /auth/register` had `Depends(require_role("ADMIN"))` —
+    meaning no one, not even the first non-seeded user, could ever register (a `require_role`
+    dependency itself requires an already-authenticated caller of that role). This was consistent
+    across three layers — the code, `docs/16-rbac.md`'s own permission matrix ("Register: ADMIN
+    only"), and two new critical tests asserting the lockout as intended behavior — but directly
+    contradicted this file's own pre-existing Invariant §13.4 ("Registration always creates
+    OPERATOR: never allow self-service admin creation") and `UserManagementPage.tsx`'s
+    long-standing Phase-2 comment ("registration is self-service"). Stacked underneath: even with
+    that gate removed, `register_user()` trusted `UserCreate.role` straight off the request body
+    (`role = getattr(user_data, "role", None) or UserRole.OPERATOR`) — letting any anonymous caller
+    submit `role: "ADMIN"` and receive it, the exact self-service-admin-creation Invariant §13.4
+    exists to prevent. Fixed both: `/auth/register` is public again (reachable with no token), and
+    `register_user()` now always assigns `UserRole.OPERATOR`, ignoring any submitted role
+    unconditionally. Promotion to `ADMIN`/`EMERGENCY_SERVICES`/`VIEWER`/`CITIZEN` remains only the
+    separate, pre-existing ADMIN-only `PATCH /users/{id}/role` (`backend/app/api/users.py`, already
+    validates against the full `UserRole` enum with no changes needed for the two new roles).
+    `docs/16-rbac.md`'s matrix line and the two critical tests (`test_01_auth.py`,
+    `test_02_rbac.py`) were rewritten to assert the honest, corrected contract rather than reverted
+    to match the vulnerability. `scripts/check_phase0_regressions.sh` extended with two permanent
+    guards for this exact regression class.
+  - **Fabrication found and fixed** (`services/anomaly_service/main.py`): `evaluate_flow_drop`'s
+    "upstream throughput" was computed as `flow * 1.2` — the *same* link's own measurement times an
+    arbitrary constant, not an independent reading of a different link. Worked out algebraically,
+    this makes the FLOW_DROP indicator structurally incapable of ever firing (downstream is always
+    exactly `upstream / 1.2`, so `downstream < 0.5 * upstream` can never be true for a non-negative
+    flow) — one of the five documented indicators was silently dead on arrival, contradicting
+    SN-088's "each fires on its designed condition" acceptance line. Fixed with a real topology-aware
+    fix: new `shared/corridor_topology.py::upstream_edge_for_sumo_id()` walks the single tracked
+    arterial chain (`W_entry-J0-J1-J2-J3-E_exit`) to find the genuine upstream edge, and the
+    detector now reads that edge's own most-recently-recorded real flow sample (`0.0`/honestly
+    "not yet measured" until that link's own telemetry has accumulated at least one reading — the
+    indicator's existing `available=False` path already handles that correctly). Live-verified: a
+    real 100-vehicle upstream sample against a real 30-vehicle downstream sample now correctly
+    fires FLOW_DROP.
+  - **Fabrication found and fixed** (same file): a new incident's `evidence_ref` defaulted to
+    `f"frames/blurred/{link_id}_{int(current_time_epoch)}.jpg"` — a plausible-looking path to a
+    blurred snapshot that categorically never exists, since nothing in this pipeline (see the
+    Phase 5 addendum's `PrivacyBlurrer` note below) ever captures or writes such a file. Fixed to
+    stay `null` unless a caller genuinely has a real reference to pass.
+  - **Fabrication found and fixed** (`backend/app/api/incidents.py`): `confirm_incident`'s
+    "proposed response unit" step hardcoded `unit_id: f"PATROL-{junction}"`, `station: f"Station
+    near {junction}"`, and `eta_minutes: 4` — this project has no real patrol/unit-location or
+    dispatch-tracking system anywhere to draw a genuine ID, station, or ETA from. Fixed to report
+    `status: "MANUAL_DISPATCH_REQUIRED"` honestly, with no invented specifics, and the operator
+    told to identify and contact a real unit themselves — SN-093's own "propose, don't dispatch"
+    framing already anticipates a human in this loop.
+  - **Bug found and fixed** (same file): every incident lifecycle broadcast
+    (`_publish_redis_event(..., formatted.model_dump())`) silently failed with `Object of type
+    datetime is not JSON serializable` — caught by the surrounding `except Exception`, logged as a
+    warning, and dropped — meaning SN-091's "a new incident appears in the UI within 5s" push
+    never actually reached `/ws/incidents` for any of the five lifecycle events. Fixed by using
+    `model_dump(mode="json")`, which correctly serializes the response's `datetime` fields to ISO
+    strings first.
+  - **Recurring bug class found and fixed, 4th occurrence** (`backend/app/services/audit_service.py`,
+    `backend/app/api/signals.py`): both now used `datetime.now(timezone.utc)` for a value assigned
+    directly to a naive `DateTime` column (`AuditLog.timestamp`, `SignalPlan.updated_at`) — the
+    exact tz-aware/naive mismatch this file's own Phase 2 and Phase 4 addenda already document as
+    two prior real incidents. `signals.py`'s case was an actual regression: the diff had changed a
+    previously-correct `datetime.utcnow()` to the broken tz-aware call. Both reverted to naive
+    `datetime.utcnow()`, matching every DateTime column and the codebase-wide convention (§13 edge
+    case 10).
+  - **Showstopper bug found and fixed** (`backend/app/services/vision_service.py`): the SN-105
+    `AI_BEHAVIOR_FLAG` audit-logging addition dropped the closing `)` on `persist_behavior_flag`'s
+    `BehaviorFlag(...)` constructor call, leaving `db.add(flag)` and everything after it inside the
+    constructor's argument list — a straight syntax error. Because this module is only imported
+    lazily (from inside `main.py`'s Redis pubsub loop, on the first real alert message), nothing in
+    the existing automated test suite ever imported it, so it sat completely broken — the entire
+    Phase 5 behavior-flag persistence pipeline (`GET /vision/flags`, the human-gate resolve
+    endpoint) was silently dead. Fixed (one missing `)`) and live-verified: a real flag persisted
+    to `behavior_flags` together with a real new `AI_BEHAVIOR_FLAG` audit row.
+  - **Bug found and fixed** (`services/control_service/main.py`, SN-105's `AI_CONTROL_DECISION`
+    sampling): `decision_result.q_values` is a plain `List[float]` for MARL and `None` for every
+    other controller (`controllers.py`'s own documented contract) — but the audit code called
+    `.q_values.values()`, a dict method, on it. For the one case this mattered (a genuine MARL
+    decision, the only time `q_values` is truthy), this raised `AttributeError`, silently swallowed
+    by the surrounding `except Exception`, so real AI decisions were never actually audited.
+    Meanwhile every Webster/fallback/manual decision — which has no real `q_values` and isn't an AI
+    decision at all — fell through to a hardcoded `conf_val = 0.85` and was logged with
+    `actor_type=AuditActorType.AI`, a fabricated confidence score misattributed to a deterministic
+    formula. Fixed: `max(decision_result.q_values)` (no `.values()`, it's already a list of floats);
+    `actor_type`/`confidence` now genuinely branch on whether real Q-values exist —
+    `AuditActorType.AI` with a real derived confidence only for an actual MARL decision,
+    `AuditActorType.SYSTEM` with `confidence=None` otherwise (matching `AuditLog`'s own CHECK
+    constraint). Live-verified both branches against a real Postgres.
+  - **Minor inconsistency found and fixed** (`scripts/retention.sh`): the dry-run branch listed a
+    `traffic_readings` purge that the real (non-dry-run) branch never actually executed — added the
+    matching `DELETE` statement. TimescaleDB's own native retention job (see above) already
+    enforces this independently, so this wasn't a live data-retention gap, just the script not
+    doing what it told the operator it would do.
+  - **Reviewed and found genuinely correct, no changes needed**: `services/anomaly_service/
+    {indicators,rules}.py` (all five indicator formulas and the combination rule match
+    `docs/14-incident-detection.md §3` exactly, including `evaluate_speed_collapse`'s already-correct
+    handling of a `None` `mean_speed_kmh` from the Phase 5 fix above); `backend/alembic/versions/
+    006_incidents.py`'s deferred constraint trigger (a real database-level "no incident without an
+    indicator" guarantee, not just app-level validation); `backend/app/api/incidents.py`'s two human
+    gates (`confirm` genuinely requires OPERATOR/ADMIN and blocks on a terminal status; `
+    publish-warning` genuinely 409s unless `CONFIRMED`/`RESPONDING` and is ADMIN-only); `backend/
+    app/api/audit.py` and `AuditPage.tsx` (real filtered queries, real ADMIN-only gating, real
+    disclosed sampling notice, no fabricated rows); `backend/app/api/users.py`'s `PATCH /{id}/role`
+    promotion endpoint; `.env.example`'s `VISION_ANPR_ENABLED=false` and its code-level enforcement
+    in `services/vision_worker/config.py`; `tests/test_language_policy.py` (SN-096's intoxication
+    patterns were already present from the Phase 5 pass, still correctly enforced against this new
+    code); `require_role()`'s real `ACCESS_DENIED` audit-row-on-403 behavior and the real
+    Redis-backed `enforce_rate_limit()` helper (SN-099/101) — spot-checked `/auth/login`,
+    `/auth/refresh`, `/public/*`, `/health*` to confirm the `/register` regression was isolated and
+    didn't affect any other documented-PUB endpoint.
+  - **Known gap, not fixed (no frontend consumer exists yet, so no observable defect)**: SN-093's
+    "proposed response panel" and the `unit_id`/`eta_minutes`-bearing fields it implied are not
+    referenced anywhere in the frontend (`grep -rn "proposed_unit\|eta_minutes"` outside
+    `incidents.py` and its test only found an unrelated `eta_minutes` field in `types/index.ts`) —
+    consistent with the honest `MANUAL_DISPATCH_REQUIRED` fix above, since there is no real
+    panel yet for a fabricated one to have been feeding.
+  - **Live verification, 2026-09-12**: reset the demo Postgres to a genuinely clean schema and ran
+    the full `alembic upgrade head` chain (six migrations) and a full `downgrade base` /
+    `upgrade head` round trip, both clean; re-seeded via `seed_admin.py`/`seed_city.py`; ran
+    `backend/tests/` (79 passed, 1 honest skip), `tests/critical/` + `tests/
+    test_routing_engine_phase3.py` + `tests/test_language_policy.py` + `tests/test_vision_api.py`
+    together in one invocation (259 passed, 1 honest skip — this also confirmed `pytest.ini`'s new
+    `--import-mode=importlib` genuinely fixed the `tests`/`backend.tests` package-name collision
+    documented as a workaround elsewhere in this file). `scripts/check_phase0_regressions.sh`
+    extended to 29 checks, all pass. `ruff check app/` clean. `npx tsc --noEmit` and a full
+    `npm run build` clean, all chunks within the 500 KB budget. `npm test` (Vitest): 6/6.
+- **Phases 9–10:** NOT_STARTED (Phase 9: Demo Hardening, Phase 10: Final Acceptance).
 
 **2026-09-11 addendum — full pre-Phase-5 audit of the "Antigravity" copilot/agent-tools
 subsystem, fixed and live-verified.** Requested explicitly ("check all errors/bugs up through

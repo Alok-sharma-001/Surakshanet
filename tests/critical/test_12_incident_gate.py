@@ -144,6 +144,7 @@ async def test_operator_resolution_audit_logging():
     from app.services.audit_service import write_audit
 
     mock_db = AsyncMock()
+    mock_db.add = MagicMock()
     operator_id = uuid.uuid4()
     flag_id = uuid.uuid4()
 

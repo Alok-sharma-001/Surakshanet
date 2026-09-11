@@ -19,6 +19,7 @@ import {
   Settings,
   LogOut,
   Shield,
+  ClipboardList,
 } from 'lucide-react';
 
 interface NavItem {
@@ -51,6 +52,7 @@ const systemNavItems: NavItem[] = [
 ];
 
 const adminNavItems: NavItem[] = [
+  { name: 'Audit Logs', path: '/app/audit', icon: ClipboardList },
   { name: 'Users', path: '/app/users', icon: Users },
   { name: 'Settings', path: '/app/settings', icon: Settings },
 ];
@@ -109,7 +111,8 @@ const NavSection: React.FC<{ items: NavItem[]; label?: string }> = ({ items, lab
 );
 
 const Sidebar: React.FC = () => {
-  const { logout } = useAuthStore();
+  const { user, logout } = useAuthStore();
+  const isAdmin = user?.role === 'ADMIN';
   const navigate = useNavigate();
 
   const handleLogout = () => {
@@ -158,9 +161,11 @@ const Sidebar: React.FC = () => {
           <NavSection items={systemNavItems} label="System" />
         </div>
 
-        <div className="border-t border-slate-100 pt-2">
-          <NavSection items={adminNavItems} label="Admin" />
-        </div>
+        {isAdmin && (
+          <div className="border-t border-slate-100 pt-2">
+            <NavSection items={adminNavItems} label="Admin" />
+          </div>
+        )}
       </nav>
 
       {/* Logout */}

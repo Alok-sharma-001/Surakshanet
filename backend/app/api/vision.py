@@ -19,7 +19,7 @@ from app.models.vision import (
 )
 from app.models.user import User
 from app.models.audit import AuditActorType, AuditResult
-from app.services.auth_service import require_role, get_optional_current_user
+from app.services.auth_service import require_role
 from app.services.audit_service import write_audit
 
 logger = logging.getLogger("surakshanet.api.vision")
@@ -64,7 +64,9 @@ class FlagResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.get("/status")
-async def get_vision_status() -> Dict[str, Any]:
+async def get_vision_status(
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER")),
+) -> Dict[str, Any]:
     """Returns live diagnostics of the computer vision worker pipeline (SN-069, SN-073).
     Returns explicit unavailable status when no video source is connected.
     """
@@ -89,7 +91,8 @@ async def get_vision_status() -> Dict[str, Any]:
 
 @router.get("/detections/latest")
 async def get_latest_detections(
-    cam_id: str = Query("CAM-01", description="Camera identifier")
+    cam_id: str = Query("CAM-01", description="Camera identifier"),
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER")),
 ) -> Dict[str, Any]:
     """Returns the latest real vehicle detection bounding boxes from the vision worker (SN-078)."""
     try:
@@ -123,7 +126,7 @@ async def list_behavior_flags(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER")),
 ) -> List[Dict[str, Any]]:
     """Lists behavior suspicion flags flagged by computer vision detectors."""
     query = select(BehaviorFlag).order_by(desc(BehaviorFlag.detected_at))
@@ -272,7 +275,7 @@ async def create_restricted_zone(
 async def list_restricted_zones(
     camera_id: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER")),
 ) -> List[Dict[str, Any]]:
     """Lists restricted no-parking zones configured for cameras."""
     query = select(NoParkingZone).order_by(desc(NoParkingZone.created_at))
@@ -294,3 +297,101 @@ async def list_restricted_zones(
         }
         for z in zones
     ]
+
+
+@router.get("/false-positive-rate")
+async def get_false_positive_rate(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER")),
+) -> Dict[str, Any]:
+    """Tracks and reports computer vision false-positive rates (SN-110).
+    Computes dismissed / total per flag type and overall.
+    """
+    res = await db.execute(select(BehaviorFlag))
+    flags = res.scalars().all()
+
+    total_flags = len(flags)
+    dismissed_flags = sum(1 for f in flags if f.status == BehaviorFlagStatus.DISMISSED)
+    confirmed_flags = sum(1 for f in flags if f.status == BehaviorFlagStatus.CONFIRMED)
+    unverified_flags = sum(1 for f in flags if f.status == BehaviorFlagStatus.UNVERIFIED)
+
+    overall_fp_rate = (dismissed_flags / total_flags) if total_flags > 0 else 0.0
+
+    by_type: Dict[str, Dict[str, Any]] = {}
+    for ft in BehaviorFlagType:
+        type_str = ft.value if hasattr(ft, "value") else str(ft)
+        type_flags = [f for f in flags if f.flag_type == ft]
+        tot = len(type_flags)
+        dism = sum(1 for f in type_flags if f.status == BehaviorFlagStatus.DISMISSED)
+        conf = sum(1 for f in type_flags if f.status == BehaviorFlagStatus.CONFIRMED)
+        unv = sum(1 for f in type_flags if f.status == BehaviorFlagStatus.UNVERIFIED)
+        fp_rate = (dism / tot) if tot > 0 else 0.0
+        by_type[type_str] = {
+            "total": tot,
+            "confirmed": conf,
+            "dismissed": dism,
+            "unverified": unv,
+            "false_positive_rate": round(fp_rate, 4),
+        }
+
+    return {
+        "overall": {
+            "total_flags": total_flags,
+            "confirmed": confirmed_flags,
+            "dismissed": dismissed_flags,
+            "unverified": unverified_flags,
+            "false_positive_rate": round(overall_fp_rate, 4),
+        },
+        "by_flag_type": by_type,
+    }
+
+
+@router.get("/model-limitations")
+async def get_model_limitations(
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER")),
+) -> Dict[str, Any]:
+    """Returns published machine learning model limitations and declared biases (SN-110)."""
+    return {
+        "models": {
+            "yolov8n_coco": {
+                "name": "YOLOv8n (COCO)",
+                "limitations": [
+                    "No auto-rickshaw class in COCO. Autos are detected as car or motorcycle, biasing PCU in Indian traffic.",
+                    "Under-counts two-wheelers and pedestrians in dense scenes due to occlusion; recall degrades in rain, fog and at night."
+                ],
+                "mitigation": "Requires locally-labelled dataset for Indian traffic conditions; PCU adjustment applied."
+            },
+            "speed_estimation": {
+                "name": "Camera Speed Estimation",
+                "limitations": [
+                    "Requires per-camera homography and metres-per-pixel calibration. Uncalibrated cameras emit null, never a guess."
+                ]
+            },
+            "traffic_forecaster": {
+                "name": "Forecaster (LSTM + XGBoost)",
+                "limitations": [
+                    "Trained on synthetic simulation data. It has learned internal generator dynamics, not Indian traffic."
+                ],
+                "declared_tag": "training_data: synthetic"
+            },
+            "dqn_signal_policy": {
+                "name": "DQN Traffic Signal Policy",
+                "limitations": [
+                    "Trained in SUMO simulation on this corridor. Not validated on physical hardware; network transfer unproven."
+                ]
+            },
+            "anomaly_incident_detection": {
+                "name": "Anomaly Incident Detector",
+                "limitations": [
+                    "Detects statistical telemetry anomalies, not confirmed collisions. Confidence is an anomaly score, not a crash probability."
+                ]
+            },
+            "cv_behavior_flags": {
+                "name": "CV Behaviour Suspicion Detector",
+                "limitations": [
+                    "Measures kinematic trajectory anomalies, not driver intent or legal culpability."
+                ]
+            }
+        },
+        "system_bias": "Systematic under-counting of two-wheelers and auto-rickshaws biases unweighted density estimators. Addressed via PCU weighting and operator verification gates."
+    }

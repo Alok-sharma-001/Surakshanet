@@ -256,7 +256,7 @@ export const CopilotAssistant: React.FC = () => {
             {[
               'Preempt emergency corridor for ambulance Silk Board -> MG Road',
               'Forecast 60m traffic volume and spillback risk for j-silkboard',
-              'Accident at Tin Factory: compute optimal detour routing',
+              'Possible incident at Tin Factory: compute optimal detour routing',
               'Dispatch VMS roadside warning for heavy fog ahead'
             ].map((p, i) => (
               <button

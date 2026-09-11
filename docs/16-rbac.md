@@ -26,7 +26,7 @@ Covers **SN-098 … SN-101, SN-112**. Current roles: `ADMIN`, `OPERATOR`, `VIEWE
 |---|---|---|---|---|---|
 | `POST /auth/login`, `/auth/refresh` | PUB | PUB | PUB | PUB | PUB |
 | `GET /auth/me` | ✔ | ✔ | ✔ | ✔ | ✔ |
-| `POST /auth/register` | ✔ | — | — | — | — |
+| `POST /auth/register` | PUB | PUB | PUB | PUB | PUB |
 | `GET /users`, `PATCH /users/{id}` | ✔ | — | — | — | — |
 | `GET /health`, `/health/deep` | PUB | PUB | PUB | PUB | PUB |
 | `GET /traffic/*`, `/junctions/*` (read) | ✔ | ✔ | ✔ | ✔ | — |
@@ -63,6 +63,7 @@ Covers **SN-098 … SN-101, SN-112**. Current roles: `ADMIN`, `OPERATOR`, `VIEWE
 | `GET /public/*` | PUB | PUB | PUB | PUB | PUB |
 
 **Deliberate restrictions and their reasons:**
+- `POST /auth/register` is reachable by anyone, including no token at all — it is how every account, including the first one, is ever created — but the endpoint itself always forces `role=OPERATOR` regardless of anything the caller submits, never trusting a client-supplied role (Invariant §13.4 in the root `CLAUDE.md`). Promotion to `ADMIN`, `EMERGENCY_SERVICES`, `VIEWER`, or `CITIZEN` is only ever the separate, explicit `PATCH /users/{id}/role` action by an existing `ADMIN`. A prior draft of this table marked registration `ADMIN`-only, matching a since-reverted regression in `backend/app/api/auth.py` that made the whole application impossible to bootstrap (no one — not even the first non-seeded user — could ever register); `frontend/.../UserManagementPage.tsx`'s own long-standing comment ("registration is self-service") reflects the correct, original design this table now matches again.
 - Only `ADMIN` publishes anything public (event publish, incident warning). Public communication is irreversible; it needs the highest authority in the system.
 - Only `EMERGENCY_SERVICES` and `ADMIN` activate corridors (SN-101) — a corridor pre-empts an entire route and is an abuse vector if open to every operator.
 - `EMERGENCY_SERVICES` cannot change signal modes. They request priority; they do not run the network.

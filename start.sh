@@ -60,10 +60,12 @@ if [[ "$PROFILE" == "dev" ]]; then
     COMPOSE_FILE="infra/docker-compose.yml"
 fi
 
-# Detect Python interpreter (prefer virtualenv)
-PYTHON_BIN="python3"
-if [[ -f ".venv/bin/python3" ]]; then
-    PYTHON_BIN=".venv/bin/python3"
+# Detect Python interpreter (prefer virtualenv unless overridden)
+if [[ -z "${PYTHON_BIN:-}" ]]; then
+    PYTHON_BIN="python3"
+    if [[ -f ".venv/bin/python3" ]]; then
+        PYTHON_BIN=".venv/bin/python3"
+    fi
 fi
 
 report_failure() {
@@ -143,7 +145,7 @@ CONTAINERS=("surakshanet-timescaledb" "surakshanet-redis" "surakshanet-mosquitto
 for c in "${CONTAINERS[@]}"; do
     elapsed=0
     until [[ "$(docker inspect --format '{{.State.Health.Status}}' "$c" 2>/dev/null)" == "healthy" ]]; do
-        if [[ $elapsed -ge 60 ]]; then
+        if [[ $elapsed -ge ${STEP_TIMEOUT:-60} ]]; then
             report_failure "3" "Wait for health" "container $c timed out waiting for healthy state" "inspect logs with: docker logs $c" "docs/04-environment-setup.md §7"
         fi
         sleep 2
@@ -170,7 +172,7 @@ docker exec surakshanet-backend alembic upgrade head >/dev/null 2>&1 || {
 # Wait for /health
 elapsed=0
 until curl -s -f http://127.0.0.1:8000/health >/dev/null 2>&1; do
-    if [[ $elapsed -ge 60 ]]; then
+    if [[ $elapsed -ge ${STEP_TIMEOUT:-60} ]]; then
         report_failure "4" "Start backend" "backend /health endpoint unreachable after 60s" "connection refused or 5xx from http://127.0.0.1:8000/health" "docs/04-environment-setup.md §7"
     fi
     sleep 2
@@ -240,7 +242,7 @@ else
 
         elapsed=0
         until curl -s http://127.0.0.1:5173 >/dev/null 2>&1; do
-            if [[ $elapsed -ge 30 ]]; then
+            if [[ $elapsed -ge ${STEP_TIMEOUT:-30} ]]; then
                 report_failure "7" "Start frontend" "vite dev server timed out" "check logs/frontend.log" "docs/04-environment-setup.md §5"
             fi
             sleep 1
@@ -259,7 +261,7 @@ DEEP_HEALTH_FILE="$(mktemp)"
 all_ok=false
 HEALTH_ERR=""
 
-for i in $(seq 1 15); do
+for i in $(seq 1 ${STEP_TIMEOUT:-15}); do
     curl -s http://127.0.0.1:8000/health/deep > "$DEEP_HEALTH_FILE" 2>/dev/null || echo '{"status":"error"}' > "$DEEP_HEALTH_FILE"
     if [[ -s "$DEEP_HEALTH_FILE" ]] && ! grep -q '{"status":"error"}' "$DEEP_HEALTH_FILE"; then
         HEALTH_ERR=$($PYTHON_BIN -c "

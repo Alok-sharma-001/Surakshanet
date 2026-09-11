@@ -12,7 +12,7 @@ from app.database import get_db
 from app.models.event import Event, EventType, EventIntensity, EventStatus
 from app.models.advisory import AdvisoryOriginType
 from app.models.user import User
-from app.services.auth_service import get_current_user, require_role
+from app.services.auth_service import require_role
 from app.services.event_service import (
     translate_demand,
     is_prediction_running,
@@ -110,9 +110,9 @@ async def create_event(
 async def list_events(
     status_filter: Optional[EventStatus] = Query(None, alias="status"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER")),
 ):
-    """Lists all events. Accessible to VIEWER, OPERATOR, and ADMIN."""
+    """Lists all events. Accessible to VIEWER, OPERATOR, EMERGENCY_SERVICES, and ADMIN."""
     stmt = select(Event)
     if status_filter:
         stmt = stmt.where(Event.status == status_filter)
@@ -146,7 +146,7 @@ async def list_events(
 async def get_event(
     event_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER")),
 ):
     """Retrieves single event details, demand translation, and prediction status."""
     res = await db.execute(select(Event).where(Event.id == event_id))
@@ -276,7 +276,7 @@ async def run_event_prediction(
 async def get_event_prediction_endpoint(
     event_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR", "EMERGENCY_SERVICES", "VIEWER")),
 ):
     """
     Retrieves measured prediction results.

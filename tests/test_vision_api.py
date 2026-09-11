@@ -15,23 +15,45 @@ from app.services.auth_service import get_current_user, require_role
 @pytest.mark.asyncio
 async def test_get_vision_status_unavailable_by_default():
     """SN-073: GET /vision/status returns explicit unavailable status when no worker/source."""
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        res = await client.get("/vision/status")
-        assert res.status_code == 200
-        data = res.json()
-        assert data["status"] == "unavailable"
-        assert data["reason"] is not None
+    operator = User(
+        id=uuid.uuid4(),
+        email="operator@surakshanet.gov.in",
+        name="Traffic Operator",
+        role=UserRole.OPERATOR,
+        is_active=True,
+    )
+    app.dependency_overrides[get_current_user] = lambda: operator
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            res = await client.get("/api/v1/vision/status")
+            assert res.status_code == 200
+            data = res.json()
+            assert data["status"] == "unavailable"
+            assert data["reason"] is not None
+    finally:
+        app.dependency_overrides.clear()
 
 
 @pytest.mark.asyncio
 async def test_get_latest_detections_offline():
     """SN-078: GET /vision/detections/latest returns offline state when worker offline."""
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        res = await client.get("/api/v1/vision/detections/latest?cam_id=CAM-01")
-        assert res.status_code == 200
-        data = res.json()
-        assert data["detections"] == []
-        assert data["fps"] is None
+    operator = User(
+        id=uuid.uuid4(),
+        email="operator@surakshanet.gov.in",
+        name="Traffic Operator",
+        role=UserRole.OPERATOR,
+        is_active=True,
+    )
+    app.dependency_overrides[get_current_user] = lambda: operator
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            res = await client.get("/api/v1/vision/detections/latest?cam_id=CAM-01")
+            assert res.status_code == 200
+            data = res.json()
+            assert data["detections"] == []
+            assert data["fps"] is None
+    finally:
+        app.dependency_overrides.clear()
 
 
 @pytest.mark.asyncio
@@ -56,6 +78,7 @@ async def test_patch_resolve_flag_human_gate_and_audit():
     )
 
     mock_db = AsyncMock()
+    mock_db.add = MagicMock()
     # Mock select returning mock_flag
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = mock_flag
@@ -99,6 +122,7 @@ async def test_restricted_zones_create_and_list():
     )
 
     mock_db = AsyncMock()
+    mock_db.add = MagicMock()
     async def override_db():
         yield mock_db
 

@@ -120,7 +120,7 @@ export const Navbar: React.FC<Props> = ({ activeTab, onTabChange }) => {
                 </div>
                 <div className="space-y-3 mt-3 text-xs">
                   <div className="p-3 rounded-xl bg-red-50 border border-red-200">
-                    <div className="font-bold text-red-800">Accident on NH-52</div>
+                    <div className="font-bold text-red-800">Possible incident on NH-52</div>
                     <div className="text-slate-600 text-[11px]">Intersection 08 · Ambulances routed</div>
                   </div>
                   <div className="p-3 rounded-xl bg-amber-50 border border-amber-200">

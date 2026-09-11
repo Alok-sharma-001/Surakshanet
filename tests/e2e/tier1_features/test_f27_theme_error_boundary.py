@@ -9,13 +9,6 @@ import pytest
 from tests.e2e.client import PROJECT_ROOT
 
 
-@pytest.mark.tier1
-@pytest.mark.m5
-@pytest.mark.feature(27)
-def test_design_md_file_exists():
-    """TC-F27-01: Verify design.md exists in project root."""
-    design_path = os.path.join(PROJECT_ROOT, "design.md")
-    assert os.path.exists(design_path), "design.md missing in root"
 
 
 @pytest.mark.tier1

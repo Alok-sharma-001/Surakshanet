@@ -2,7 +2,7 @@ export interface User {
   id: string;
   email: string;
   name: string;
-  role: 'ADMIN' | 'OPERATOR' | 'VIEWER';
+  role: 'ADMIN' | 'OPERATOR' | 'EMERGENCY_SERVICES' | 'VIEWER' | 'CITIZEN';
   is_active: boolean;
   created_at: string;
 }
@@ -94,4 +94,22 @@ export interface SimulationState {
     total_waiting_time: number;
     throughput: number;
   };
+}
+
+export interface AuditLogItem {
+  id: string;
+  timestamp: string;
+  actor_type: 'USER' | 'SYSTEM' | 'AI';
+  actor_id?: string | null;
+  action: string;
+  target_type?: string | null;
+  target_id?: string | null;
+  input?: any;
+  output?: any;
+  model?: string | null;
+  model_version?: string | null;
+  confidence?: number | null;
+  source: string;
+  result: 'SUCCESS' | 'FAILURE' | 'DENIED';
+  correlation_id?: string | null;
 }

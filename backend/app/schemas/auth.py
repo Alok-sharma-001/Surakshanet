@@ -9,6 +9,7 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=1)
     name: str
+    role: Optional[UserRole] = None
 
 
 class UserLogin(BaseModel):

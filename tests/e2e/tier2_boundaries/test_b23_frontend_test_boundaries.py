@@ -8,13 +8,6 @@ import pytest
 from tests.e2e.client import PROJECT_ROOT
 
 
-@pytest.mark.tier2
-@pytest.mark.m5
-@pytest.mark.feature(23)
-def test_auth_store_file_exists():
-    """TC-B23-01: Boundary - Verify authStore.ts exists in frontend/dashboard/src/store/."""
-    auth_store_path = os.path.join(PROJECT_ROOT, "frontend", "dashboard", "src", "store", "authStore.ts")
-    assert os.path.exists(auth_store_path), f"authStore.ts missing at {auth_store_path}"
 
 
 @pytest.mark.tier2

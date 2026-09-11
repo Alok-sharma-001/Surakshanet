@@ -388,6 +388,9 @@ class ControlService:
         self.last_decision_id[tl_id] = decision_id
         self.last_decision_ts[tl_id] = decision_ts
 
+        self.cmd_seq[tl_id] = self.cmd_seq.get(tl_id, 0) + 1
+        seq = self.cmd_seq[tl_id]
+
         j_uuid = await self._resolve_junction(tl_id)
 
         if j_uuid:
@@ -420,13 +423,70 @@ class ControlService:
                         source=telemetry.source.value
                     )
                     db.add(decision_row)
+
+                    # Sampled AI decision audit log per SN-104 & SN-105:
+                    # audit every clamp, every fallback, and 1 in 20 routine decisions
+                    should_audit = (
+                        safety_res.clamped
+                        or (safety_res.action_source in ("fallback", "webster", "manual"))
+                        or (seq % 20 == 0)
+                    )
+                    if should_audit:
+                        try:
+                            from app.services.audit_service import write_audit
+                            from app.models.audit import AuditActorType, AuditResult
+                            # q_values is a plain List[float] for MARL, None
+                            # for every other controller (controllers.py's own
+                            # documented contract) — .values() on a list
+                            # raised AttributeError here, silently swallowed
+                            # by the except below, so a real MARL decision's
+                            # audit write never actually happened; meanwhile
+                            # every Webster/fallback/manual decision (which
+                            # has no real q_values, and isn't an AI decision
+                            # at all) was logged with a fabricated 0.85
+                            # confidence under actor_type=AI. Fixed: only a
+                            # genuine MARL decision is logged as AI with a
+                            # real confidence derived from its own q_values;
+                            # everything else is SYSTEM with no confidence
+                            # (the audit_logs CHECK constraint already
+                            # enforces confidence is null unless actor_type
+                            # is AI).
+                            is_ai_decision = bool(decision_result.q_values)
+                            conf_val = None
+                            if is_ai_decision:
+                                conf_val = round(min(1.0, max(0.1, float(max(decision_result.q_values)))), 3)
+                            await write_audit(
+                                db=db,
+                                action="AI_CONTROL_DECISION",
+                                actor_type=AuditActorType.AI if is_ai_decision else AuditActorType.SYSTEM,
+                                actor_id=None,
+                                target_type="junction",
+                                target_id=j_uuid,
+                                input_payload={
+                                    "state_vector": state_result.to_dict(),
+                                    "q_values": decision_result.q_values,
+                                },
+                                output_payload={
+                                    "action": safety_res.action,
+                                    "applied_phase": safety_res.applied_phase,
+                                    "applied_duration_s": safety_res.applied_duration_s,
+                                    "clamped": safety_res.clamped,
+                                    "clamp_reason": safety_res.clamp_reason,
+                                },
+                                model=controller_name,
+                                model_version=decision_result.model_version or "1.0.0",
+                                confidence=conf_val,
+                                result=AuditResult.SUCCESS,
+                                source=telemetry.source.value,
+                            )
+                        except Exception as audit_err:
+                            logger.error(f"Error writing audit log for control decision: {audit_err}")
+
                     await db.commit()
             except Exception as e:
                 logger.error(f"Error persisting ControlDecision for {tl_id}: {e}")
 
         # 7. Emit TraCI control command to Redis (control_commands)
-        self.cmd_seq[tl_id] = self.cmd_seq.get(tl_id, 0) + 1
-        seq = self.cmd_seq[tl_id]
 
         cmd_payload = {
             "type": "SET_PHASE",

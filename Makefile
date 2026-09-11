@@ -29,7 +29,19 @@ dev: up
 down:
 	docker compose -f infra/docker-compose.yml down
 
-test: test-backend test-frontend
+test: test-critical test-frontend
+
+test-critical:
+	@if [ -f .venv/bin/pytest ]; then .venv/bin/pytest tests/critical/ -v; else pytest tests/critical/ -v; fi
+
+test-unit:
+	@if [ -f .venv/bin/pytest ]; then .venv/bin/pytest tests/critical/test_04_telemetry_ingest.py tests/critical/test_07_safety_envelope.py tests/critical/test_13_provenance.py tests/critical/test_15_ab_reproducibility.py -v; else pytest tests/critical/test_04_telemetry_ingest.py tests/critical/test_07_safety_envelope.py tests/critical/test_13_provenance.py tests/critical/test_15_ab_reproducibility.py -v; fi
+
+test-integration:
+	@if [ -f .venv/bin/pytest ]; then .venv/bin/pytest tests/critical/test_01_auth.py tests/critical/test_02_rbac.py tests/critical/test_03_public_exposure.py tests/critical/test_08_emergency_corridor.py tests/critical/test_10_citizen_advisory.py tests/critical/test_12_incident_gate.py tests/critical/test_13_incident_system.py tests/critical/test_14_audit.py -v; else pytest tests/critical/test_01_auth.py tests/critical/test_02_rbac.py tests/critical/test_03_public_exposure.py tests/critical/test_08_emergency_corridor.py tests/critical/test_10_citizen_advisory.py tests/critical/test_12_incident_gate.py tests/critical/test_13_incident_system.py tests/critical/test_14_audit.py -v; fi
+
+test-sumo:
+	@if [ -f .venv/bin/pytest ]; then .venv/bin/pytest tests/critical/ -m sumo -v; else pytest tests/critical/ -m sumo -v; fi
 
 test-backend:
 	docker exec surakshanet-backend pytest tests/test_alerts.py tests/test_auth.py tests/test_marl.py tests/test_ml.py tests/test_pcu_engine.py tests/test_routing.py tests/test_rtsp_worker.py tests/test_signal_bridge.py tests/test_signals.py tests/test_spatial.py tests/test_traffic.py -v

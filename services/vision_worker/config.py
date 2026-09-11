@@ -84,7 +84,9 @@ class VisionWorkerConfig:
     conf_threshold: float = 0.40
     aggregation_window_s: float = 2.0
     redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-    anpr_enabled: bool = False  # SN-109: ANPR is disabled by default
+    anpr_enabled: bool = field(
+        default_factory=lambda: os.getenv("VISION_ANPR_ENABLED", "false").lower() in ("true", "1", "yes")
+    )
 
     @classmethod
     def load(cls, config_path: Optional[str] = None) -> "VisionWorkerConfig":
@@ -155,4 +157,5 @@ class VisionWorkerConfig:
                 ]
             )
 
-        return cls(cameras=cameras)
+        anpr_env = os.getenv("VISION_ANPR_ENABLED", "false").lower() in ("true", "1", "yes")
+        return cls(cameras=cameras, anpr_enabled=anpr_env)

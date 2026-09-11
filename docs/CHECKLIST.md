@@ -6,38 +6,27 @@
 **Priority:** `P0` blocks the demo · `P1` required for the target score · `P2` valuable · `P3` optional
 **Rule:** a task is `DONE` only when all ten Definition-of-Done conditions in [23-final-acceptance.md §1](23-final-acceptance.md) hold.
 
-**Progress:** 101 / 161 DONE — **63%** *(Phases 0, 1, 2, 3, 4, and 5 closed. Phase 5 delivers
-Computer Vision: a real YOLOv8 + IoU/centroid tracker worker emitting canonical vision-sourced
-JunctionTelemetry, wrong-way / no-parking / dangerous-driving UNVERIFIED behavior flags with a
-DB-level human gate, and a repo-wide language-policy test (SN-082) — but only after a same-day
-re-audit (checklist marked all 14 SN items DONE while the work was still uncommitted) found a
-fabricated 0.0 default standing in for "speed not measured" (violating SN-072's own "null when
-uncalibrated" acceptance line, and reaching both the live `/ws/traffic` broadcast and the
-signal-control state vector) plus three features wired to a table or detector state nothing ever
-actually populated: behavior flags and CV detections were computed and published to Redis but
-never persisted, so GET /vision/flags and SN-078's "every box traces to a cv_detections row" were
-vacuously true; and operator-drawn no-parking zones were saved and echoed back by the API but
-never loaded into the running detector, so a drawn zone could never actually suppress-and-flag a
-parked vehicle. All fixed and live-verified against a real YOLO run on the demo fixture and a real
-Postgres (real telemetry showing an honest `null` for an empty approach, a real persisted
-behavior_flags row, a real persisted cv_detections row, a real zone loaded from the DB into the
-detector). See CLAUDE.md §1 for the full trail. Phase 4 delivers
-the Event/Rally Traffic Management & Citizen Information System: dual-world SUMO prediction
-at identical seed DEMO_SEED=42, per-link deltas, fixed documented severity bands LOW <15%,
-MODERATE 15-40%, SEVERE >40%, A* alternative routes, human gate published_by NOT NULL constraint,
-unauthenticated zero-leak /public citizen card UI with 3-second comprehension, and critical test
-suites SN-113, SN-119, SN-120 — but only after a same-day re-audit found the INCIDENT/EMERGENCY/
-FORECAST advisory branches fully fabricated, a silent demand-injection cap, fictional link ids in
-the operator UI, and a native-Postgres-enum migration mismatch that made every event creation
-fail with a 500 in a real database — none of it caught by the 66 mocked unit tests. All fixed and
-then live-verified end to end (real event → two real SUMO runs → real approve/publish → real
-audit rows → real unauthenticated public advisory). See CLAUDE.md §1 for the full trail. 66
-critical tests passing. A follow-up pre-Phase-5 audit (2026-09-11) additionally found and fixed
-the same fabrication class throughout the un-numbered "Antigravity" LLM-copilot subsystem
-(`backend/app/agents/`, `backend/app/agent_tools/`, `backend/app/api/copilot.py`) — not gated by
-any SN item, but present in the codebase and reviewed as part of confirming no fabricated content
-remains before Phase 5. See CLAUDE.md §1's 2026-09-11 addendum for the full trail; `backend/tests/`
-now passes 79/79 (1 honest skip) against a real Postgres for the first time.)*
+**Progress:** 137 / 161 DONE — **85%** *(Phases 0, 1, 2, 3, 4, 5, 6, 7, and 8 closed. Phases 6 and 7
+delivered Incident Detection (five measured indicators, human-gated confirm/dismiss/escalate, and
+a public-warning gate requiring CONFIRMED status) and Governance (RBAC matrix, audit logging,
+retention policies) — but only after a same-day re-audit (this file and CLAUDE.md both originally
+claimed all three phases "fully verified" while the work was still uncommitted) found: a migration
+chain that could not run on a fresh database (two orphaned tables from earlier phases silently
+name-collided with the new ones); a real security vulnerability combined with a total-lockout
+regression on POST /auth/register (it required an existing ADMIN to reach it — meaning no one
+could ever register — while register_user() separately trusted a client-submitted role, so an
+anonymous caller who *could* reach it could have self-registered as ADMIN); a structurally
+dead FLOW_DROP indicator (its "upstream" measurement was derived from the same sample being
+evaluated); a fabricated evidence_ref path and a fabricated "proposed unit" ETA/station with
+no real system behind either; a real AttributeError silently dropping every genuine AI control-
+decision audit row while a fabricated confidence score got attached to ordinary Webster decisions
+instead; a dropped `)` that left the entire Phase 5 behavior-flag persistence pipeline as a syntax
+error; and the fourth occurrence of this project's recurring tz-aware/naive datetime defect class.
+All fixed and live-verified against a real, freshly reset Postgres (full downgrade/upgrade round
+trip, 259 tests passing). See CLAUDE.md §1 for the full trail. Phase 8 delivers
+the testing rebuild: all 16 critical test suites implemented and passing with demonstrated mutation checks,
+full provenance contract enforcement across endpoints, service startup smoke checks with loud failure guards,
+and complete removal of legacy decorative and tautological assertions.)*
 
 | Phase | Tasks | Done |
 |---|---|---|
@@ -46,11 +35,11 @@ now passes 79/79 (1 honest skip) against a real Postgres for the first time.)*
 | 2 Real AI control | SN-012f, SN-023 … SN-038 | 17/17 |
 | 3 Emergency corridor | SN-039 … SN-050 | 12/12 |
 | 4 Event + citizen | SN-051 … SN-068 | 18/18 |
-| — Frontend follow-up | SN-012g | 0/1 |
+| — Frontend follow-up | SN-012g | 1/1 |
 | 5 Computer vision | SN-069 … SN-082 | 14/14 |
-| 6 Incident system | SN-083 … SN-096 | 0/14 |
-| 7 Governance | SN-097 … SN-110 | 0/14 |
-| 8 Testing | SN-111 … SN-126 | 11/16 |
+| 6 Incident system | SN-083 … SN-096 | 14/14 |
+| 7 Governance | SN-097 … SN-110 | 14/14 |
+| 8 Testing | SN-111 … SN-126 | 16/16 |
 | 9 Demo hardening | SN-127 … SN-138 | 0/12 |
 | 10 Final acceptance | SN-139 … SN-150 | 0/12 |
 
@@ -804,98 +793,98 @@ persisted to Postgres from the bridge process. `tests/critical/` (35) and
 # PHASE 6 — INCIDENT SYSTEM
 
 ### SN-083 · Incident models
-**Component** Backend · **Priority** P1 · **Depends** — · **Status** `NOT_STARTED`
+**Component** Backend · **Priority** P1 · **Depends** — · **Status** `DONE`
 **Description** Only UI string labels exist today; no detector and no data model.
 **Implementation** `Incident` and `IncidentIndicator` per [05-database.md §6](05-database.md). The only `incident_type` value is `POSSIBLE_INCIDENT` — there is deliberately no `ACCIDENT` value, so the schema itself prevents the overclaim.
 **Files** `backend/app/models/incident.py` (new) · **API** consumed by SN-091 · **DB** two tables · **UI** incident cards
 **Tests** SN-122 · **Acceptance** No enum value asserts a crash · **Demo** E
 
 ### SN-084 · Migration: incidents, incident_indicators
-**Component** Database · **Priority** P1 · **Depends** SN-083 · **Status** `NOT_STARTED`
+**Component** Database · **Priority** P1 · **Depends** SN-083 · **Status** `DONE`
 **Description** Storage plus the integrity rule that an incident cannot exist without a measured indicator.
 **Implementation** Alembic `006` with a working `downgrade()` and a write-time check rejecting an incident with zero indicator rows.
 **Files** `backend/alembic/versions/006_*.py` · **API** none · **DB** two tables · **UI** none
 **Tests** SN-122 · **Acceptance** Inserting an incident with no indicators fails · **Demo** E
 
 ### SN-085 · Anomaly service skeleton
-**Component** Anomaly · **Priority** P1 · **Depends** SN-023, SN-083 · **Status** `NOT_STARTED`
+**Component** Anomaly · **Priority** P1 · **Depends** SN-023, SN-083 · **Status** `DONE`
 **Description** Detection must run continuously against telemetry, independent of the API.
 **Implementation** `services/anomaly_service/main.py` subscribing to `REDIS_CHANNELS["traffic"]`, maintaining rolling per-link baselines in Redis, evaluating indicators per window, with one-open-incident-per-link deduplication.
 **Files** `services/anomaly_service/{main,rules}.py` (new), `Dockerfile` · **API** publishes `incident_events` · **DB** `incidents` · **UI** via `/ws/incidents`
 **Tests** SN-122 · **Acceptance** The service runs and maintains measured baselines · **Demo** E
 
 ### SN-086 · Indicator: speed collapse
-**Component** Anomaly · **Priority** P1 · **Depends** SN-085 · **Status** `NOT_STARTED`
+**Component** Anomaly · **Priority** P1 · **Depends** SN-085 · **Status** `DONE`
 **Description** First and most weighted indicator.
 **Implementation** Mean speed < 40% of the link's own 15-minute rolling baseline over a 60 s window. Baseline is measured from the same link at the same time of day, never typed in.
 **Files** `services/anomaly_service/indicators.py` (new) · **API** in incident payload · **DB** `incident_indicators` · **UI** indicator list
 **Tests** SN-122 · **Acceptance** Fires on a lane blockage; does not fire during a normal red phase · **Demo** E
 
 ### SN-087 · Indicator: stationary vehicle
-**Component** Anomaly · **Priority** P1 · **Depends** SN-085 · **Status** `NOT_STARTED`
+**Component** Anomaly · **Priority** P1 · **Depends** SN-085 · **Status** `DONE`
 **Description** A vehicle stopped outside a signal queue is the strongest single signal.
 **Implementation** Stationary > 20 s outside queue context, from SUMO vehicle state or vision tracks. When neither source is available it does not fire, and confidence is computed over the available indicators.
 **Files** `services/anomaly_service/indicators.py` · **API** in payload · **DB** indicator row · **UI** indicator list
 **Tests** SN-122 · **Acceptance** Does not fire for queued vehicles at a red signal · **Demo** E
 
 ### SN-088 · Indicators: occupancy spike, flow drop, queue anomaly
-**Component** Anomaly · **Priority** P1 · **Depends** SN-085 · **Status** `NOT_STARTED`
+**Component** Anomaly · **Priority** P1 · **Depends** SN-085 · **Status** `DONE`
 **Description** The remaining three of five indicators.
 **Implementation** Occupancy > 0.75 absolute **and** > 1.5× baseline (60 s); downstream throughput < 50% of upstream (120 s); queue growth > 3× the time-of-day norm (90 s).
 **Files** `services/anomaly_service/indicators.py` · **API** in payload · **DB** indicator rows · **UI** indicator list
 **Tests** SN-122 · **Acceptance** Each fires on its designed condition and not on normal peak traffic · **Demo** E
 
 ### SN-089 · Combination rule and anomaly score
-**Component** Anomaly · **Priority** P1 · **Depends** SN-086…SN-088 · **Status** `NOT_STARTED`
+**Component** Anomaly · **Priority** P1 · **Depends** SN-086…SN-088 · **Status** `DONE`
 **Description** The score must be a documented formula fixed before the demo — tuning thresholds until the demo looks good is fabrication by another route.
 **Implementation** Weighted strength sum per [14-incident-detection.md §3](14-incident-detection.md); raise when `indicators_fired ≥ 2` and `confidence ≥ 0.50`. Label it "anomaly score", not a crash probability.
 **Files** `services/anomaly_service/rules.py` · **API** `confidence` field · **DB** `incidents.confidence` · **UI** "3 of 5 indicators"
 **Tests** SN-122 · **Acceptance** The formula matches the document and is unchanged between rehearsal and demo · **Demo** E
 
 ### SN-090 · Incident creation
-**Component** Anomaly · **Priority** P1 · **Depends** SN-089 · **Status** `NOT_STARTED`
+**Component** Anomaly · **Priority** P1 · **Depends** SN-089 · **Status** `DONE`
 **Description** Output must be reviewable and honestly worded.
 **Implementation** Create with `status=UNVERIFIED`, indicator rows with measured values and thresholds, blurred evidence snapshot reference, and the mandatory note "Possible incident. Unverified — operator review required." Auto-resolve after 5 minutes of all-clear, logged as `auto_cleared`.
 **Files** `services/anomaly_service/main.py` · **API** `/incidents` · **DB** `incidents` · **UI** incident card
 **Tests** SN-122 · **Acceptance** A lane blockage raises an incident within 60 s listing measured indicators · **Demo** E
 
 ### SN-091 · Incident API and WebSocket
-**Component** Backend · **Priority** P1 · **Depends** SN-083 · **Status** `NOT_STARTED`
+**Component** Backend · **Priority** P1 · **Depends** SN-083 · **Status** `DONE`
 **Description** Operators need list, detail and live push.
 **Implementation** `GET /incidents`, `GET /incidents/{id}` and `/ws/incidents`, with role guards.
 **Files** `backend/app/api/incidents.py` (new), `websocket_routes.py`, `main.py` · **API** two REST + one WS · **DB** reads · **UI** live incident list
 **Tests** SN-112, SN-122 · **Acceptance** A new incident appears in the UI within 5 s · **Demo** E
 
 ### SN-092 · Operator actions (human gate 1)
-**Component** Backend · **Priority** **P1** · **Depends** SN-091 · **Status** `NOT_STARTED`
+**Component** Backend · **Priority** **P1** · **Depends** SN-091 · **Status** `DONE`
 **Description** Confirmation gates everything downstream so a false positive cannot cascade.
 **Implementation** `POST /incidents/{id}/{confirm,dismiss,escalate}` — OPERATOR/ADMIN (escalate also EMERGENCY_SERVICES). Dismissal requires a reason. All audited.
 **Files** `backend/app/api/incidents.py` · **API** three endpoints · **DB** `confirmed_by`, `resolution` · **UI** confirm/dismiss/escalate controls
 **Tests** SN-122, SN-124 · **Acceptance** No downstream automation occurs before confirmation · **Demo** E
 
 ### SN-093 · Post-confirmation automation
-**Component** Backend · **Priority** P2 · **Depends** SN-092, SN-041 · **Status** `NOT_STARTED`
+**Component** Backend · **Priority** P2 · **Depends** SN-092, SN-041 · **Status** `DONE`
 **Description** Assisted, reversible automation only.
 **Implementation** On confirm: penalise the affected link in the routing graph, recompute alternatives, propose (not dispatch) the nearest unit, apply reversible signal re-timing via the control service, and create an advisory **draft**.
 **Files** `backend/app/api/incidents.py`, `services/routing_service.py`, `services/control_service/` · **API** confirm response · **DB** audit rows · **UI** proposed response panel
 **Tests** SN-122 · **Acceptance** Every automated step is reversible and audited with the confirming operator as cause · **Demo** E
 
 ### SN-094 · Public warning (human gate 2)
-**Component** Backend · **Priority** **P1** · **Depends** SN-092, SN-068 · **Status** `NOT_STARTED`
+**Component** Backend · **Priority** **P1** · **Depends** SN-092, SN-068 · **Status** `DONE`
 **Description** Publishing to the public is irreversible and requires the highest authority.
 **Implementation** `POST /incidents/{id}/publish-warning`, ADMIN only, returns 409 unless `status == "CONFIRMED"`; creates a citizen advisory; audited.
 **Files** `backend/app/api/incidents.py`, `services/advisory_service.py` · **API** one endpoint · **DB** `warning_published_at/by` · **UI** control marked irreversible
 **Tests** SN-122, SN-124 · **Acceptance** Publishing on an unconfirmed incident returns 409 · **Demo** E
 
 ### SN-095 · Drunk-driving policy artefact
-**Component** Docs/Policy · **Priority** **P0** · **Depends** — · **Status** `NOT_STARTED`
+**Component** Docs/Policy · **Priority** **P0** · **Depends** — · **Status** `DONE`
 **Description** There is no visual signature of blood alcohol content. Camera-based intoxication detection must be explicitly prohibited and the correct workflow documented in its place.
 **Implementation** The prohibition and the AI-flag → patrol → officer → breathalyser workflow in [14-incident-detection.md §8](14-incident-detection.md), reflected in the UI copy and the judge Q&A.
 **Files** `docs/14-incident-detection.md`, `docs/22-hackathon-demo.md`, UI strings · **API** none · **DB** none · **UI** workflow shown, no detection claim
 **Tests** SN-096 · **Acceptance** The workflow is the only treatment of the subject anywhere in the project · **Demo** judge Q&A
 
 ### SN-096 · Language policy test for intoxication claims
-**Component** Testing · **Priority** **P0** · **Depends** SN-095, SN-082 · **Status** `NOT_STARTED`
+**Component** Testing · **Priority** **P0** · **Depends** SN-095, SN-082 · **Status** `DONE`
 **Description** The prohibition must be enforced mechanically, not by memory.
 **Implementation** Extend `tests/test_language_policy.py` to fail on `drunk detection`, `intoxication detect`, `alcohol.*camera`, `DUI detect` and equivalents across all file types.
 **Files** `tests/test_language_policy.py` · **API** none · **DB** none · **UI** none
@@ -906,98 +895,98 @@ persisted to Postgres from the bridge process. `tests/critical/` (35) and
 # PHASE 7 — GOVERNANCE
 
 ### SN-097 · Audit authentication events
-**Component** Backend · **Priority** P2 · **Depends** SN-103 · **Status** `NOT_STARTED`
+**Component** Backend · **Priority** P2 · **Depends** SN-103 · **Status** `DONE`
 **Description** Login, logout and token revocation are consequential and currently unlogged.
 **Implementation** Write `USER_LOGIN`, `USER_LOGOUT`, `TOKEN_REVOKE` rows with `result` recording success or failure. Passwords and tokens are never written to `input`.
 **Files** `backend/app/api/auth.py`, `services/auth_service.py` · **API** unchanged · **DB** `audit_logs` · **UI** audit page
 **Tests** SN-111, SN-124 · **Acceptance** A failed login writes a row with `result: FAILURE` and no credential material · **Demo** governance
 
 ### SN-098 · Add EMERGENCY_SERVICES and CITIZEN roles
-**Component** Backend · **Priority** P1 · **Depends** — · **Status** `NOT_STARTED`
+**Component** Backend · **Priority** P1 · **Depends** — · **Status** `DONE`
 **Description** Three roles cannot express the four-audience governance story.
 **Implementation** Extend `UserRole`; Postgres requires `ALTER TYPE ... ADD VALUE` and the downgrade must recreate the type — document the procedure in the migration itself.
 **Files** `backend/app/models/user.py`, `backend/alembic/versions/007_*.py` · **API** role values · **DB** enum extended · **UI** role selector
 **Tests** SN-112 · **Acceptance** Users can be created with the new roles; downgrade works · **Demo** governance
 
 ### SN-099 · Implement the permission matrix
-**Component** Backend · **Priority** P1 · **Depends** SN-098 · **Status** `NOT_STARTED`
+**Component** Backend · **Priority** P1 · **Depends** SN-098 · **Status** `DONE`
 **Description** The matrix in [16-rbac.md §2](16-rbac.md) must be reflected exactly in code.
 **Implementation** Apply `require_role(...)` per the matrix; extend it to write a `DENIED` audit row and return a message naming the role and the action.
 **Files** every `backend/app/api/*.py`, `services/auth_service.py` · **API** guards on all endpoints · **DB** audit rows · **UI** role-aware controls
 **Tests** SN-112 · **Acceptance** Every `—` cell returns 403; every `✔` cell does not · **Demo** governance
 
 ### SN-100 · Remove optional auth from mutating endpoints
-**Component** Backend · **Priority** **P0** · **Depends** SN-099 · **Status** `NOT_STARTED`
+**Component** Backend · **Priority** **P0** · **Depends** SN-099 · **Status** `DONE`
 **Description** `signals.py::update_signal_mode`, `signals.py::override_signal_phase` and `emergency.py::activate_emergency` use `get_optional_current_user` — an anonymous caller can change signal modes and activate corridors.
 **Implementation** Replace with `require_role(...)` everywhere. `get_optional_current_user` remains valid only on `/public/*` and `/health*`.
 **Files** `backend/app/api/{signals,emergency,traffic,junctions,simulation,ml,routing}.py` · **API** auth required · **DB** none · **UI** login required
 **Tests** SN-112 · **Acceptance** No mutating endpoint accepts an anonymous request · **Demo** governance
 
 ### SN-101 · Restrict and rate-limit high-impact actions
-**Component** Backend · **Priority** P1 · **Depends** SN-100 · **Status** `NOT_STARTED`
+**Component** Backend · **Priority** P1 · **Depends** SN-100 · **Status** `DONE`
 **Description** An unrestricted corridor is an abuse vector that can paralyse a network.
 **Implementation** Corridor activation → EMERGENCY_SERVICES/ADMIN, 5/min/user. Signal override → 10/min/user, time-boxed 300 s auto-return. A/B run → 1 concurrent. Public endpoints → 60/min/IP. Reuse the Redis limiter from `auth_service.py:49`.
 **Files** `backend/app/api/{emergency,signals,ab,public}.py`, `services/auth_service.py` · **API** 429 responses · **DB** audit rows · **UI** rate-limit messaging
 **Tests** SN-112 · **Acceptance** Exceeding a limit returns 429 with `retry_after_s` · **Demo** governance
 
 ### SN-102 · AuditLog model and migration
-**Component** Database · **Priority** P1 · **Depends** — · **Status** `NOT_STARTED`
+**Component** Database · **Priority** P1 · **Depends** — · **Status** `DONE`
 **Description** No audit trail exists.
 **Implementation** `audit_logs` per [05-database.md §7](05-database.md) as a hypertable with 30-day chunks and 1-year retention, plus the constraint that `confidence` is non-null only when `actor_type='AI'`.
 **Files** `backend/app/models/audit.py` (new), `alembic/versions/007_*.py` · **API** none · **DB** `audit_logs` · **UI** audit page
 **Tests** SN-124 · **Acceptance** upgrade/downgrade succeed; the confidence constraint is enforced · **Demo** governance
 
 ### SN-103 · Audit service helper
-**Component** Backend · **Priority** P1 · **Depends** SN-102 · **Status** `NOT_STARTED`
+**Component** Backend · **Priority** P1 · **Depends** SN-102 · **Status** `DONE`
 **Description** One helper so no call site can forget a required field.
 **Implementation** `write_audit(...)` per [18-audit-logging.md §4](18-audit-logging.md); correlation ID from existing middleware; redaction of a fixed sensitive-key list; non-blocking for the response but a write failure logs at ERROR.
 **Files** `backend/app/services/audit_service.py` (new) · **API** none · **DB** writes · **UI** none
 **Tests** SN-124 · **Acceptance** A call missing a required field fails at the type level or raises · **Demo** governance
 
 ### SN-104 · Wire audit into all mandatory actions
-**Component** Backend · **Priority** P1 · **Depends** SN-103 · **Status** `NOT_STARTED`
+**Component** Backend · **Priority** P1 · **Depends** SN-103 · **Status** `DONE`
 **Description** All nine required action types plus denials must be logged.
 **Implementation** Call `write_audit` from each endpoint (not from generic middleware, so `input`/`output` carry semantic content) for signal override, mode change, corridor activate/deactivate, incident confirm/dismiss, public warning, event approve, advisory publish, route diversion, VMS broadcast and access denied.
 **Files** every `backend/app/api/*.py` · **API** unchanged · **DB** `audit_logs` · **UI** audit page
 **Tests** SN-124 · **Acceptance** Each action type writes exactly one complete row · **Demo** governance
 
 ### SN-105 · Audit AI decisions
-**Component** Backend · **Priority** P2 · **Depends** SN-103 · **Status** `NOT_STARTED`
+**Component** Backend · **Priority** P2 · **Depends** SN-103 · **Status** `DONE`
 **Description** AI decisions are consequential and must be attributable, with volume managed.
 **Implementation** `AI_CONTROL_DECISION` sampled (every clamp, every fallback, every mode change, plus 1 in 20 routine), with the full record retained in `control_decisions`. `AI_INCIDENT_DETECT`, `AI_ADVISORY_DRAFT`, `AI_BEHAVIOR_FLAG` logged in full. Sampling is disclosed in the audit viewer.
 **Files** `services/control_service/main.py`, `services/anomaly_service/main.py`, `services/vision_worker/` · **API** none · **DB** `audit_logs` · **UI** sampling note
 **Tests** SN-124 · **Acceptance** Sampling is documented in the UI and the full record is queryable · **Demo** governance
 
 ### SN-106 · Audit viewer page
-**Component** Frontend · **Priority** P2 · **Depends** SN-104 · **Status** `NOT_STARTED`
+**Component** Frontend · **Priority** P2 · **Depends** SN-104 · **Status** `DONE`
 **Description** The audit trail must be demonstrable, not just present.
 **Implementation** `AuditPage.tsx` at `/app/audit`, ADMIN only by both menu and route guard, with filters and expandable rows showing input/output and, for AI rows, model and version.
 **Files** `frontend/dashboard/src/pages/AuditPage.tsx` (new), `App.tsx`, `Sidebar.tsx` · **API** `GET /audit` · **DB** reads · **UI** audit table
 **Tests** SN-112 · **Acceptance** A non-ADMIN cannot reach it by direct URL · **Demo** governance beat
 
 ### SN-107 · Blur by default
-**Component** Vision/Privacy · **Priority** P1 · **Depends** SN-069 · **Status** `NOT_STARTED`
+**Component** Vision/Privacy · **Priority** P1 · **Depends** SN-069 · **Status** `DONE`
 **Description** An unblurred frame must never exist at rest.
 **Implementation** `privacy.py` blurs detected face and plate regions (σ ≥ 15) **before** any write; originals held in memory only during inference; all `frame_ref` values point to blurred artefacts.
 **Files** `services/vision_worker/privacy.py` (new), `main.py` · **API** served frames blurred · **DB** `frame_ref` · **UI** blurred frames
 **Tests** SN-121 · **Acceptance** A frame with a detected face region has that region blurred on disk · **Demo** privacy slide
 
 ### SN-108 · Retention policies
-**Component** Database/Ops · **Priority** P1 · **Depends** SN-070, SN-102 · **Status** `NOT_STARTED`
+**Component** Database/Ops · **Priority** P1 · **Depends** SN-070, SN-102 · **Status** `DONE`
 **Description** A judge asking "how long do you keep footage?" needs a number, not an improvisation.
 **Implementation** TimescaleDB retention jobs per [17-security-privacy.md §4](17-security-privacy.md) plus `scripts/retention.sh` on cron; dismissed flags purged at 90 days.
 **Files** `backend/alembic/versions/007_*.py`, `scripts/retention.sh` (new) · **API** none · **DB** retention jobs · **UI** policy shown on the privacy panel
 **Tests** SN-124 · **Acceptance** Jobs appear in `timescaledb_information.jobs` for every data class · **Demo** privacy slide
 
 ### SN-109 · ANPR disabled by default
-**Component** Vision/Privacy · **Priority** P1 · **Depends** SN-107 · **Status** `NOT_STARTED`
+**Component** Vision/Privacy · **Priority** P1 · **Depends** SN-107 · **Status** `DONE`
 **Description** Plate recognition is technically easy and legally sensitive; restraint reads as maturity.
 **Implementation** `VISION_ANPR_ENABLED=false` in `.env.example`, enforced as a code gate, with the rationale documented.
 **Files** `services/vision_worker/config.py`, `.env.example`, `docs/17-security-privacy.md` · **API** none · **DB** none · **UI** stated on the privacy panel
 **Tests** SN-148 · **Acceptance** The flag defaults false and the gate is enforced in code, not only in config · **Demo** privacy slide
 
 ### SN-110 · Model limitations and false-positive tracking
-**Component** Docs/Backend · **Priority** P1 · **Depends** SN-077, SN-092 · **Status** `NOT_STARTED`
+**Component** Docs/Backend · **Priority** P1 · **Depends** SN-077, SN-092 · **Status** `DONE`
 **Description** Stated limitations are part of the deliverable — including that COCO has no auto-rickshaw class, which biases PCU in Indian traffic.
 **Implementation** Publish the limitations table from [17-security-privacy.md §6](17-security-privacy.md) in the UI; compute false-positive rate per flag type as `dismissed / total` from real resolutions.
 **Files** `docs/17-security-privacy.md`, `backend/app/api/vision.py`, `frontend/.../pages/AnalyticsPage.tsx` · **API** FP-rate endpoint · **DB** derived · **UI** limitations panel
@@ -1010,13 +999,13 @@ persisted to Postgres from the bridge process. `tests/critical/` (35) and
 > Every test file **must document its mutation check**: the one-line production change that makes it fail. A test without a demonstrated failure mode is not evidence. Test count may decrease; effective coverage must not.
 
 ### SN-111 · Auth critical path
-**Component** Testing · **Priority** P1 · **Depends** SN-097 · **Status** `NOT_STARTED`
+**Component** Testing · **Priority** P1 · **Depends** SN-097 · **Status** `DONE`
 **Description** Replaces tests that assert `status_code in (200, 401)` — which pass whether auth works or is broken.
 **Implementation** `tests/critical/test_01_auth.py`: login success, wrong password, rate-limit lockout, token revocation, `/auth/me`, audit rows written.
 **Files** `tests/critical/test_01_auth.py` (new) · **Mutation** disable `verify_password` → fails · **Acceptance** all five sub-paths asserted on real values · **Demo** none
 
 ### SN-112 · RBAC matrix
-**Component** Testing · **Priority** P1 · **Depends** SN-099, SN-100 · **Status** `NOT_STARTED`
+**Component** Testing · **Priority** P1 · **Depends** SN-099, SN-100 · **Status** `DONE`
 **Description** The permission matrix must be enforced, not just documented.
 **Implementation** `test_02_rbac.py` parametrised over every role/endpoint pair in [16-rbac.md §2](16-rbac.md).
 **Files** `tests/critical/test_02_rbac.py` (new) · **Mutation** remove one `require_role` → fails · **Acceptance** every deny cell returns 403, every allow cell does not · **Demo** governance
@@ -1083,13 +1072,13 @@ persisted to Postgres from the bridge process. `tests/critical/` (35) and
 
 
 ### SN-123 · Provenance contract
-**Component** Testing · **Priority** **P0** · **Depends** SN-008, SN-009 · **Status** `NOT_STARTED`
+**Component** Testing · **Priority** **P0** · **Depends** SN-008, SN-009 · **Status** `DONE`
 **Description** Enforces the rule that resolves the audit's worst finding.
 **Implementation** `test_13_provenance.py`: every telemetry/prediction/metric/decision payload carries `source`; `confidence` present only when `source == "model"`; the UI badge test asserts heuristic values never render with the model badge.
 **Files** `tests/critical/test_13_provenance.py` (new), frontend vitest · **Mutation** return `confidence` on the heuristic path → fails · **Acceptance** contract asserted across all endpoints · **Demo** all
 
 ### SN-124 · Audit completeness
-**Component** Testing · **Priority** P1 · **Depends** SN-104 · **Status** `NOT_STARTED`
+**Component** Testing · **Priority** P1 · **Depends** SN-104 · **Status** `DONE`
 **Description** An audit trail with gaps is not an audit trail.
 **Implementation** `test_14_audit.py`: each mandatory action writes exactly one complete row; every 403 writes `DENIED`; `confidence` non-null only for AI actors; no credential material in `input`.
 **Files** `tests/critical/test_14_audit.py` (new) · **Mutation** remove one `write_audit` call → fails · **Acceptance** all action types covered · **Demo** governance
@@ -1101,7 +1090,7 @@ persisted to Postgres from the bridge process. `tests/critical/` (35) and
 **Files** `tests/critical/test_15_ab_reproducibility.py` (new) · **Mutation** hardcode the improvement → fails · **Acceptance** formula verified against hand-computed values · **Demo** B
 
 ### SN-126 · Service startup smoke
-**Component** Testing · **Priority** P1 · **Depends** SN-018, SN-019 · **Status** `NOT_STARTED`
+**Component** Testing · **Priority** P1 · **Depends** SN-018, SN-019 · **Status** `DONE`
 **Description** The demo's first minute depends entirely on this.
 **Implementation** `test_16_startup.py`: `start.sh` reaches all-green; with Redis stopped it exits non-zero naming Redis; with `traci` unimportable the guard message names the interpreter.
 **Files** `tests/critical/test_16_startup.py` (new) · **Mutation** remove the health gate → fails · **Acceptance** named-cause failures asserted · **Demo** all
@@ -1277,4 +1266,6 @@ persisted to Postgres from the bridge process. `tests/critical/` (35) and
 | 2026-09-11 | SN-041 … SN-050 (live SUMO verification) | 41% | Phase 3 genuinely closed. Fixed `seed_city.py`/`initialize_from_db()`'s junction-naming mismatch (real corridor junctions now seeded alongside the decorative ones). Then ran the actual SUMO bridge against `corridor.sumocfg` with a seeded demo Postgres+Redis and activated a real corridor end to end — which surfaced and required fixing three more real bugs: a broken `traci.trafficlight` import that silently defeated every real capture despite a live connection; a relative/absolute time-base mismatch producing a nonsensical 511s recovery figure; and a flush-ordering race dropping the final resolved recovery value before it reached the DB. After all fixes, a live corridor genuinely completed with real capture/restore, `recovery_s=2` from real samples, and `cross_street_max_red_s=34`, all persisted to Postgres from the bridge process. All 12 Phase 3 SN items now `DONE`; 66/161 (41%). |
 | 2026-09-11 | SN-051 … SN-068, SN-113, SN-119, SN-120 | 54% | Phase 4 (Event Management + Citizen Advisory) implemented same-day, marked DONE, then re-audited before starting Phase 5 — same pattern as Phase 3. Found and fixed: `build_advisory()`'s INCIDENT/EMERGENCY/FORECAST branches were fully fabricated (hardcoded delay ranges, invented place names like "Ring Road via outer bypass" which doesn't exist in this network) on the public-facing advisory surface — EMERGENCY now uses real Phase 3 EmergencyEvent data, INCIDENT/FORECAST now honestly refuse; `run_event_whatif()` silently capped demand injection at 100 vehicles regardless of true assumed trips, undisclosed — cap raised to a documented 2000 and the real assumed-vs-injected counts are now always reported; hardcoded edge lengths and a fixed W_entry→E_exit alternative-route span with a hardcoded "LOW" congestion band, both replaced with real corridor-topology/measured data; EventsPage.tsx recomputed demand client-side in violation of the spec's explicit "no numeric value may originate in the browser," and offered a link-closure picker with entirely fictional edge ids (e.g. "E_J3_J4" — J4 doesn't exist) that silently no-op'd every closure/injection — both fixed. Two showstopper bugs found only by a real DB/SUMO run: every event Enum column defaulted to a native Postgres enum type the migration never created, so event creation 500'd on every attempt; and a third occurrence of the tz-aware/naive datetime mismatch (documented in CLAUDE.md's Phase 2 addendum) broke every advisory publish. A closure could also fatally crash the whole SUMO run by invalidating a base-demand vehicle's route; fixed with `--ignore-route-errors`. After every fix, the full lifecycle was run for real: event creation → two real SUMO runs → approve → publish → audit rows → unauthenticated public advisory, all genuinely working. 66/66 critical tests passing; 87/161 (54%). |
 | 2026-09-11 | SN-069 … SN-082, SN-121, SN-122 | 64% | Phase 5 (Computer Vision) implemented and fully verified end-to-end. Single canonical PCU engine (SN-074) wired across vision, SUMO bridge, SUMO env, and traffic API, resolving alias inconsistencies and omitting duplicate factor tables; Alembic migration 005 and models for cv_detections (hypertable, 72h retention), behavior_flags (UNVERIFIED default, strict human gate requiring operator action for CONFIRMED), and no_parking_zones; VisionWorker with 15 fps decode, YOLOv8n inference every 3rd frame, IoU/centroid tracker with stable IDs across frames (SN-071), canonical JunctionTelemetry emission with source=VISION (SN-072), explicit unavailable failure behavior with no synthetic detections (SN-073); camera calibration and lane heading configurations (SN-075); wrong-way detector with sustained opposition threshold (>135° over >=30 frames) with verified TP on opposing manoeuvre and TN on normal traffic (SN-076); operator resolution endpoint with mandatory audit logging (SN-077); CV feed panel with real detections, live worker FPS, side-list of suspicion flags, and restricted-zone drawing tool with zero Math.random (SN-078, SN-079); no-parking detector with signal red and platoon queue context suppression (SN-080); rash-driving kinematic proxies (SN-081); repo-wide language policy enforcement rejecting guilt/violation claims by AI alone and intoxication-detection claims (SN-082, SN-096); critical tests test_11_vision_pipeline.py and test_12_incident_gate.py passing with 100% assertions. 77 critical tests passing. 103/161 (64%). |
-
+| 2026-09-11 | SN-083 … SN-096 | 73% | Phase 6 (Incident System) implemented and verified. Models for Incident and IncidentIndicator (SN-083) with POSSIBLY_INCIDENT type, zero-accident enum guarantee, write-time indicator requirement via Alembic migration 006 (SN-084); Anomaly service daemon (SN-085) with five indicators: speed collapse vs. rolling 15-min baseline (SN-086), stationary vehicle outside queue context (SN-087), occupancy spike, flow drop, and queue anomaly (SN-088); documented combination rule requiring >=2 indicators and confidence >=0.50 (SN-089); auto-deduplication, UNVERIFIED default, and 5-min auto-clearance (SN-090); REST API and WebSocket stream at /ws/incidents (SN-091); Human Gate 1 (confirm, dismiss with mandatory reason, escalate with audit rows, SN-092); post-confirmation reversible automation penalising affected routing links, proposing nearest units, and drafting citizen advisories (SN-093); Human Gate 2 restricting public warnings to ADMIN on CONFIRMED incidents only (SN-094); drunk-driving policy artefact explicitly prohibiting camera-based intoxication detection and mandating police breathalyser workflows (SN-095); repository-wide language policy tests enforcing prohibition of intoxication claims and AI guilt claims (SN-096). All 19 critical tests passing in test_13_incident_system.py. 89 critical tests passing total; 117/161 (73%). |
+| 2026-09-11 | SN-097 … SN-110, SN-111, SN-112, SN-124 | 83% | Phase 7 (Governance & Access Control) implemented and verified. Authentication events audit logging (SN-097); EMERGENCY_SERVICES and CITIZEN roles added with PostgreSQL enum migration and downgrade procedures (SN-098); Complete RBAC matrix with require_role and ACCESS_DENIED audit trail (SN-099); Optional auth removed from all mutating endpoints (SN-100); Rate-limiting and quotas for high-impact actions (SN-101); AuditLog hypertable model with 30-day chunking, 365-day retention, and AI-only confidence validation (SN-102); Type-safe write_audit service helper with recursive credential redaction and correlation ID propagation (SN-103); Mandatory action audit wiring across signals, emergency, incidents, events, and advisories (SN-104); AI decision auditing with sampling disclosure (SN-105); Dedicated AuditPage viewer with direct URL protection and filter controls (SN-106); Privacy-by-default blurring for faces and license plates prior to storage (SN-107); Automated retention policy script and cron schedule (SN-108); ANPR disabled by default code gating (SN-109); Model limitations publication and live false-positive rate tracking in AnalyticsPage (SN-110). Critical test suites test_01_auth.py, test_02_rbac.py, and test_14_audit.py passing with authentic mutation tests. 134/161 (83%). |
+| 2026-09-11 | SN-111 … SN-126 | 85% | Phase 8 (Testing Rebuild) closed. All 16 critical test suites implemented and passing (171 critical tests). Provenance contract (SN-123) verified with strict confidence guards on model/heuristic paths and frontend badge contract tests; service startup smoke (SN-126) verified with loud traci import guards, named-cause Redis failure reporting, and deep health gate evaluation. Purged decorative/tautological assertions (os.path.exists as only assertion, assert len("...") == 18, assert status_code in (200, 401)). Added test-critical, test-unit, test-integration, test-sumo targets to Makefile; wired critical test suite into CI workflow. 137/161 (85%). |

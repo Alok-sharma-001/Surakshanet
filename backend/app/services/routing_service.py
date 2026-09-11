@@ -26,6 +26,7 @@ class RoutingService:
     def __init__(self):
         self.engine = RoutingEngine()
         self.is_initialized = False
+        self.incident_penalties: Dict[Tuple[str, str], float] = {}
         # Initialize default corridor network immediately
         self.engine.build_graph(CORRIDOR_JUNCTIONS, CORRIDOR_EDGES)
         self.is_initialized = True
@@ -109,33 +110,150 @@ class RoutingService:
                 }
         return traffic_data
 
+    def apply_incident_penalty(self, link_id: str, penalty: float = 100.0) -> Optional[Tuple[str, str]]:
+        """SN-093: Penalises affected link in routing graph on incident confirmation."""
+        from shared.corridor_topology import edge_for_telemetry_approach
+        found_edge = None
+        for u in self.engine.graph:
+            for v, edge_data in self.engine.graph[u].items():
+                sumo_id = edge_data.get("sumo_edge_id", "")
+                if sumo_id == link_id or f"{u}_{v}" == link_id or f"E_{u}_{v}" == link_id or f"{u}_to_{v}" == link_id:
+                    self.incident_penalties[(u, v)] = penalty
+                    found_edge = (u, v)
+
+        if not found_edge and "_" in link_id:
+            # Check if link_id is (junction, direction) like "J2_W"
+            parts = link_id.split("_", 1)
+            mapped_edge = edge_for_telemetry_approach(parts[0], parts[1])
+            if mapped_edge:
+                for u in self.engine.graph:
+                    for v, edge_data in self.engine.graph[u].items():
+                        if edge_data.get("sumo_edge_id") == mapped_edge:
+                            self.incident_penalties[(u, v)] = penalty
+                            found_edge = (u, v)
+
+        if not found_edge:
+            clean = link_id.replace("E_", "").replace("to_", "")
+            parts = [p for p in clean.split("_") if p]
+            if len(parts) >= 2 and parts[0] in self.engine.graph and parts[1] in self.engine.graph[parts[0]]:
+                self.incident_penalties[(parts[0], parts[1])] = penalty
+                found_edge = (parts[0], parts[1])
+        logger.info(f"Applied routing penalty {penalty} to link {link_id} (edge {found_edge})")
+        return found_edge
+
+    def clear_incident_penalty(self, link_id: str):
+        """Clears incident penalty on dismissal or resolution."""
+        from shared.corridor_topology import edge_for_telemetry_approach
+        to_remove = []
+        mapped_edge = None
+        if "_" in link_id:
+            parts = link_id.split("_", 1)
+            mapped_edge = edge_for_telemetry_approach(parts[0], parts[1])
+
+        for (u, v) in self.incident_penalties:
+            edge_data = self.engine.graph.get(u, {}).get(v, {})
+            sumo_id = edge_data.get("sumo_edge_id", "")
+            if (
+                sumo_id == link_id
+                or f"{u}_{v}" == link_id
+                or f"E_{u}_{v}" == link_id
+                or f"{u}_to_{v}" == link_id
+                or (mapped_edge and sumo_id == mapped_edge)
+            ):
+                to_remove.append((u, v))
+        for k in to_remove:
+            self.incident_penalties.pop(k, None)
+        logger.info(f"Cleared routing penalties for link {link_id}")
+
+    def recompute_incident_alternatives(self, link_id: str) -> Dict[str, Any]:
+        """SN-093: Recomputes alternative routes avoiding the penalized incident link."""
+        from shared.corridor_topology import edge_for_telemetry_approach
+        edge = None
+        mapped_edge = None
+        if "_" in link_id:
+            parts = link_id.split("_", 1)
+            mapped_edge = edge_for_telemetry_approach(parts[0], parts[1])
+
+        for (u, v) in self.incident_penalties:
+            edge_data = self.engine.graph.get(u, {}).get(v, {})
+            sumo_id = edge_data.get("sumo_edge_id", "")
+            if (
+                sumo_id == link_id
+                or f"{u}_{v}" == link_id
+                or f"E_{u}_{v}" == link_id
+                or f"{u}_to_{v}" == link_id
+                or (mapped_edge and sumo_id == mapped_edge)
+            ):
+                edge = (u, v)
+                break
+
+        if not edge and self.incident_penalties:
+            edge = next(iter(self.incident_penalties))
+
+        if not edge:
+            nodes = list(self.engine.node_positions.keys())
+            if len(nodes) >= 2:
+                u, v = nodes[0], nodes[-1]
+            else:
+                return {"path": [], "alternatives": []}
+        else:
+            u, v = edge
+
+        orig_coords = self.engine.node_positions.get(u)
+        dest_coords = self.engine.node_positions.get(v)
+        if orig_coords and dest_coords:
+            return self.engine.find_alternatives(
+                orig_coords,
+                dest_coords,
+                num_routes=2,
+                profile="citizen",
+                penalties=dict(self.incident_penalties),
+            )
+        return {"path": [], "alternatives": []}
+
     def find_route(
         self,
         origin: Tuple[float, float],
         destination: Tuple[float, float],
-        profile: str = "citizen"
+        profile: str = "citizen",
+        penalties: Optional[Dict[Tuple[str, str], float]] = None,
     ) -> Dict[str, Any]:
-        """Finds optimal route for coordinates."""
-        return self.engine.find_route(origin, destination, profile=profile)
+        """Finds optimal route for coordinates, respecting active incident penalties."""
+        active_penalties = dict(self.incident_penalties)
+        if penalties:
+            active_penalties.update(penalties)
+        return self.engine.find_route(origin, destination, profile=profile, penalties=active_penalties)
 
     def find_route_between_nodes(
         self,
         start_node: str,
         end_node: str,
-        profile: str = "emergency"
+        profile: str = "emergency",
+        penalties: Optional[Dict[Tuple[str, str], float]] = None,
     ) -> Dict[str, Any]:
         """Finds optimal route between two node IDs."""
-        return self.engine.find_route_between_nodes(start_node, end_node, profile=profile)
+        active_penalties = dict(self.incident_penalties)
+        if penalties:
+            active_penalties.update(penalties)
+        return self.engine.find_route_between_nodes(
+            start_node, end_node, profile=profile, penalties=active_penalties
+        )
 
     def find_alternatives(
         self,
         origin: Tuple[float, float],
         destination: Tuple[float, float],
         num_routes: int = 2,
-        profile: str = "citizen"
+        profile: str = "citizen",
+        penalties: Optional[Dict[Tuple[str, str], float]] = None,
     ) -> Dict[str, Any]:
         """Finds diverse alternative routes."""
-        return self.engine.find_alternatives(origin, destination, num_routes=num_routes, profile=profile)
+        active_penalties = dict(self.incident_penalties)
+        if penalties:
+            active_penalties.update(penalties)
+        return self.engine.find_alternatives(
+            origin, destination, num_routes=num_routes, profile=profile, penalties=active_penalties
+        )
 
     def get_edge_lengths_m(self, route: List[str]) -> Dict[str, float]:
         """Returns real per-link lengths (meters) for consecutive junctions on `route`.
