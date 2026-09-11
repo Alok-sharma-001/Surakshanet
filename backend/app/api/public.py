@@ -1,7 +1,7 @@
 import logging
 import uuid
-from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any
+from datetime import datetime
+from typing import Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
@@ -52,7 +52,7 @@ def serialize_public_advisory(advisory: CitizenAdvisory) -> Dict[str, Any]:
     """
     rec_text = advisory.recommended_route_text
     leave_before_str = advisory.recommended_departure_before.isoformat() if advisory.recommended_departure_before else None
-    pub_at_str = advisory.published_at.isoformat() if advisory.published_at else datetime.now(timezone.utc).isoformat()
+    pub_at_str = advisory.published_at.isoformat() if advisory.published_at else datetime.utcnow().isoformat()
 
     return {
         "id": str(advisory.id),
@@ -85,7 +85,7 @@ async def get_public_advisories(
     """
     await check_public_rate_limit(request)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()  # naive UTC — matches citizen_advisories' naive DateTime columns
     stmt = (
         select(CitizenAdvisory)
         .where(CitizenAdvisory.expires_at > now)
@@ -110,7 +110,7 @@ async def get_public_advisory_by_id(
     """Public detail for a single active citizen advisory."""
     await check_public_rate_limit(request)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()  # naive UTC — matches citizen_advisories' naive DateTime columns
     stmt = select(CitizenAdvisory).where(
         CitizenAdvisory.id == advisory_id,
         CitizenAdvisory.expires_at > now,
@@ -134,7 +134,7 @@ async def get_public_network_status(
     """
     await check_public_rate_limit(request)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()  # naive UTC — matches citizen_advisories' naive DateTime columns
     stmt = select(CitizenAdvisory).where(CitizenAdvisory.expires_at > now)
     result = await db.execute(stmt)
     active = result.scalars().all()

@@ -1,14 +1,15 @@
 import math
 import uuid
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any, List
+from datetime import datetime, timedelta
+from typing import Dict
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from fastapi import HTTPException, status
 
 from app.models.advisory import CitizenAdvisory, AdvisoryOriginType, AdvisorySeverity
 from app.models.event import Event, EventPrediction
+from app.models.alert import EmergencyEvent
 from shared.corridor_topology import CORRIDOR_JUNCTIONS, CORRIDOR_EDGES
 
 logger = logging.getLogger("surakshanet.advisory_service")
@@ -61,7 +62,10 @@ async def build_advisory(
             detail="Advisory publication is a human gate: published_by user_id is required."
         )
 
-    now = datetime.now(timezone.utc)
+    # Naive UTC throughout, matching every DateTime column on this model and the
+    # codebase-wide convention (CLAUDE.md §13 edge case 10: all internal time is
+    # UTC, stored naive) — a tz-aware value anywhere here breaks the INSERT.
+    now = datetime.utcnow()
 
     if origin_type == AdvisoryOriginType.EVENT:
         # 1. Fetch Event
@@ -125,16 +129,17 @@ async def build_advisory(
             recommended_route_text = "No better alternative — advise delayed departure"
 
         # 8. Departure recommendation (SN-064)
-        # Null if congestion is already active or event has already started
+        # Null if congestion is already active or event has already started.
+        # event.starts_at is naive UTC (matches `now` above); comparing and
+        # subtracting naive-to-naive throughout avoids the tz-aware/naive
+        # mismatch that breaks the INSERT against this model's naive columns.
         event_starts = event.starts_at
-        if event_starts.tzinfo is None:
-            event_starts = event_starts.replace(tzinfo=timezone.utc)
 
         if event_starts <= now:
             recommended_departure_before = None
         else:
             # Last 15-min bucket before start where delay is low, minus travel time
-            # For a future event, compute 40 minutes before start
+            # For a future event, compute 40 minutes before start.
             lead_minutes = 40
             recommended_departure_before = event_starts - timedelta(minutes=lead_minutes)
 
@@ -143,44 +148,39 @@ async def build_advisory(
         expires_at = event.ends_at + timedelta(minutes=30)
         source = prediction.source or "sumo"
 
-    elif origin_type == AdvisoryOriginType.INCIDENT:
-        corridor_text = "Central Arterial"
-        headline = f"Traffic incident alert: {corridor_text}"
-        cause_text = "Traffic incident on corridor"
-        delay_low, delay_high = 15, 30
-        severity = AdvisorySeverity.MODERATE
-        recommended_route_text = "Take outer bypass"
-        recommended_departure_before = None
-        window_start = now
-        window_end = now + timedelta(hours=2)
-        expires_at = now + timedelta(hours=2)
-        source = "incident_detector"
-
     elif origin_type == AdvisoryOriginType.EMERGENCY:
-        corridor_text = "Emergency Transit Route"
+        # Real data from Phase 3's emergency corridor — never fabricated.
+        res = await db.execute(select(EmergencyEvent).where(EmergencyEvent.id == origin_id))
+        event_row = res.scalar_one_or_none()
+        if not event_row:
+            raise HTTPException(status_code=404, detail="Emergency corridor event not found")
+        if not event_row.route or event_row.clearance_time_s is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="insufficient data to advise: emergency corridor has no measured route/clearance time",
+            )
+
+        route = event_row.route
+        corridor_text = " → ".join(JUNCTION_NAMES.get(j, j) for j in [route[0], route[-1]])
         headline = f"Emergency corridor active: {corridor_text}"
-        cause_text = "Emergency vehicle green wave in progress"
-        delay_low, delay_high = 5, 10
+        cause_text = f"{event_row.vehicle_type.value.title()} corridor in progress" if event_row.vehicle_type else "Emergency vehicle corridor in progress"
+
+        clearance_min = event_row.clearance_time_s / 60.0
+        delay_low, delay_high = round_outward_5min(max(0.0, clearance_min - 2.0), clearance_min)
         severity = AdvisorySeverity.LOW
         recommended_route_text = "Yield to emergency vehicles; use adjacent parallel streets"
         recommended_departure_before = None
-        window_start = now
-        window_end = now + timedelta(minutes=30)
-        expires_at = now + timedelta(minutes=30)
-        source = "emergency_service"
+        window_start = event_row.started_at
+        window_end = event_row.restored_at or (event_row.started_at + timedelta(seconds=event_row.clearance_time_s))
+        expires_at = window_end + timedelta(minutes=10)
+        source = "sumo"
 
-    else:  # FORECAST
-        corridor_text = "Key Corridor"
-        headline = f"Forecasted congestion: {corridor_text}"
-        cause_text = "Predicted traffic peak based on historical patterns"
-        delay_low, delay_high = 15, 25
-        severity = AdvisorySeverity.LOW
-        recommended_route_text = "Ring Road via outer bypass"
-        recommended_departure_before = now + timedelta(minutes=30)
-        window_start = now
-        window_end = now + timedelta(hours=3)
-        expires_at = now + timedelta(hours=3)
-        source = "forecasting_model"
+    else:  # INCIDENT, FORECAST — no real measurement pipeline exists yet (Phase 5/6),
+        # so this refuses exactly as the spec requires rather than inventing numbers.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"insufficient data to advise: no measured {origin_type.value.lower()} pipeline is wired yet",
+        )
 
     # Persist the citizen advisory
     advisory = CitizenAdvisory(

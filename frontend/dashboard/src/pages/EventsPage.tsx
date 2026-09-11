@@ -13,6 +13,20 @@ import { api } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import { TelemetrySourceBadge } from '../components/TelemetrySourceBadge';
 
+interface DemandTranslation {
+  expected_crowd: number;
+  trips_by_mode: {
+    two_wheeler: number;
+    car: number;
+    auto: number;
+    bus: number;
+    walk_other: number;
+  };
+  total_vehicle_trips: number;
+  total_pcu: number;
+  assumptions: Record<string, unknown>;
+}
+
 interface EventItem {
   id: string;
   name: string;
@@ -25,6 +39,7 @@ interface EventItem {
   intensity: string;
   status: 'DRAFT' | 'PREDICTED' | 'APPROVED' | 'PUBLISHED' | 'CANCELLED' | 'CLOSED';
   created_at: string;
+  demand_translation?: DemandTranslation;
 }
 
 interface LinkDelta {
@@ -54,9 +69,8 @@ interface AlternativeRoute {
 }
 
 interface PredictionData {
-  id: string;
   event_id: string;
-  executed_at: string;
+  computed_at: string;
   source: string;
   seed: number;
   severity_summary: {
@@ -66,17 +80,26 @@ interface PredictionData {
   };
   link_deltas: LinkDelta[];
   alternatives: AlternativeRoute[];
+  demand_injection?: {
+    assumed_vehicle_trips: number;
+    injected_vehicle_trips: number;
+    demand_capped: boolean;
+  } | null;
 }
 
+// Real SUMO corridor edge ids, matching shared/corridor_topology.py exactly —
+// a selection here must correspond to an actual edge or closures/injections
+// silently no-op in run_whatif_world() (conn.edge.setDisallowed only acts on
+// edge ids that exist in the network).
 const AVAILABLE_EDGES = [
-  { id: 'E_J1_J2', name: 'Palasia - Geeta Bhawan Corridor' },
-  { id: 'E_J2_J3', name: 'Geeta Bhawan - Shivaji Nagar Stretch' },
-  { id: 'E_J3_J4', name: 'Shivaji Nagar - Regal Square Arterial' },
-  { id: 'E_J2_J1', name: 'Geeta Bhawan - Palasia Return' },
-  { id: 'E_J3_J2', name: 'Shivaji Nagar - Geeta Bhawan Link' },
-  { id: 'E_J4_J3', name: 'Regal Square - Shivaji Nagar Arterial' },
-  { id: 'E_J1_J4', name: 'Palasia - Bypass Outer Link' },
-  { id: 'E_J4_J1', name: 'Bypass - Palasia Return Link' },
+  { id: 'E_W_to_J0', name: 'West Expressway Entry → Corridor Junction 0' },
+  { id: 'E_J0_to_J1', name: 'Corridor Junction 0 → Corridor Junction 1' },
+  { id: 'E_J1_to_J0', name: 'Corridor Junction 1 → Corridor Junction 0' },
+  { id: 'E_J1_to_J2', name: 'Corridor Junction 1 → Corridor Junction 2' },
+  { id: 'E_J2_to_J1', name: 'Corridor Junction 2 → Corridor Junction 1' },
+  { id: 'E_J2_to_J3', name: 'Corridor Junction 2 → Corridor Junction 3' },
+  { id: 'E_J3_to_J2', name: 'Corridor Junction 3 → Corridor Junction 2' },
+  { id: 'E_J3_to_E', name: 'Corridor Junction 3 → East Expressway Exit' },
 ];
 
 export default function EventsPage() {
@@ -98,8 +121,8 @@ export default function EventsPage() {
   const [startsAt, setStartsAt] = useState<string>('2026-09-15T16:00');
   const [endsAt, setEndsAt] = useState<string>('2026-09-15T20:00');
   const [expectedCrowd, setExpectedCrowd] = useState<number>(25000);
-  const [affectedLinks, setAffectedLinks] = useState<string[]>(['E_J1_J2', 'E_J2_J3']);
-  const [closureLinks, setClosureLinks] = useState<string[]>(['E_J1_J2']);
+  const [affectedLinks, setAffectedLinks] = useState<string[]>(['E_J1_to_J2', 'E_J2_to_J3']);
+  const [closureLinks, setClosureLinks] = useState<string[]>(['E_J1_to_J2']);
   const [intensity, setIntensity] = useState<string>('HIGH');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
@@ -147,15 +170,17 @@ export default function EventsPage() {
         const evRes = await api.events.getById(selectedEventId);
         setSelectedEvent(evRes.data);
 
-        // Fetch prediction
+        // Fetch prediction. The endpoint returns the prediction's fields directly
+        // (no nested "prediction" wrapper), and a still-running simulation is a
+        // real HTTP 202 with {status: "running"} in the body.
         try {
           const predRes = await api.events.getPrediction(selectedEventId);
-          if (predRes.status === 200 && predRes.data?.prediction) {
-            setPrediction(predRes.data.prediction);
-            setIsPredicting(false);
-          } else if (predRes.status === 202) {
+          if (predRes.status === 202 || predRes.data?.status === 'running') {
             setIsPredicting(true);
             setPredictPollActive(true);
+          } else if (predRes.status === 200 && predRes.data?.status === 'complete') {
+            setPrediction(predRes.data);
+            setIsPredicting(false);
           }
         } catch (predErr: any) {
           if (predErr.response?.status === 202) {
@@ -181,8 +206,8 @@ export default function EventsPage() {
     const interval = setInterval(async () => {
       try {
         const predRes = await api.events.getPrediction(selectedEventId);
-        if (predRes.status === 200 && predRes.data?.prediction) {
-          setPrediction(predRes.data.prediction);
+        if (predRes.status === 200 && predRes.data?.status === 'complete') {
+          setPrediction(predRes.data);
           setIsPredicting(false);
           setPredictPollActive(false);
           toast.success('Simulation completed! Results ready.');
@@ -515,29 +540,41 @@ export default function EventsPage() {
                   </div>
                 </div>
 
-                {/* Demand Translation Transparency Box (SN-054) */}
-                <div className="p-4 bg-teal-50/50 border border-teal-200/80 rounded-xl space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-xs font-bold text-teal-900 uppercase tracking-wider">
-                      <Users className="w-4 h-4 text-teal-700" />
-                      <span>Demand Translation (config.py assumptions)</span>
-                    </div>
-                    <span className="text-[11px] font-semibold text-teal-700">
-                      Total: {calculateDemand(selectedEvent.expected_crowd).totalVehicles.toLocaleString()} vehicles
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                    {Object.entries(calculateDemand(selectedEvent.expected_crowd)).filter(([k]) => k !== 'totalVehicles').map(([mode, count]) => (
-                      <div key={mode} className="bg-white/80 p-2 rounded-lg border border-teal-100">
-                        <span className="text-slate-500 capitalize">{mode.replace(/([A-Z])/g, ' $1')}:</span>
-                        <span className="font-bold text-slate-900 ml-1.5">{count.toLocaleString()}</span>
+                {/* Demand Translation Transparency Box (SN-054) — every number here comes
+                    straight from the backend's demand_translation response, never
+                    recomputed in the browser. */}
+                {selectedEvent.demand_translation ? (
+                  <div className="p-4 bg-teal-50/50 border border-teal-200/80 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-teal-900 uppercase tracking-wider">
+                        <Users className="w-4 h-4 text-teal-700" />
+                        <span>Demand Translation (config.py assumptions)</span>
                       </div>
-                    ))}
+                      <span className="text-[11px] font-semibold text-teal-700">
+                        Total: {selectedEvent.demand_translation.total_vehicle_trips.toLocaleString()} vehicles
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                      {Object.entries(selectedEvent.demand_translation.trips_by_mode).map(([mode, count]) => (
+                        <div key={mode} className="bg-white/80 p-2 rounded-lg border border-teal-100">
+                          <span className="text-slate-500 capitalize">{mode.replace(/_/g, ' ')}:</span>
+                          <span className="font-bold text-slate-900 ml-1.5">{count.toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-[10px] text-teal-800/80">
+                      Formula: Expected Crowd × Mode Share / Vehicle Occupancy (assumptions above, from config.py).
+                      {prediction?.demand_injection?.demand_capped && (
+                        <>
+                          {' '}Simulation injects {prediction.demand_injection.injected_vehicle_trips.toLocaleString()} of these
+                          {' '}(capped — the network cannot absorb the full assumed count in one run; severity reflects the capped figure).
+                        </>
+                      )}
+                    </p>
                   </div>
-                  <p className="text-[10px] text-teal-800/80">
-                    Formula: Expected Crowd × Mode Share / Vehicle Occupancy. Injected into affected corridors per arrival profile.
-                  </p>
-                </div>
+                ) : (
+                  <p className="text-[11px] text-slate-400 italic">Demand translation not available for this event.</p>
+                )}
               </div>
 
               {/* Simulation Progress or Results */}
@@ -563,7 +600,7 @@ export default function EventsPage() {
                           Dual-World Impact Assessment (Seed {prediction.seed})
                         </h3>
                         <p className="text-xs text-slate-500">
-                          Source: <span className="font-semibold text-slate-700 uppercase">{prediction.source}</span> · Measured at {new Date(prediction.executed_at).toLocaleTimeString()}
+                          Source: <span className="font-semibold text-slate-700 uppercase">{prediction.source}</span> · Measured at {new Date(prediction.computed_at).toLocaleTimeString()}
                         </p>
                       </div>
 

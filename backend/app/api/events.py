@@ -1,14 +1,15 @@
 import uuid
 import logging
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 
 from app.database import get_db
-from app.models.event import Event, EventPrediction, EventType, EventIntensity, EventStatus
+from app.models.event import Event, EventType, EventIntensity, EventStatus
 from app.models.advisory import AdvisoryOriginType
 from app.models.user import User
 from app.services.auth_service import get_current_user, require_role
@@ -154,7 +155,7 @@ async def get_event(
         raise HTTPException(status_code=404, detail="Event not found")
 
     pred = await get_latest_prediction(event_id, db)
-    running = is_prediction_running(str(event_id))
+    running = await is_prediction_running(str(event_id))
 
     return {
         "id": str(event.id),
@@ -253,7 +254,7 @@ async def run_event_prediction(
     seed = payload.seed if payload else 42
     duration_s = payload.duration_s if payload else 300
 
-    if is_prediction_running(str(event_id)):
+    if await is_prediction_running(str(event_id)):
         return {
             "status": "running",
             "event_id": str(event_id),
@@ -261,7 +262,7 @@ async def run_event_prediction(
             "message": "Prediction simulation already running",
         }
 
-    launch_prediction_task(str(event_id), seed=seed, duration_s=duration_s)
+    await launch_prediction_task(str(event_id), seed=seed, duration_s=duration_s)
 
     return {
         "status": "running",
@@ -287,12 +288,15 @@ async def get_event_prediction_endpoint(
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
 
-    if is_prediction_running(str(event_id)):
-        return {
-            "event_id": str(event_id),
-            "status": "running",
-            "message": "Simulation in progress. Both worlds must complete before severity is computed.",
-        }
+    if await is_prediction_running(str(event_id)):
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content={
+                "event_id": str(event_id),
+                "status": "running",
+                "message": "Simulation in progress. Both worlds must complete before severity is computed.",
+            },
+        )
 
     pred = await get_latest_prediction(event_id, db)
     if not pred:
@@ -310,6 +314,7 @@ async def get_event_prediction_endpoint(
         "alternatives": pred.alternatives or [],
         "source": pred.source or "sumo",
         "computed_at": pred.computed_at.isoformat() if pred.computed_at else None,
+        "demand_injection": pred.demand_injection,
     }
 
 
@@ -330,7 +335,7 @@ async def approve_event(
         raise HTTPException(status_code=404, detail="Event not found")
 
     pred = await get_latest_prediction(event_id, db)
-    if not pred or is_prediction_running(str(event_id)):
+    if not pred or await is_prediction_running(str(event_id)):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Cannot approve event without a completed prediction. Run prediction first.",

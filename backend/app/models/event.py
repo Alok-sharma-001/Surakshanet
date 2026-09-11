@@ -64,5 +64,6 @@ class EventPrediction(Base):
     link_deltas = Column(JSON, nullable=True)
     severity_summary = Column(JSON, nullable=True)
     alternatives = Column(JSON, nullable=True)
+    demand_injection = Column(JSON, nullable=True)  # {assumed_vehicle_trips, injected_vehicle_trips, demand_capped}
     computed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     source = Column(String(32), default="sumo", nullable=False)

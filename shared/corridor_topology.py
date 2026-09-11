@@ -86,6 +86,15 @@ _EDGE_LENGTH_BY_PAIR: Dict[Tuple[str, str], float] = {
     (e["from"], e["to"]): e["length_m"] for e in CORRIDOR_EDGES
 }
 
+_LENGTH_BY_SUMO_EDGE_ID: Dict[str, float] = {
+    e["sumo_edge_id"]: e["length_m"] for e in CORRIDOR_EDGES
+}
+
+
+def edge_length_m_for_sumo_id(sumo_edge_id: str) -> Optional[float]:
+    """Real edge length in meters for a SUMO edge id, or None if it isn't a known corridor edge."""
+    return _LENGTH_BY_SUMO_EDGE_ID.get(sumo_edge_id)
+
 
 def edge_id_for(from_junction: str, to_junction: str) -> Optional[str]:
     """Real SUMO edge id for a junction pair, or None if they aren't directly connected."""

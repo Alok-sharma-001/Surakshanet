@@ -1,5 +1,4 @@
 import logging
-import math
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
@@ -142,14 +141,33 @@ def compute_severity_summary(link_deltas: List[Dict[str, Any]]) -> Dict[str, int
     return counts
 
 
-# In-memory tracking of running prediction tasks
+# In-memory tracking of running prediction tasks, valid only within this worker
+# process. The backend runs multiple uvicorn workers (--workers 2), so a plain
+# in-memory flag would be invisible to a status-check request landing on a
+# different worker than the one that launched the prediction — Redis is the
+# shared source of truth across workers; the in-memory dict is kept only so the
+# launching worker can hold a real asyncio.Task reference for its own bookkeeping.
 _running_tasks: Dict[str, Any] = {}
+_PREDICTION_RUNNING_TTL_S = 600  # generous upper bound on a 300s-duration dual-world run
 
 
-def is_prediction_running(event_id: str) -> bool:
-    """Returns True if a prediction simulation is actively running for event_id."""
-    task = _running_tasks.get(str(event_id))
-    return task is not None and not task.done()
+def _prediction_running_key(event_id: str) -> str:
+    return f"event_prediction_running:{event_id}"
+
+
+async def is_prediction_running(event_id: str) -> bool:
+    """Returns True if a prediction simulation is actively running for event_id,
+
+    checked via Redis so it's correct regardless of which worker handles the request.
+    """
+    try:
+        from app.services.auth_service import get_redis_client
+        redis = get_redis_client()
+        return bool(await redis.exists(_prediction_running_key(str(event_id))))
+    except Exception:
+        # Redis unreachable: fall back to this worker's own view rather than block.
+        task = _running_tasks.get(str(event_id))
+        return task is not None and not task.done()
 
 
 async def get_latest_prediction(event_id: Any, db) -> Optional[Any]:
@@ -170,7 +188,12 @@ async def get_latest_prediction(event_id: Any, db) -> Optional[Any]:
 
 
 async def execute_event_prediction(event_id: str, seed: int = 42, duration_s: int = 300):
-    """Executes dual-world what-if simulation in background thread and commits prediction to DB."""
+    """Executes dual-world what-if simulation in background thread and commits prediction to DB.
+
+    Always clears the Redis "running" flag on exit, success or failure, so a
+    crashed simulation never leaves an event stuck permanently reporting
+    "running" to every worker.
+    """
     import uuid
     import asyncio
     from sqlalchemy import select
@@ -180,57 +203,83 @@ async def execute_event_prediction(event_id: str, seed: int = 42, duration_s: in
 
     uid = uuid.UUID(str(event_id)) if isinstance(event_id, str) else event_id
 
-    # 1. Fetch event config
-    async with async_session_factory() as db:
-        res = await db.execute(select(Event).where(Event.id == uid))
-        event = res.scalar_one_or_none()
-        if not event:
-            logger.error(f"Event {event_id} not found for prediction")
-            return
-        crowd = event.expected_crowd or 0
-        affected = event.affected_links or []
-        closures = event.closure_links or []
+    try:
+        # 1. Fetch event config
+        async with async_session_factory() as db:
+            res = await db.execute(select(Event).where(Event.id == uid))
+            event = res.scalar_one_or_none()
+            if not event:
+                logger.error(f"Event {event_id} not found for prediction")
+                return
+            crowd = event.expected_crowd or 0
+            affected = event.affected_links or []
+            closures = event.closure_links or []
 
-    # 2. Run simulation via ABRunner in thread pool
-    runner = ABRunner()
-    prediction_result = await asyncio.to_thread(
-        runner.run_event_whatif,
-        event_id=str(uid),
-        seed=seed,
-        duration_s=duration_s,
-        affected_links=affected,
-        closure_links=closures,
-        expected_crowd=crowd,
-    )
-
-    # 3. Persist EventPrediction and advance event status
-    async with async_session_factory() as db:
-        pred = EventPrediction(
-            id=uuid.uuid4(),
-            event_id=uid,
+        # 2. Run simulation via ABRunner in thread pool
+        runner = ABRunner()
+        prediction_result = await asyncio.to_thread(
+            runner.run_event_whatif,
+            event_id=str(uid),
             seed=seed,
-            baseline_metrics=prediction_result["baseline_metrics"],
-            event_metrics=prediction_result["event_metrics"],
-            link_deltas=prediction_result["link_deltas"],
-            severity_summary=prediction_result["severity_summary"],
-            alternatives=prediction_result["alternatives"],
-            computed_at=datetime.utcnow(),
-            source="sumo"
+            duration_s=duration_s,
+            affected_links=affected,
+            closure_links=closures,
+            expected_crowd=crowd,
         )
-        db.add(pred)
 
-        evt_res = await db.execute(select(Event).where(Event.id == uid))
-        evt = evt_res.scalar_one_or_none()
-        if evt and evt.status == EventStatus.DRAFT:
-            evt.status = EventStatus.PREDICTED
+        # 3. Persist EventPrediction and advance event status
+        async with async_session_factory() as db:
+            pred = EventPrediction(
+                id=uuid.uuid4(),
+                event_id=uid,
+                seed=seed,
+                baseline_metrics=prediction_result["baseline_metrics"],
+                event_metrics=prediction_result["event_metrics"],
+                link_deltas=prediction_result["link_deltas"],
+                severity_summary=prediction_result["severity_summary"],
+                alternatives=prediction_result["alternatives"],
+                demand_injection=prediction_result.get("demand"),
+                computed_at=datetime.utcnow(),
+                source="sumo"
+            )
+            db.add(pred)
 
-        await db.commit()
-    logger.info(f"Prediction complete and saved for event {event_id}")
+            evt_res = await db.execute(select(Event).where(Event.id == uid))
+            evt = evt_res.scalar_one_or_none()
+            if evt and evt.status == EventStatus.DRAFT:
+                evt.status = EventStatus.PREDICTED
+
+            await db.commit()
+        logger.info(f"Prediction complete and saved for event {event_id}")
+    except Exception:
+        logger.exception(f"Event prediction failed for event {event_id}")
+        raise
+    finally:
+        _running_tasks.pop(str(event_id), None)
+        try:
+            from app.services.auth_service import get_redis_client
+            redis = get_redis_client()
+            await redis.delete(_prediction_running_key(str(event_id)))
+        except Exception:
+            pass
 
 
-def launch_prediction_task(event_id: str, seed: int = 42, duration_s: int = 300) -> Any:
-    """Launches an asynchronous background simulation task for event prediction."""
+async def launch_prediction_task(event_id: str, seed: int = 42, duration_s: int = 300) -> Any:
+    """Launches an asynchronous background simulation task for event prediction.
+
+    Marks the event as running in Redis (shared across all backend workers)
+    before scheduling the task, so a concurrent request on another worker
+    can't slip in and launch a second simulation for the same event.
+    """
     import asyncio
+
+    try:
+        from app.services.auth_service import get_redis_client
+        redis = get_redis_client()
+        await redis.setex(_prediction_running_key(str(event_id)), _PREDICTION_RUNNING_TTL_S, "1")
+    except Exception:
+        pass
+
     task = asyncio.create_task(execute_event_prediction(event_id, seed, duration_s))
     _running_tasks[str(event_id)] = task
     return task

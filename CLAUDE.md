@@ -94,37 +94,104 @@ execution surface is `docs/CHECKLIST.md` (SN-001…SN-150, grouped into Phases 0
   - `grep -rn "mock_plan\|DEL-CP-01"` across `ml/`, `backend/` returns nothing.
   - `tests/critical/` (35 tests) and `tests/test_routing_engine_phase3.py` (5 tests) pass after
     every fix above. Checklist: all 12 Phase 3 SN items `DONE`; 66/161 (41%).
-- **Phase 4 (Event management + citizen advisory, SN-051…SN-068 + SN-113, SN-119, SN-120):** DONE.
-  - Data models (`Event`, `EventPrediction`, `CitizenAdvisory`, `AuditLog`) and Alembic migration
-    `004_events_and_advisories.py` adding all 4 tables with `published_by NOT NULL` human gate constraint.
-    Migration applied to live TimescaleDB.
-  - Demand translation (`services/control_service/config.py`, `backend/app/services/event_service.py`):
-    explicit mode split & occupancy assumptions (25,000 attendees -> 7,143 2-wheelers, 2,976 cars,
-    1,500 autos, 107 buses).
-  - Dual-world what-if simulation (`services/control_service/ab_runner.py`): executes World A (baseline)
-    vs World B (event demand + closures) at identical seed (`DEMO_SEED = 42`). Seed mismatches strictly
-    raise `ValueError`. Incomplete predictions return HTTP 202 without premature severity.
-  - Per-link deltas & severity: `delta_pct = (event_tt - baseline_tt) / baseline_tt * 100`. Fixed,
-    documented bands (`LOW < 15%`, `MODERATE 15–40%`, `SEVERE > 40%`), never tuned per run.
-  - Alternative route engine: A* over event-world weights strictly excluding closures with diversity
-    penalties; returns honest empty case ("no better alternative — advise delayed departure") when no route
-    is viable.
-  - Citizen advisory builder (`backend/app/services/advisory_service.py`): translates link IDs to human
-    corridor names, rounds delay ranges outward to 5-minute multiples (e.g. 22–33 min -> 20–35 min), fixed
-    cause vocabulary, computes pre-congestion departure recommendation and suppresses it if event is ongoing.
-  - Human gate: `CitizenAdvisory.published_by` enforced via database `NOT NULL` constraint and ORM
-    `@validates("published_by")`. Event approve and publish endpoints require authenticated `ADMIN` and write
-    to `AuditLog`. Unapproved events strictly reject publication with HTTP 409.
-  - Public surface (`backend/app/api/public.py`): `/public/advisories`, `/public/advisories/{id}`, `/public/status`
-    unauthenticated, IP rate-limited (60 req/min), with zero internal leaks (no UUIDs, junction IDs, SUMO edge
-    IDs, model versions, confidence scores, or operator identities).
-  - Frontend (`frontend/dashboard/src/pages/EventsPage.tsx`, `PublicAdvisoryPage.tsx`, `Sidebar.tsx`, `App.tsx`):
-    full operator event management workflow at `/app/events` and unauthenticated mobile-first commuter view at
-    `/public` with 3-second comprehension, multi-sensory badges, honest empty state, and 60s in-place polling.
-    Vite build passes with all chunks <= 500 KB.
-  - Critical tests: `test_09_event_whatif.py` (SN-119), `test_10_citizen_advisory.py` (SN-120), and
-    `test_03_public_exposure.py` (SN-113) added. All 58 critical tests in `tests/critical/` pass.
-  - Checklist updated: 87/161 (54%).
+- **Phase 4 (Event management + citizen advisory, SN-051…SN-068 + SN-113, SN-119, SN-120):** DONE,
+  genuinely live-verified — but only after a same-day re-audit found real fabrication and several
+  showstopper bugs the 66 mocked unit tests never caught, because none of them ever touched a real
+  Postgres or ran a real SUMO simulation. The original commit's own claim ("migration applied to
+  live TimescaleDB") was true only in the sense that it didn't error on `CREATE TABLE` — the very
+  first real `INSERT` against it crashed every time (see below). Full trail:
+  - **Fabrication found and fixed** (`backend/app/services/advisory_service.py`): the `INCIDENT`,
+    `EMERGENCY`, and `FORECAST` branches of `build_advisory()` — the **public-facing** citizen
+    advisory builder — were fully invented: hardcoded delay ranges (`15,30` / `5,10` / `15,25`),
+    fake place names ("Central Arterial", "Ring Road via outer bypass" — no such road exists in
+    this network), fabricated cause text. This is exactly the fabrication class Phase 0 exists to
+    eliminate, now on the most citizen-visible surface in the project. Fixed: `EMERGENCY` now
+    builds from a real `EmergencyEvent` row (Phase 3's real corridor data — route, clearance_time_s);
+    `INCIDENT`/`FORECAST` now honestly refuse ("insufficient data to advise") since neither has a
+    real measurement pipeline wired yet (Phase 6 incident detection, forecast integration).
+    `EVENT` (the one origin type Phase 4 actually has infrastructure for) was already correctly
+    measured-only.
+  - **Fabrication found and fixed** (`services/control_service/ab_runner.py::run_event_whatif`):
+    demand injection was silently capped at a flat, undocumented 100 vehicles regardless of the
+    real assumed trip count (e.g. 11,726 for a 25,000-attendee event) — so "severity" was always
+    measured off ~100 injected cars, never disclosed. Fixed: cap raised to a documented
+    `ABRunner.MAX_INJECTABLE_VEHICLES = 2000`, and the real assumed vs. actually-injected counts
+    are now always reported in the prediction (`demand_injection: {assumed_vehicle_trips,
+    injected_vehicle_trips, demand_capped}`), surfaced through the API and the operator UI.
+  - **Fabrication found and fixed** (same file, `run_whatif_world`): per-edge travel time used a
+    hardcoded `100m`/`300m` length guess instead of the real corridor lengths already available in
+    `shared/corridor_topology.py` — the exact anti-pattern already fixed once in Phase 3's
+    `green_wave.py`. Fixed to use real per-edge lengths.
+  - **Fabrication found and fixed** (`compute_event_alternatives`): always routed a fixed
+    W_entry→E_exit span regardless of which link the event actually affected, hardcoded the
+    alternative's congestion band to `"LOW"` unconditionally, and fell back to an invented
+    "Bypass via Ring Road" string. Fixed to derive origin/destination from the real worst-affected
+    link's endpoints, compute the alternative's congestion band from real measured deltas, and use
+    only real place-name text.
+  - **Frontend fabrication found and fixed** (`EventsPage.tsx`): the demand-translation panel for
+    an *existing* event recomputed the mode-split formula client-side in JavaScript instead of
+    reading the real backend-computed `demand_translation` already present on every event API
+    response — a direct violation of docs/11-event-management.md §6's explicit "no numeric value
+    on this page may originate in the browser." Fixed to read the real field; client-side
+    computation kept only for the pre-submission create-form live preview, before any backend
+    event exists to query.
+  - **Severe correctness bug found and fixed** (`EventsPage.tsx`'s `AVAILABLE_EDGES`): the
+    affected/closure-link picker offered fictional edge ids (`E_J1_J2`, `E_J3_J4` — "J4" doesn't
+    exist in this network) with fabricated Indore place names, none matching the real SUMO ids in
+    `shared/corridor_topology.py` (`E_J1_to_J2` etc.) — meaning any event created through the UI
+    with its own default selections would silently closure/inject nothing at all, since
+    `conn.edge.setDisallowed`/`conn.vehicle.add` no-op on an edge id that doesn't exist. Fixed to
+    use the real corridor edges and real junction names.
+  - **Showstopper bug found and fixed**: every `Enum(PythonEnum)` model column (`event_type`,
+    `intensity`, `status` on `Event`; `origin_type`, `severity` on `CitizenAdvisory`; `actor_type`,
+    `result` on `AuditLog`) defaults to a native Postgres enum type on this dialect, but migration
+    004 created them as plain `VARCHAR` — so **every single event creation failed** with
+    `asyncpg.exceptions.UndefinedObjectError: type "eventtype" does not exist`, a 500 on the very
+    first, most basic operation of this entire feature. None of the 66 tests caught it because
+    they all mock the DB session. Fixed by making migration 004 create the real native enum types
+    (matching the established pattern in `001_initial_schema.py`), with matching `DROP TYPE`
+    cleanup in `downgrade()`. Verified live: fresh `alembic upgrade head` / `downgrade -1` /
+    `upgrade head` all succeed against a real Postgres.
+  - **Showstopper bug found and fixed**: `advisory_service.py` mixed tz-aware (`datetime.now
+    (timezone.utc)`) and naive datetimes on the same `CitizenAdvisory` row — the third occurrence
+    of the exact defect class this file's own Phase 2 addendum already documents as a real prior
+    incident. Every real publish crashed with `asyncpg... can't subtract offset-naive and
+    offset-aware datetimes`. Fixed by making the whole function naive-UTC throughout, matching
+    every DateTime column and the codebase-wide convention (§13 edge case 10). The same tz-aware
+    `now` was independently found and fixed in `backend/app/api/public.py`'s three advisory
+    queries.
+  - **Simulation crash found and fixed**: closing a link with `run_event_whatif`'s
+    `closure_links` could invalidate a base-demand vehicle's predefined route from
+    `corridor.rou.xml` (no rerouting device configured) — SUMO doesn't reroute it, it fatally
+    aborts the *entire* simulation ("Quitting (on error)"), taking down the whole prediction.
+    Fixed: `--ignore-route-errors true` added to the what-if SUMO command (drops just that one
+    vehicle instead of crashing); also stopped injecting demand onto a link that's simultaneously
+    being closed (pointless — SUMO rejects every such vehicle).
+  - **Multi-worker bug found and fixed** (`event_service.py`): prediction-running state was tracked
+    in a plain in-process dict, invisible across the backend's actual `--workers 2` deployment
+    (confirmed in `backend/Dockerfile`) — a status check landing on the other worker than the one
+    that launched the simulation would wrongly report "not running." Fixed to use Redis (shared
+    across workers), with a `finally`-block guarantee that a crashed simulation clears its flag
+    rather than leaving an event stuck "running" forever.
+  - **Wiring bug found and fixed** (`EventsPage.tsx` + `events.py`): the frontend expected
+    `predRes.data.prediction` (a nested wrapper the backend never sent — every field is returned
+    flat) and `prediction.executed_at` (the backend sends `computed_at`) — meaning the prediction
+    results view likely never rendered even after a fully successful simulation. The "still
+    running" response also claimed HTTP 202 in its docstring while actually returning 200 with no
+    explicit status code. Fixed both sides to match: `JSONResponse(status_code=202, ...)` for the
+    running case, and the frontend reading the real flat shape.
+  - **Live end-to-end verification, 2026-09-11**: after all of the above, ran the complete real
+    flow against a seeded demo Postgres + Redis — `POST /events` (real 25,000-attendee event, real
+    demand translation matching the spec's worked example exactly: 7,143/2,976/1,500/107, total
+    11,726) → `POST /events/{id}/predict` (two real SUMO runs, `demand_injection` honestly reporting
+    2,000/11,726 injected/assumed, real varying per-link deltas e.g. `E_J2_to_J3: +26.5% MODERATE`)
+    → `POST /approve` → `POST /publish` (real advisory built from the real measured worst link,
+    `EVENT_APPROVE`/`ADVISORY_PUBLISH` audit rows written) → `GET /public/advisories` (unauthenticated,
+    correctly excludes every internal identifier). The full chain works for real, not just against
+    mocks.
+  - `tests/critical/` (66 tests, including `test_10_citizen_advisory.py`'s new fabrication-guard
+    tests) and `tests/test_routing_engine_phase3.py` (5) pass after every fix. `npx tsc --noEmit`
+    clean. `ruff check app/` clean.
 - **Phases 5–10:** NOT_STARTED.
 
 **2026-09-11 addendum — Phase 2 re-audit findings, fixed, and one open limitation:**

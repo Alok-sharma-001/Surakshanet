@@ -18,7 +18,7 @@ import logging
 import os
 import shutil
 import uuid
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
 
 from services.control_service.config import ControlConfig, WEIGHTS_PATH
 from services.control_service.controllers import MarlController, WebsterController
@@ -112,6 +112,12 @@ def generate_ab_statement(
 
 
 class ABRunner:
+    # Documented, disclosed cap on vehicles injected for an event what-if (SN-054/055) —
+    # the toy 4-junction network cannot physically absorb a literal five-figure trip
+    # count onto 1-2 edges within one simulation window. Never silent: run_event_whatif
+    # always reports the true assumed demand alongside what was actually injected.
+    MAX_INJECTABLE_VEHICLES = 2000
+
     def __init__(self, weights_path: str = WEIGHTS_PATH):
         self.weights_path = weights_path
         self.cfg = ControlConfig(weights_path=weights_path)
@@ -381,7 +387,12 @@ class ABRunner:
             "--step-length", "1.0",
             "--no-warnings", "true",
             "--duration-log.disable", "true",
-            "--waiting-time-memory", "10000"
+            "--waiting-time-memory", "10000",
+            # closure_links can invalidate a base-demand vehicle's predefined
+            # route (corridor.rou.xml has no rerouting device); without this,
+            # SUMO fatally aborts the whole run instead of just dropping that
+            # one vehicle, taking down the entire what-if simulation with it.
+            "--ignore-route-errors", "true",
         ]
 
         traci.start(cmd, label=label)
@@ -495,12 +506,15 @@ class ABRunner:
             conn.close()
 
         # Build output metrics per edge
+        from shared.corridor_topology import edge_length_m_for_sumo_id
+
         metrics: Dict[str, Dict[str, float]] = {}
         for e in all_edges:
             speeds = link_speeds.get(e, [13.89])
             avg_spd = sum(speeds) / max(1, len(speeds))
-            # Assume 300m for corridor links, 100m for cross approaches
-            length = 100.0 if any(k in e for k in ("N", "S", "W_to", "to_W", "E_exit", "to_E")) else 300.0
+            # Real per-edge length from the corridor topology (matches corridor.edg.xml);
+            # 300.0 is a last-resort fallback only for an edge outside the known corridor set.
+            length = edge_length_m_for_sumo_id(e) or 300.0
             travel_time = length / max(1.0, avg_spd)
             avg_jam = sum(link_jams.get(e, [0.0])) / max(1, len(link_jams.get(e, [])))
             avg_delay = sum(link_waits.get(e, [0.0])) / max(1, len(link_waits.get(e, [])))
@@ -527,42 +541,65 @@ class ABRunner:
         Conforms to docs/11-event-management.md §5 (SN-057).
         """
         from app.services.routing_service import routing_service
-        from shared.corridor_topology import CORRIDOR_JUNCTIONS
 
         engine = routing_service.engine
 
         # Identify origins and destinations needing detour
         closures = set(closure_links or [])
         penalties: Dict[Tuple[str, str], float] = {}
-        for edge_id in closures:
-            for u in engine.graph:
-                for v in engine.graph[u]:
-                    if engine.graph[u][v].get("sumo_edge_id") == edge_id:
-                        penalties[(u, v)] = 9999.0  # Impassable closure penalty
+        edge_by_id: Dict[str, Tuple[str, str]] = {}
+        for u in engine.graph:
+            for v in engine.graph[u]:
+                sumo_id = engine.graph[u][v].get("sumo_edge_id")
+                if sumo_id:
+                    edge_by_id[sumo_id] = (u, v)
+                if sumo_id in closures:
+                    penalties[(u, v)] = 9999.0  # Impassable closure penalty
 
-        # Identify most congested corridor link
-        worst_link = (affected_links or ["E_J1_to_J2"])[0]
+        # Identify the most congested affected link — real endpoints, not an assumed corridor span.
+        worst_link = None
         if link_deltas:
             severe_deltas = [d for d in link_deltas if d.get("severity") in ("SEVERE", "MODERATE")]
             if severe_deltas:
                 worst_link = severe_deltas[0]["link_id"]
+        if worst_link is None and affected_links:
+            worst_link = affected_links[0]
+        if worst_link is None and closure_links:
+            worst_link = closure_links[0]
 
-        # Default corridor bounds
-        origin_coords = (12.9177, 77.6211)  # W_entry
-        dest_coords = (12.9177, 77.6346)    # E_exit
+        worst_pair = edge_by_id.get(worst_link) if worst_link else None
+        if worst_pair:
+            u_id, v_id = worst_pair
+            origin_coords = engine.node_positions.get(u_id)
+            dest_coords = engine.node_positions.get(v_id)
+        else:
+            origin_coords = dest_coords = None
+
+        if not origin_coords or not dest_coords:
+            # No real affected link to route around — nothing to recommend a detour for.
+            return [{
+                "rank": 1,
+                "route_text": "No viable detour",
+                "added_distance_km": 0.0,
+                "added_time_s": 0.0,
+                "congestion": "SEVERE",
+                "reason": "no better alternative — advise delayed departure",
+                "path": []
+            }]
 
         # Find baseline route
         base_route = engine.find_route(origin_coords, dest_coords, profile="citizen")
         base_tt = base_route.get("travel_time_s", 60.0)
         base_dist = base_route.get("distance_km", 1.0)
+        base_edges = set(zip(base_route.get("path", [])[:-1], base_route.get("path", [])[1:]))
 
         # Find alternatives with closure penalties
         diversion = engine.find_route(origin_coords, dest_coords, profile="citizen", penalties=penalties)
 
         alternatives = []
-        if diversion and "path" in diversion and diversion["path"]:
+        if diversion and "path" in diversion and diversion["path"] and diversion["path"] != base_route.get("path"):
             alt_path = diversion["path"]
-            path_edges = [(alt_path[i], alt_path[i+1]) for i in range(len(alt_path)-1)]
+            path_edges = [(alt_path[i], alt_path[i + 1]) for i in range(len(alt_path) - 1)]
             hits_closure = any(edge in penalties for edge in path_edges)
 
             if not hits_closure:
@@ -571,18 +608,31 @@ class ABRunner:
                 added_time = max(0.0, alt_tt - base_tt)
                 added_dist = max(0.0, alt_dist - base_dist)
 
-                route_text = diversion.get("route_text", "Bypass via Ring Road")
+                # Real congestion band for the alternative: the worst severity among its own
+                # edges, if any were measured; LOW only because nothing measured suggests worse.
+                alt_edge_ids = {
+                    engine.graph.get(u, {}).get(v, {}).get("sumo_edge_id")
+                    for u, v in path_edges
+                }
+                alt_severities = [
+                    d["severity"] for d in (link_deltas or [])
+                    if d.get("link_id") in alt_edge_ids
+                ]
+                severity_rank = {"LOW": 0, "MODERATE": 1, "SEVERE": 2}
+                alt_congestion = max(alt_severities, key=lambda s: severity_rank.get(s, 0), default="LOW")
+
+                route_text = diversion.get("route_text") or " → ".join(alt_path)
                 if closures:
-                    reason = f"Bypasses closed links ({', '.join(closures)}) via outer arterial"
+                    reason = f"Bypasses closed link{'s' if len(closures) > 1 else ''} ({', '.join(closures)})"
                 else:
-                    reason = f"Avoids severe congestion on {worst_link}"
+                    reason = f"Avoids {worst_link} without crossing the same edges as the direct route"
 
                 alternatives.append({
                     "rank": 1,
                     "route_text": route_text,
                     "added_distance_km": round(added_dist, 2),
                     "added_time_s": round(added_time, 1),
-                    "congestion": "LOW",
+                    "congestion": alt_congestion,
                     "reason": reason,
                     "path": alt_path
                 })
@@ -626,10 +676,21 @@ class ABRunner:
         from datetime import datetime
 
         demand_info = translate_demand(expected_crowd)
-        target_links = affected_links or ["E_J0_to_J1", "E_J1_to_J2"]
+        # Never inject demand onto a link that's also being closed — SUMO
+        # rejects every such vehicle (logged, non-fatal, but pointless).
+        closed_set = set(closure_links or [])
+        target_links = [link for link in (affected_links or ["E_J0_to_J1", "E_J1_to_J2"]) if link not in closed_set]
 
-        # Build injection schedule
-        total_veh = min(demand_info.get("total_vehicle_trips", 0), 100)
+        # Build injection schedule. The toy 4-junction network cannot physically
+        # absorb a literal five-figure trip count onto 1-2 edges within one
+        # simulation window — MAX_INJECTABLE_VEHICLES is a documented, disclosed
+        # engineering cap, never a silent one. `demand_capped` and the actual
+        # injected count are always reported alongside the full assumed demand
+        # so the UI/API never claims to have measured more than it actually did
+        # (docs/11-event-management.md §3's honesty requirement).
+        assumed_total = demand_info.get("total_vehicle_trips", 0)
+        total_veh = min(assumed_total, self.MAX_INJECTABLE_VEHICLES)
+        demand_capped = assumed_total > total_veh
         injected_trips = []
         if total_veh > 0 and target_links:
             for i in range(total_veh):
@@ -672,5 +733,10 @@ class ABRunner:
             "severity_summary": severity_summary,
             "alternatives": alternatives,
             "computed_at": datetime.utcnow().isoformat(),
+            "demand": {
+                "assumed_vehicle_trips": assumed_total,
+                "injected_vehicle_trips": total_veh,
+                "demand_capped": demand_capped,
+            },
         }
 

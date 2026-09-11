@@ -22,18 +22,42 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # 1. Create events table
+    #    Enum columns use real Postgres ENUM types (matching the model-side
+    #    Enum(SomePythonEnum) default, which targets a native type named after
+    #    the lowercased class — e.g. EventType -> "eventtype"). A plain VARCHAR
+    #    column here would silently break every INSERT with
+    #    asyncpg.exceptions.UndefinedObjectError: type "eventtype" does not exist,
+    #    since the ORM always casts to the native type on this dialect.
     op.create_table(
         "events",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("name", sa.String(length=128), nullable=False),
-        sa.Column("event_type", sa.String(length=32), nullable=False),
+        sa.Column(
+            "event_type",
+            sa.Enum(
+                "RALLY", "PROCESSION", "FESTIVAL", "VIP_MOVEMENT", "MARATHON",
+                "CONCERT", "DEMONSTRATION", "GOVERNMENT", "OTHER",
+                name="eventtype",
+            ),
+            nullable=False,
+        ),
         sa.Column("starts_at", sa.DateTime(), nullable=False),
         sa.Column("ends_at", sa.DateTime(), nullable=False),
         sa.Column("expected_crowd", sa.Integer(), nullable=True),
         sa.Column("affected_links", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column("closure_links", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-        sa.Column("intensity", sa.String(length=16), server_default="MEDIUM", nullable=False),
-        sa.Column("status", sa.String(length=16), server_default="DRAFT", nullable=False),
+        sa.Column(
+            "intensity",
+            sa.Enum("LOW", "MEDIUM", "HIGH", name="eventintensity"),
+            server_default="MEDIUM",
+            nullable=False,
+        ),
+        sa.Column(
+            "status",
+            sa.Enum("DRAFT", "PREDICTED", "APPROVED", "PUBLISHED", "CLOSED", "CANCELLED", name="eventstatus"),
+            server_default="DRAFT",
+            nullable=False,
+        ),
         sa.Column("created_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=True),
         sa.Column("approved_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=True),
         sa.Column("created_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
@@ -54,6 +78,7 @@ def upgrade() -> None:
         sa.Column("link_deltas", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column("severity_summary", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column("alternatives", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column("demand_injection", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column("computed_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.Column("source", sa.String(length=32), server_default="sumo", nullable=False),
         sa.PrimaryKeyConstraint("id"),
@@ -64,7 +89,11 @@ def upgrade() -> None:
     op.create_table(
         "citizen_advisories",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("origin_type", sa.String(length=32), nullable=False),
+        sa.Column(
+            "origin_type",
+            sa.Enum("EVENT", "INCIDENT", "EMERGENCY", "FORECAST", name="advisoryorigintype"),
+            nullable=False,
+        ),
         sa.Column("origin_id", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("headline", sa.String(length=120), nullable=False),
         sa.Column("corridor_text", sa.String(length=256), nullable=False),
@@ -75,7 +104,7 @@ def upgrade() -> None:
         sa.Column("cause_text", sa.String(length=256), nullable=False),
         sa.Column("recommended_route_text", sa.String(length=256), nullable=False),
         sa.Column("recommended_departure_before", sa.DateTime(), nullable=True),
-        sa.Column("severity", sa.String(length=16), nullable=False),
+        sa.Column("severity", sa.Enum("LOW", "MODERATE", "SEVERE", name="advisoryseverity"), nullable=False),
         sa.Column("published_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("published_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.Column("expires_at", sa.DateTime(), nullable=False),
@@ -90,7 +119,12 @@ def upgrade() -> None:
         "audit_logs",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("timestamp", sa.DateTime(), server_default=sa.func.now(), nullable=False),
-        sa.Column("actor_type", sa.String(length=16), server_default="USER", nullable=False),
+        sa.Column(
+            "actor_type",
+            sa.Enum("USER", "SYSTEM", "AI", name="auditactortype"),
+            server_default="USER",
+            nullable=False,
+        ),
         sa.Column("actor_id", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("action", sa.String(length=64), nullable=False),
         sa.Column("target_type", sa.String(length=64), nullable=True),
@@ -98,7 +132,12 @@ def upgrade() -> None:
         sa.Column("input", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column("output", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column("source", sa.String(length=32), server_default="manual", nullable=False),
-        sa.Column("result", sa.String(length=16), server_default="SUCCESS", nullable=False),
+        sa.Column(
+            "result",
+            sa.Enum("SUCCESS", "FAILURE", "DENIED", name="auditresult"),
+            server_default="SUCCESS",
+            nullable=False,
+        ),
         sa.Column("correlation_id", sa.String(length=64), nullable=True),
         sa.PrimaryKeyConstraint("id"),
     )
@@ -120,3 +159,12 @@ def downgrade() -> None:
 
     op.drop_index("ix_events_status", table_name="events")
     op.drop_table("events")
+
+    bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        for enum_name in [
+            "eventtype", "eventintensity", "eventstatus",
+            "advisoryorigintype", "advisoryseverity",
+            "auditactortype", "auditresult",
+        ]:
+            op.execute(f"DROP TYPE IF EXISTS {enum_name} CASCADE;")

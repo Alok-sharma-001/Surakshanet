@@ -17,7 +17,7 @@ Conforms to docs/12-citizen-advisory.md, docs/05-database.md §4, and SN-120.
 
 import pytest
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 from fastapi import HTTPException
 
@@ -37,6 +37,7 @@ from app.services.advisory_service import (
     round_outward_5min,
     build_advisory,
 )
+from app.models.alert import EmergencyEvent, EmergencyPriority, EmergencyVehicleType, EmergencyStatus
 
 
 def test_outward_rounding_to_5min_multiples():
@@ -67,14 +68,14 @@ def test_human_gate_published_by_cannot_be_null():
         origin_id=uuid.uuid4(),
         headline="Heavy traffic expected on Palasia Corridor",
         corridor_text="Palasia - Geeta Bhawan Corridor",
-        window_start=datetime.now(timezone.utc),
-        window_end=datetime.now(timezone.utc) + timedelta(hours=3),
+        window_start=datetime.utcnow(),
+        window_end=datetime.utcnow() + timedelta(hours=3),
         delay_min_low=20,
         delay_min_high=35,
         cause_text="Public event, 25,000 expected",
         severity=AdvisorySeverity.SEVERE,
         published_by=admin_id,
-        expires_at=datetime.now(timezone.utc) + timedelta(hours=4),
+        expires_at=datetime.utcnow() + timedelta(hours=4),
     )
     assert advisory.published_by == admin_id
 
@@ -85,14 +86,14 @@ def test_human_gate_published_by_cannot_be_null():
             origin_id=uuid.uuid4(),
             headline="Invalid Advisory Without Admin",
             corridor_text="Palasia Corridor",
-            window_start=datetime.now(timezone.utc),
-            window_end=datetime.now(timezone.utc) + timedelta(hours=3),
+            window_start=datetime.utcnow(),
+            window_end=datetime.utcnow() + timedelta(hours=3),
             delay_min_low=10,
             delay_min_high=20,
             cause_text="Testing",
             severity=AdvisorySeverity.MODERATE,
             published_by=None,  # Forbidden
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=4),
+            expires_at=datetime.utcnow() + timedelta(hours=4),
         )
 
 
@@ -105,8 +106,8 @@ async def test_missing_measurements_refuses_advisory_generation():
     event = Event(
         name="Test Event",
         event_type=EventType.RALLY,
-        starts_at=datetime.now(timezone.utc) + timedelta(hours=2),
-        ends_at=datetime.now(timezone.utc) + timedelta(hours=5),
+        starts_at=datetime.utcnow() + timedelta(hours=2),
+        ends_at=datetime.utcnow() + timedelta(hours=5),
         expected_crowd=10000,
         affected_links=["E_J1_J2"],
         closure_links=[],
@@ -144,8 +145,8 @@ async def test_advisory_build_from_approved_event():
     and departure recommendation.
     """
     admin_id = uuid.uuid4()
-    starts = datetime.now(timezone.utc) + timedelta(hours=2)
-    ends = datetime.now(timezone.utc) + timedelta(hours=5)
+    starts = datetime.utcnow() + timedelta(hours=2)
+    ends = datetime.utcnow() + timedelta(hours=5)
 
     event = Event(
         name="Ganesh Visarjan Procession",
@@ -217,8 +218,8 @@ async def test_ongoing_event_suppresses_departure_recommendation():
     """
     admin_id = uuid.uuid4()
     # Event started 30 minutes ago
-    starts = datetime.now(timezone.utc) - timedelta(minutes=30)
-    ends = datetime.now(timezone.utc) + timedelta(hours=2)
+    starts = datetime.utcnow() - timedelta(minutes=30)
+    ends = datetime.utcnow() + timedelta(hours=2)
 
     event = Event(
         name="Ongoing Rally",
@@ -301,4 +302,81 @@ async def test_unapproved_event_publish_rejected():
         await publish_event(event_id=draft_event.id, db=db, current_user=admin_user)
     assert exc_info.value.status_code == 409
     assert "Event must be APPROVED" in exc_info.value.detail
+
+
+async def test_incident_and_forecast_refuse_rather_than_fabricate():
+    """
+    SN-067/docs/12-citizen-advisory.md §5 rule 1: an origin with no real measurement
+    pipeline wired yet must refuse ("insufficient data to advise"), never fabricate a
+    plausible-looking advisory with invented delay ranges, place names or causes.
+    INCIDENT and FORECAST have no real measurement source wired in this codebase yet
+    (Phase 6 incident detection, Phase 5+ forecast integration) — build_advisory must
+    say so honestly rather than inventing content, as it did before this fix.
+    """
+    db = AsyncMock()
+    admin_id = uuid.uuid4()
+
+    for origin_type in (AdvisoryOriginType.INCIDENT, AdvisoryOriginType.FORECAST):
+        with pytest.raises(HTTPException) as exc_info:
+            await build_advisory(db, origin_type, uuid.uuid4(), admin_id)
+        assert exc_info.value.status_code == 400
+        assert "insufficient data to advise" in exc_info.value.detail
+
+
+async def test_emergency_advisory_uses_real_corridor_data():
+    """
+    Verifies the EMERGENCY origin builds its advisory from a real EmergencyEvent row
+    (Phase 3's emergency corridor) rather than a hardcoded placeholder like the
+    previous "Emergency Transit Route" / delay_low=5, delay_high=10 fabrication.
+    """
+    admin_id = uuid.uuid4()
+    emergency = EmergencyEvent(
+        id=uuid.uuid4(),
+        vehicle_id="AMB-1234",
+        priority=EmergencyPriority.CRITICAL,
+        vehicle_type=EmergencyVehicleType.AMBULANCE,
+        route=["J0", "J1", "J2", "J3"],
+        status=EmergencyStatus.ACTIVE,
+        started_at=datetime.utcnow(),
+        clearance_time_s=180.0,
+    )
+
+    db = AsyncMock()
+    mock_res = MagicMock()
+    mock_res.scalar_one_or_none.return_value = emergency
+    db.execute.return_value = mock_res
+
+    advisory = await build_advisory(db, AdvisoryOriginType.EMERGENCY, emergency.id, admin_id)
+
+    # Corridor text must come from the real route's junction names, not a fabricated string.
+    assert "Emergency Transit Route" not in advisory.corridor_text
+    assert "→" in advisory.corridor_text
+    # Delay range must derive from the real clearance_time_s (180s = 3 min), not (5, 10).
+    assert advisory.delay_min_low >= 0
+    assert advisory.delay_min_high <= 10
+    assert advisory.published_by == admin_id
+
+
+async def test_emergency_advisory_refuses_without_clearance_time():
+    """An EmergencyEvent with no measured clearance_time_s must refuse, not fabricate one."""
+    admin_id = uuid.uuid4()
+    emergency = EmergencyEvent(
+        id=uuid.uuid4(),
+        priority=EmergencyPriority.CRITICAL,
+        vehicle_type=EmergencyVehicleType.AMBULANCE,
+        route=["J0", "J1"],
+        status=EmergencyStatus.ACTIVE,
+        started_at=datetime.utcnow(),
+        clearance_time_s=None,
+    )
+
+    db = AsyncMock()
+    mock_res = MagicMock()
+    mock_res.scalar_one_or_none.return_value = emergency
+    db.execute.return_value = mock_res
+
+    with pytest.raises(HTTPException) as exc_info:
+        await build_advisory(db, AdvisoryOriginType.EMERGENCY, emergency.id, admin_id)
+    assert exc_info.value.status_code == 400
+    assert "insufficient data to advise" in exc_info.value.detail
 
