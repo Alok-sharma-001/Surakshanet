@@ -73,3 +73,5 @@ backend/ml/
 
 # Runtime logs & pidfiles from start.sh/stop.sh (SN-018/021) — never commit process state
 logs/
+graphify-out/
+

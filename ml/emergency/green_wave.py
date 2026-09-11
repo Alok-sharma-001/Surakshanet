@@ -201,7 +201,12 @@ class GreenWaveController:
                     tj = telemetry_by_junction[jid]
                     approaches = tj.get("approaches", [])
                     if approaches:
-                        speed_kmh = approaches[0].get("mean_speed_kmh", 45.0)
+                        raw_speed = approaches[0].get("mean_speed_kmh")
+                        # None means nothing was resolvable this window (e.g. an
+                        # uncalibrated vision camera) — keep the 45.0 default set
+                        # above rather than propagate None into the ETA math.
+                        if raw_speed is not None:
+                            speed_kmh = raw_speed
 
                 speed_mps = (speed_kmh / 3.6) * speed_factor
                 eff_speed_mps = min(free_flow_speed_mps, max(speed_mps, min_floor_mps))

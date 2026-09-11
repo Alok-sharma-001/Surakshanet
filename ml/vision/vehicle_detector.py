@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 __all__ = ["VehicleDetector", "VisionUnavailable"]
 
 try:
-    from shared.constants import PCU_FACTORS
+    from shared.constants import PCU_FACTORS, compute_pcu
 except ImportError:
     PCU_FACTORS = {
         'car': 1.0,
@@ -20,8 +20,52 @@ except ImportError:
         'bus': 3.0,
         'truck': 3.0,
         'auto_rickshaw': 1.0,
-        'bicycle': 0.2
+        'bicycle': 0.2,
+        'lcv': 1.5,
     }
+    def compute_pcu(vehicle_counts: Dict[str, float]) -> float:
+        return round(sum(count * PCU_FACTORS.get(vclass, 1.0) for vclass, count in vehicle_counts.items()), 2)
+
+
+def _ensure_nms_available():
+    """Ensures Non-Maximum Suppression (NMS) is available, monkeypatching pure PyTorch NMS
+    if custom torchvision C++ ops fail to load (e.g. CPU vs CUDA build mismatch).
+    """
+    try:
+        import torchvision.ops
+        import torch
+        b = torch.tensor([[0.0, 0.0, 10.0, 10.0]])
+        s = torch.tensor([0.9])
+        torchvision.ops.nms(b, s, 0.5)
+    except Exception:
+        import torch
+        import torchvision.ops
+        import torchvision.ops.boxes
+
+        def _py_nms(boxes, scores, iou_threshold):
+            if boxes.numel() == 0:
+                return torch.empty((0,), dtype=torch.long, device=boxes.device)
+            x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+            areas = (x2 - x1) * (y2 - y1)
+            order = scores.argsort(descending=True)
+            keep = []
+            while order.numel() > 0:
+                i = order[0].item()
+                keep.append(i)
+                if order.numel() == 1:
+                    break
+                xx1 = torch.clamp(x1[order[1:]], min=x1[i])
+                yy1 = torch.clamp(y1[order[1:]], min=y1[i])
+                xx2 = torch.clamp(x2[order[1:]], max=x2[i])
+                yy2 = torch.clamp(y2[order[1:]], max=y2[i])
+                inter = torch.clamp(xx2 - xx1, min=0) * torch.clamp(yy2 - yy1, min=0)
+                ovr = inter / (areas[i] + areas[order[1:]] - inter)
+                order = order[torch.where(ovr <= iou_threshold)[0] + 1]
+            return torch.tensor(keep, dtype=torch.long, device=boxes.device)
+
+        torchvision.ops.nms = _py_nms
+        torchvision.ops.boxes.nms = _py_nms
+
 
 class VehicleDetector:
     """YOLOv8 vehicle detection and PCU calculation service."""
@@ -50,6 +94,7 @@ class VehicleDetector:
         self.model = None
         
         try:
+            _ensure_nms_available()
             if os.path.exists(self.model_path):
                 from ultralytics import YOLO
                 self.model = YOLO(self.model_path)
@@ -98,6 +143,7 @@ class VehicleDetector:
                     detections.append({
                         "bbox": bbox,
                         "class_name": class_name,
+                        "class": class_name,
                         "confidence": float(box.conf.item())
                     })
                     
@@ -133,11 +179,9 @@ class VehicleDetector:
         return counts
         
     def calculate_pcu(self, vehicle_counts: Dict[str, int]) -> float:
-        """Computes total PCU from vehicle counts."""
-        pcu = 0.0
-        for vclass, count in vehicle_counts.items():
-            pcu += count * PCU_FACTORS.get(vclass, 1.0)
-        return round(pcu, 2)
+        """Computes total PCU from vehicle counts using the canonical engine."""
+        return compute_pcu(vehicle_counts)
+
         
     def calculate_density(self, pcu: float, road_area_sqm: float = 7000.0) -> float:
         """Computes traffic density (0.0 to 1.0 scale)."""

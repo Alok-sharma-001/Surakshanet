@@ -104,7 +104,11 @@ class RoutingEngine:
                         density = 0.0
                         edge_data["stale"] = True
                     else:
-                        speed = max(1.0, float(matched_data.get("speed", edge_data["free_flow_speed"])))
+                        raw_speed = matched_data.get("speed")
+                        # None means nothing was resolvable this window (e.g. an
+                        # uncalibrated vision camera) — fall back to the edge's
+                        # static free-flow speed rather than crash on float(None).
+                        speed = max(1.0, float(raw_speed)) if raw_speed is not None else edge_data["free_flow_speed"]
                         density = float(matched_data.get("density", 0.0))
                         edge_data["stale"] = False
 

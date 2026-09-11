@@ -107,6 +107,16 @@ check "no legacy source vocabulary in the backend" \
 check "no derived speed in the vision worker" \
   grep -n "np.random\|avg_speed.*pcu\|52\.0 -" ml/vision/rtsp_stream_worker.py
 
+# Phase 5's services/vision_worker/main.py once defaulted an approach's
+# mean_speed_kmh to a plausible-looking 0.0 whenever no track had a
+# resolvable speed this window (uncalibrated camera, or simply no track with
+# 2+ position samples yet) — indistinguishable from a genuine "traffic
+# stopped" reading, and broadcast raw to every /ws/traffic client and into
+# the control-service state vector. SN-072's own acceptance line is "mean
+# speed (calibrated; null when uncalibrated)".
+check "no fabricated 0.0 default for unresolved vision speed" \
+  grep -n "else (0\.0 if camera\.mpp is None else 0\.0)" services/vision_worker/main.py
+
 # Unreported fields must persist as null, never as a plausible-looking default.
 check "no invented defaults on the ingest path" \
   bash -c 'grep -n "data.get(.*, *[0-9]" backend/app/services/mqtt_consumer.py | grep -v "^[0-9]*: *#"' 

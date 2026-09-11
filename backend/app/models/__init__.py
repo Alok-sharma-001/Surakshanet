@@ -9,6 +9,13 @@ from app.models.network import NetworkLink
 from app.models.event import Event, EventPrediction, EventType, EventIntensity, EventStatus
 from app.models.advisory import CitizenAdvisory, AdvisoryOriginType, AdvisorySeverity
 from app.models.audit import AuditLog, AuditActorType, AuditResult
+from app.models.vision import (
+    CVDetection,
+    BehaviorFlag,
+    BehaviorFlagType,
+    BehaviorFlagStatus,
+    NoParkingZone,
+)
 
 __all__ = [
     "Base",
@@ -42,4 +49,10 @@ __all__ = [
     "AuditLog",
     "AuditActorType",
     "AuditResult",
+    "CVDetection",
+    "BehaviorFlag",
+    "BehaviorFlagType",
+    "BehaviorFlagStatus",
+    "NoParkingZone",
 ]
+

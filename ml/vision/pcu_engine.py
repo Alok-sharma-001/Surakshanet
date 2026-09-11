@@ -4,7 +4,7 @@ from typing import Dict
 logger = logging.getLogger(__name__)
 
 try:
-    from shared.constants import PCU_FACTORS
+    from shared.constants import PCU_FACTORS, compute_pcu
 except ImportError:
     PCU_FACTORS = {
         'car': 1.0,
@@ -12,18 +12,19 @@ except ImportError:
         'bus': 3.0,
         'truck': 3.0,
         'auto_rickshaw': 1.0,
-        'bicycle': 0.2
+        'bicycle': 0.2,
+        'lcv': 1.5,
     }
+    def compute_pcu(vehicle_counts: Dict[str, float]) -> float:
+        return round(sum(count * PCU_FACTORS.get(vclass, 1.0) for vclass, count in vehicle_counts.items()), 2)
 
 class PCUEngine:
     """Dedicated PCU calculation engine."""
     
     def calculate_approach_demand(self, vehicle_counts: Dict[str, int]) -> float:
         """Total PCU for one approach."""
-        pcu = 0.0
-        for vclass, count in vehicle_counts.items():
-            pcu += count * PCU_FACTORS.get(vclass, 1.0)
-        return pcu
+        return compute_pcu(vehicle_counts)
+
         
     def calculate_junction_demand(self, approaches: Dict[str, Dict[str, int]]) -> Dict[str, float]:
         """PCU for all 4 approaches."""

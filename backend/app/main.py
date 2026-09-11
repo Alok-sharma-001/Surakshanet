@@ -62,6 +62,12 @@ async def redis_pubsub_bridge():
                         ws_target = "signals"
                     elif channel_name == REDIS_CHANNELS["alerts"]:
                         ws_target = "alerts"
+                        if isinstance(payload, dict):
+                            try:
+                                from app.services.vision_service import persist_behavior_flag
+                                await persist_behavior_flag(payload)
+                            except Exception:
+                                pass
                     elif channel_name == REDIS_CHANNELS["emergency"]:
                         ws_target = "emergency"
                     elif channel_name == REDIS_CHANNELS["simulation"]:
@@ -74,6 +80,14 @@ async def redis_pubsub_bridge():
                             try:
                                 from app.services.routing_telemetry import record_junction_telemetry
                                 record_junction_telemetry(payload)
+                            except Exception:
+                                pass
+                    elif channel_name == REDIS_CHANNELS["cv_detections"]:
+                        ws_target = channel_name
+                        if isinstance(payload, dict):
+                            try:
+                                from app.services.vision_service import persist_cv_detections
+                                await persist_cv_detections(payload)
                             except Exception:
                                 pass
                     else:
@@ -202,12 +216,15 @@ app.include_router(ws_router)
 from app.api.health import router as health_router
 from app.api.ab import router as ab_router
 from app.api.public import router as public_router
+from app.api.vision import router as vision_router
 
 app.include_router(health_router)
 app.include_router(health_router, prefix=settings.API_PREFIX)
 app.include_router(ab_router)
 app.include_router(public_router)
 app.include_router(public_router, prefix=settings.API_PREFIX)
+app.include_router(vision_router)
+
 
 
 @app.get("/", tags=["Health"])

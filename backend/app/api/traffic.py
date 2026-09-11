@@ -10,11 +10,15 @@ from app.schemas.traffic import (
     SensorCreate, SensorResponse,
     TrafficReadingCreate, TrafficReadingResponse
 )
-from app.services.auth_service import get_optional_current_user, require_role
 from app.models.user import User
+
+from app.services.auth_service import get_optional_current_user, require_role
 from app.services import traffic_service
+from shared.constants import compute_pcu
 
 router = APIRouter(prefix="/traffic", tags=["traffic"])
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -257,9 +261,6 @@ async def calculate_pcu(
     data: dict,
     current_user: Optional[User] = Depends(get_optional_current_user)
 ) -> Any:
-    cars = float(data.get("cars", 0))
-    buses = float(data.get("buses", 0))
-    two_wheelers = float(data.get("two_wheelers", data.get("motorcycles", 0)))
-    trucks = float(data.get("trucks", 0))
-    total_pcu = (cars * 1.0) + (buses * 3.0) + (two_wheelers * 0.5) + (trucks * 3.0)
+    total_pcu = compute_pcu(data)
     return {"pcu": total_pcu, "total_pcu": total_pcu}
+

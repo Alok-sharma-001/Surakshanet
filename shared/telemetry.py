@@ -30,7 +30,7 @@ class ApproachTelemetry:
     vehicle_count: float
     pcu: float                                # PCU equivalent
     queue_length_m: float
-    mean_speed_kmh: float
+    mean_speed_kmh: Optional[float]           # None when no track has a resolvable speed this window (e.g. uncalibrated camera) — never a fabricated 0.0
     occupancy: float                          # 0.0 - 1.0
     accumulated_wait_s: float
     vehicle_breakdown: Dict[str, int] = field(default_factory=dict)
@@ -46,7 +46,7 @@ class ApproachTelemetry:
             vehicle_count=float(data.get("vehicle_count", 0.0)),
             pcu=float(data.get("pcu", 0.0)),
             queue_length_m=float(data.get("queue_length_m", 0.0)),
-            mean_speed_kmh=float(data.get("mean_speed_kmh", 0.0)),
+            mean_speed_kmh=(float(data["mean_speed_kmh"]) if data.get("mean_speed_kmh") is not None else None),
             occupancy=float(data.get("occupancy", 0.0)),
             accumulated_wait_s=float(data.get("accumulated_wait_s", 0.0)),
             vehicle_breakdown=dict(data.get("vehicle_breakdown", {}))

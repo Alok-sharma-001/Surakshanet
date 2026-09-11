@@ -107,12 +107,26 @@ def build_state_vector(
     raw_queue = max((a.pcu for a in approaches), default=0.0)
     feat_0_queue = min(1.0, max(0.0, raw_queue / cfg.norm_queue_max))
 
-    # Feature 1: mean_speed (km/h, PCU-weighted mean)
-    total_pcu = sum(a.pcu for a in approaches)
-    if total_pcu > 0:
-        raw_speed = sum(a.mean_speed_kmh * a.pcu for a in approaches) / total_pcu
+    # Feature 1: mean_speed (km/h, PCU-weighted mean over approaches with a
+    # measured speed). An approach's speed is None whenever nothing was
+    # resolvable this window (e.g. an uncalibrated vision camera) — excluded
+    # from the mean rather than treated as zero. If no approach has a
+    # measured speed at all, this state is honestly rejected, matching the
+    # missing_approaches/telemetry_gap fallback pattern above.
+    speed_approaches = [a for a in approaches if a.mean_speed_kmh is not None]
+    if not speed_approaches:
+        return StateBuildResult(
+            vector=[0.0] * 8,
+            raw_values={},
+            norm_constants=norm_constants,
+            is_valid=False,
+            fallback_reason="no_measured_speed: no approach has a resolvable mean_speed_kmh"
+        )
+    speed_pcu = sum(a.pcu for a in speed_approaches)
+    if speed_pcu > 0:
+        raw_speed = sum(a.mean_speed_kmh * a.pcu for a in speed_approaches) / speed_pcu
     else:
-        raw_speed = sum(a.mean_speed_kmh for a in approaches) / len(approaches)
+        raw_speed = sum(a.mean_speed_kmh for a in speed_approaches) / len(speed_approaches)
     feat_1_speed = min(1.0, max(0.0, raw_speed / cfg.norm_speed_max))
 
     # Feature 2: occupancy (ratio, max over approaches)

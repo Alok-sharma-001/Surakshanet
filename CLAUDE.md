@@ -192,7 +192,96 @@ execution surface is `docs/CHECKLIST.md` (SN-001…SN-150, grouped into Phases 0
   - `tests/critical/` (66 tests, including `test_10_citizen_advisory.py`'s new fabrication-guard
     tests) and `tests/test_routing_engine_phase3.py` (5) pass after every fix. `npx tsc --noEmit`
     clean. `ruff check app/` clean.
-- **Phases 5–10:** NOT_STARTED.
+- **Phase 5 (Computer vision, SN-069…SN-082):** DONE, genuinely live-verified — but only after a
+  same-day re-audit (same pattern as Phases 3/4: the checklist marked all 14 SN items DONE while
+  the work was still uncommitted) found real fabrication and three "wired half-way" gaps the
+  critical-suite's mocked tests couldn't see. Full trail:
+  - **Fabrication found and fixed** (`services/vision_worker/main.py`): `_build_approach_telemetry`
+    defaulted an approach's `mean_speed_kmh` to a plausible-looking `0.0` whenever no track had a
+    resolvable speed this window — an uncalibrated camera, or simply a freshly-tracked vehicle with
+    fewer than 2 position samples (a routine, frequent case, not an edge case). This is
+    indistinguishable from a genuine "traffic stopped" reading, directly violating SN-072's own
+    acceptance line ("mean speed — calibrated; null when uncalibrated") and the codebase's oldest
+    provenance rule. The raw value was also broadcast unfiltered to every `/ws/traffic` client (no
+    consumer-side filtering, unlike the DB-write path) and fed straight into the live signal-control
+    state vector. Root-caused to the canonical `ApproachTelemetry.mean_speed_kmh` field (SN-023,
+    Phase 2) being typed as a mandatory `float` with no way to express "not measured" — the first
+    producer (SUMO) never needed one. Fixed at the schema level
+    (`shared/telemetry.py::ApproachTelemetry.mean_speed_kmh` is now `Optional[float]`) and at every
+    consumer that would otherwise crash on a real `None`: `services/control_service/state.py`
+    (excludes unmeasured approaches from the PCU-weighted mean; if *no* approach has a measured
+    speed, the state is now honestly rejected via the same `is_valid=False`/`fallback_reason`
+    pattern already used for missing-approaches/telemetry-gap, which correctly triggers the
+    existing Webster fallback — verified live), `ml/routing/routing_engine.py::update_edge_weights`
+    (falls back to the edge's static free-flow speed, matching how it already handles stale/absent
+    telemetry), `ml/emergency/green_wave.py::compute_route_etas` (keeps its existing 45.0 km/h
+    default rather than propagating `None` into transit-time math), and
+    `frontend/.../JunctionDetailPage.tsx` (renders "unavailable" instead of crashing on
+    `null.toFixed()`). Extended `scripts/check_phase0_regressions.sh` with a new check for the
+    exact fabricated pattern. Live-verified: ran the real vision worker (real YOLO detector, real
+    tracker) against `fixtures/demo.mp4` — emitted telemetry shows a real `10.9` km/h for a busy
+    approach and honest `None` (not `0.0`) for an empty one; `services/control_service/state.py`
+    correctly rejects an all-`None` telemetry frame and correctly PCU-weights a mixed one.
+  - **Wired-to-nothing gap found and fixed** (behavior flags, SN-077): `services/vision_worker/
+    {wrongway,parking,behavior}.py` compute real WRONG_WAY/ILLEGAL_PARKING/DANGEROUS_DRIVING flags
+    and publish them to Redis — but nothing ever persisted them as `BehaviorFlag` rows. `grep
+    -rn "BehaviorFlag("` across the whole repo (outside the model definition and the two test
+    files, which construct one directly and never exercise the real pipeline) returned nothing.
+    `GET /vision/flags` would always return empty and `PATCH /flags/{id}/resolve` could never
+    resolve anything, no matter how many real wrong-way vehicles the worker detected. Fixed: new
+    `backend/app/services/vision_service.py::persist_behavior_flag()`, wired into `main.py`'s
+    existing `redis_pubsub_bridge()` on `REDIS_CHANNELS["alerts"]` (the same pattern already used
+    for `REDIS_CHANNELS["traffic"]` → `record_junction_telemetry`). Live-verified: a real flag
+    payload persisted to the real `behavior_flags` table with the correct native-enum `flag_type`/
+    `status` and the mandatory note text.
+  - **Wired-to-nothing gap found and fixed** (detections, SN-078): same pattern for `cv_detections`
+    — `grep -rn "CVDetection("` outside the model definition returned nothing. SN-078's own
+    acceptance line ("every box traces to a `cv_detections` row") was unmet: detections only ever
+    lived in a 5-second Redis TTL cache. Fixed: `main.py`'s detection-box payload now also carries
+    the real `vehicle_class`/pixel `raw_bbox`/`pcu` per box (alongside the frontend's existing
+    normalized-% fields, unchanged); new `persist_cv_detections()` in the same service module,
+    wired into the bridge's existing `REDIS_CHANNELS["cv_detections"]` handling. Live-verified: a
+    real detection row persisted with the correct pixel bbox and a confidence correctly normalized
+    from the UI's 0–100 scale back to the DB's 0.0–1.0 convention.
+  - **Wired-to-nothing gap found and fixed** (no-parking zones, SN-079/080):
+    `services/vision_worker/main.py` constructed every `NoParkingDetector(cam_id)` with no zones
+    and never called `set_zones()`/`add_zone()` anywhere — `grep -rn "set_zones\|add_zone"` outside
+    their own definitions returned nothing. An operator could draw and save a zone via `POST
+    /vision/zones`, see it echoed back by `GET /vision/zones`, and it would never once suppress-and-
+    flag a real illegally parked vehicle, because the running detector's zone list was permanently
+    empty. Fixed: added a `psycopg2`-based direct read of `no_parking_zones` (mirroring
+    `simulation/sumo_live_bridge.py`'s established "own-process direct DB access" pattern for
+    exactly this class of standalone worker), loaded once at startup and refreshed every 30s in the
+    stream loop. Live-verified: a zone inserted directly into the real `no_parking_zones` table was
+    correctly loaded into `VisionWorker.parking_detectors['CAM-01'].zones` on the next refresh.
+  - **Reviewed and found genuinely correct, no changes needed**: `services/vision_worker/
+    {wrongway,tracker,behavior}.py` (real IoU+centroid tracking, real kinematic proxy math, exactly
+    matching the SN-076/081 spec thresholds), `ml/vision/pcu_engine.py` and the `vehicle_detector.py`/
+    `sumo_env.py`/`sumo_live_bridge.py` diffs (SN-074's canonical `compute_pcu()` correctly adopted
+    everywhere, no behavior change to the pre-existing SUMO free-flow-speed defaults, which predate
+    this diff), `backend/alembic/versions/005_vision_tables.py` (correctly uses native
+    `sa.Enum(...)` from the start — the migration 004 enum-vs-VARCHAR defect from the Phase 4 audit
+    was NOT repeated), `tests/test_language_policy.py` (SN-082, genuinely greps the whole repo and
+    has a real self-test proving the regex actually fires), `backend/app/agent_tools/
+    safety_guardrails.py`-style human-gate DB invariant on `BehaviorFlag` (a real `@validates` that
+    rejects `CONFIRMED` without `resolved_by`, live-verified via `tests/critical/
+    test_12_incident_gate.py`).
+  - **Known gap, not fixed (no active leak, out of scope for this pass)**:
+    `services/vision_worker/privacy.py::PrivacyBlurrer.blur_sensitive_areas()` is a real, working
+    face/plate blur implementation, but it is never called anywhere — `main.py` instantiates one per
+    camera and never invokes it. Not an active privacy leak today because no code path currently
+    persists or transmits a raw frame image anywhere (only bounding-box metadata leaves the
+    process); wiring it in would mean building an entire frame-snapshot storage feature that
+    doesn't exist yet, which is new-feature scope, not a bug fix.
+  - `tests/critical/test_11_vision_pipeline.py` (11 tests) and `test_12_incident_gate.py` (their
+    naming is a leftover Phase-6 numbering artifact — their actual content is entirely Phase 5
+    vision human-gate coverage) pass, along with `tests/test_vision_api.py` (4) and
+    `tests/test_language_policy.py` (2). Ran `backend/tests/` against a real Postgres for the
+    second time (see the Antigravity audit above for the first): 79 passed, 1 honest skip.
+    `scripts/check_phase0_regressions.sh` extended to 27 checks, all pass. `ruff check app/` clean
+    (fixed 3 pre-existing unused imports in the new `vision.py`). `npx tsc --noEmit` and a full
+    `npm run build` clean.
+- **Phases 6–10:** NOT_STARTED.
 
 **2026-09-11 addendum — full pre-Phase-5 audit of the "Antigravity" copilot/agent-tools
 subsystem, fixed and live-verified.** Requested explicitly ("check all errors/bugs up through

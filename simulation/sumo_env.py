@@ -24,7 +24,7 @@ except ImportError as exc:
 logger = logging.getLogger(__name__)
 
 try:
-    from shared.constants import PCU_FACTORS, DEMO_SEED
+    from shared.constants import PCU_FACTORS, DEMO_SEED, compute_pcu
 except ImportError:
     DEMO_SEED = 42
     PCU_FACTORS = {
@@ -33,8 +33,13 @@ except ImportError:
         'bus': 3.0,
         'truck': 3.0,
         'auto_rickshaw': 1.0,
-        'bicycle': 0.2
+        'bicycle': 0.2,
+        'lcv': 1.5,
     }
+    def compute_pcu(counts):
+        return round(sum(count * PCU_FACTORS.get(vclass, 1.0) for vclass, count in counts.items()), 2)
+
+
 
 class SumoEnvironment:
     """Eclipse SUMO environment wrapper for traffic signal control.
@@ -161,7 +166,14 @@ class SumoEnvironment:
                         avg_speed = max(0.0, spd) if spd >= 0.0 else 35.0
                         occ = float(traci.lanearea.getLastStepOccupancy(det_id)) / 100.0
                         v_ids = traci.lanearea.getLastStepVehicleIDs(det_id)
-                        pcu = sum(PCU_FACTORS.get(traci.vehicle.getVehicleClass(v), 1.0) for v in v_ids) if v_ids else 0.0
+                        breakdown = {}
+                        if v_ids:
+                            for v in v_ids:
+                                v_cls = traci.vehicle.getVehicleClass(v)
+                                breakdown[v_cls] = breakdown.get(v_cls, 0) + 1
+                            pcu = compute_pcu(breakdown)
+                        else:
+                            pcu = 0.0
                         if v_count > 0 and pcu == 0.0:
                             pcu = v_count
                         approaches[dir_code] = {
@@ -184,10 +196,11 @@ class SumoEnvironment:
                         veh_count = traci.edge.getLastStepVehicleNumber(edge)
                         queue_len = traci.edge.getLastStepHaltingNumber(edge)
                         avg_speed = traci.edge.getLastStepMeanSpeed(edge)
-                        pcu = 0.0
+                        breakdown = {}
                         for veh_id in traci.edge.getLastStepVehicleIDs(edge):
                             vclass = traci.vehicle.getVehicleClass(veh_id)
-                            pcu += PCU_FACTORS.get(vclass, 1.0)
+                            breakdown[vclass] = breakdown.get(vclass, 0) + 1
+                        pcu = compute_pcu(breakdown) if breakdown else (veh_count * 1.0 if veh_count > 0 else 0.0)
                         approaches[direction] = {
                             "pcu": pcu,
                             "queue_length": queue_len,

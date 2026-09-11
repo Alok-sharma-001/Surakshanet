@@ -6,7 +6,22 @@
 **Priority:** `P0` blocks the demo · `P1` required for the target score · `P2` valuable · `P3` optional
 **Rule:** a task is `DONE` only when all ten Definition-of-Done conditions in [23-final-acceptance.md §1](23-final-acceptance.md) hold.
 
-**Progress:** 87 / 161 DONE — **54%** *(Phases 0, 1, 2, 3, and 4 closed. Phase 4 delivers
+**Progress:** 101 / 161 DONE — **63%** *(Phases 0, 1, 2, 3, 4, and 5 closed. Phase 5 delivers
+Computer Vision: a real YOLOv8 + IoU/centroid tracker worker emitting canonical vision-sourced
+JunctionTelemetry, wrong-way / no-parking / dangerous-driving UNVERIFIED behavior flags with a
+DB-level human gate, and a repo-wide language-policy test (SN-082) — but only after a same-day
+re-audit (checklist marked all 14 SN items DONE while the work was still uncommitted) found a
+fabricated 0.0 default standing in for "speed not measured" (violating SN-072's own "null when
+uncalibrated" acceptance line, and reaching both the live `/ws/traffic` broadcast and the
+signal-control state vector) plus three features wired to a table or detector state nothing ever
+actually populated: behavior flags and CV detections were computed and published to Redis but
+never persisted, so GET /vision/flags and SN-078's "every box traces to a cv_detections row" were
+vacuously true; and operator-drawn no-parking zones were saved and echoed back by the API but
+never loaded into the running detector, so a drawn zone could never actually suppress-and-flag a
+parked vehicle. All fixed and live-verified against a real YOLO run on the demo fixture and a real
+Postgres (real telemetry showing an honest `null` for an empty approach, a real persisted
+behavior_flags row, a real persisted cv_detections row, a real zone loaded from the DB into the
+detector). See CLAUDE.md §1 for the full trail. Phase 4 delivers
 the Event/Rally Traffic Management & Citizen Information System: dual-world SUMO prediction
 at identical seed DEMO_SEED=42, per-link deltas, fixed documented severity bands LOW <15%,
 MODERATE 15-40%, SEVERE >40%, A* alternative routes, human gate published_by NOT NULL constraint,
@@ -32,10 +47,10 @@ now passes 79/79 (1 honest skip) against a real Postgres for the first time.)*
 | 3 Emergency corridor | SN-039 … SN-050 | 12/12 |
 | 4 Event + citizen | SN-051 … SN-068 | 18/18 |
 | — Frontend follow-up | SN-012g | 0/1 |
-| 5 Computer vision | SN-069 … SN-082 | 0/14 |
+| 5 Computer vision | SN-069 … SN-082 | 14/14 |
 | 6 Incident system | SN-083 … SN-096 | 0/14 |
 | 7 Governance | SN-097 … SN-110 | 0/14 |
-| 8 Testing | SN-111 … SN-126 | 9/16 |
+| 8 Testing | SN-111 … SN-126 | 11/16 |
 | 9 Demo hardening | SN-127 … SN-138 | 0/12 |
 | 10 Final acceptance | SN-139 … SN-150 | 0/12 |
 
@@ -687,98 +702,98 @@ persisted to Postgres from the bridge process. `tests/critical/` (35) and
 # PHASE 5 — COMPUTER VISION
 
 ### SN-069 · Vision worker skeleton
-**Component** Vision · **Priority** P1 · **Depends** SN-023 · **Status** `NOT_STARTED`
+**Component** Vision · **Priority** P1 · **Depends** SN-023 · **Status** `DONE`
 **Description** The real YOLO model is an isolated upload endpoint; nothing feeds it.
 **Implementation** `services/vision_worker/main.py` with source management (file/loop/RTSP), 15 fps decode, detection every 3rd frame, 2 s aggregation window. Build on `ml/vision/rtsp_stream_worker.py`.
 **Files** `services/vision_worker/{main,config}.py` (new), `Dockerfile` · **API** `GET /vision/status` · **DB** none yet · **UI** CV panel
 **Tests** SN-121 · **Acceptance** The worker runs on the demo clip and logs real detections · **Demo** all
 
 ### SN-070 · Migration: cv_detections, behavior_flags
-**Component** Database · **Priority** P1 · **Depends** SN-069 · **Status** `NOT_STARTED`
+**Component** Database · **Priority** P1 · **Depends** SN-069 · **Status** `DONE`
 **Description** Detections and flags need durable storage with correct defaults.
 **Implementation** Alembic `005`; `cv_detections` as a hypertable with 72-hour retention; `behavior_flags.status` defaults to `UNVERIFIED` with no automated path to `CONFIRMED`.
 **Files** `backend/alembic/versions/005_*.py`, `backend/app/models/vision.py` (new) · **API** none · **DB** two tables · **UI** none
 **Tests** SN-121, SN-122 · **Acceptance** upgrade/downgrade succeed; the default status is `UNVERIFIED` · **Demo** all
 
 ### SN-071 · Tracking
-**Component** Vision · **Priority** P1 · **Depends** SN-069 · **Status** `NOT_STARTED`
+**Component** Vision · **Priority** P1 · **Depends** SN-069 · **Status** `DONE`
 **Description** Wrong-way, dwell time and kinematics all require identity across frames; a per-frame detector cannot produce any of them.
 **Implementation** IoU association with centroid fallback, `max_age=15`, `min_hits=3`, stable `track_id`.
 **Files** `services/vision_worker/tracker.py` (new) · **API** `track_id` in detections · **DB** `cv_detections.track_id` · **UI** track IDs on boxes
 **Tests** SN-121 · **Acceptance** A vehicle crossing the frame keeps one track ID throughout · **Demo** all
 
 ### SN-072 · Vision telemetry emission
-**Component** Vision · **Priority** P1 · **Depends** SN-071, SN-023 · **Status** `NOT_STARTED`
+**Component** Vision · **Priority** P1 · **Depends** SN-071, SN-023 · **Status** `DONE`
 **Description** Vision must become an interchangeable telemetry source alongside SUMO.
 **Implementation** Aggregate tracks per approach over the window into counts, PCU, mean speed (calibrated; null when uncalibrated), occupancy and queue; emit `JunctionTelemetry` with `source=VISION`.
 **Files** `services/vision_worker/main.py` · **API** none · **DB** `traffic_readings` with `source='vision'` · **UI** vision badge
 **Tests** SN-121 · **Acceptance** The control service consumes vision telemetry with no code change (Gate 5) · **Demo** all
 
 ### SN-073 · Vision failure behaviour
-**Component** Vision · **Priority** P0 · **Depends** SN-069 · **Status** `NOT_STARTED`
+**Component** Vision · **Priority** P0 · **Depends** SN-069 · **Status** `DONE`
 **Description** No synthetic detection may be generated under any failure condition.
 **Implementation** No source / decode error / model load failure → explicit unavailable with reason; frame backlog → drop and count, never emit stale results as current.
 **Files** `services/vision_worker/main.py`, `backend/app/api/vision.py` · **API** `GET /vision/status` unavailable payload · **DB** none · **UI** "No video source"
 **Tests** SN-121 · **Acceptance** Stopping the worker changes the panel to unavailable within 5 s · **Demo** failure drill
 
 ### SN-074 · Single PCU implementation
-**Component** Shared · **Priority** P1 · **Depends** — · **Status** `NOT_STARTED`
+**Component** Shared · **Priority** P1 · **Depends** — · **Status** `DONE`
 **Description** `ml/vision/vehicle_detector.py` carries an inline duplicate `PCU_FACTORS` table that omits `lcv`.
 **Implementation** Delete the duplicate; import from `shared/constants.py`; expose one `compute_pcu()` used by vision, SUMO and MQTT paths.
 **Files** `ml/vision/vehicle_detector.py`, `ml/vision/pcu_engine.py`, `shared/constants.py` · **API** `/traffic/pcu` · **DB** none · **UI** none
 **Tests** SN-121 · **Acceptance** Identical vehicle mixes yield identical PCU across all three producers · **Demo** all
 
 ### SN-075 · Lane geometry configuration
-**Component** Vision · **Priority** P1 · **Depends** SN-069 · **Status** `NOT_STARTED`
+**Component** Vision · **Priority** P1 · **Depends** SN-069 · **Status** `DONE`
 **Description** Wrong-way detection needs a declared expected heading per lane.
 **Implementation** Per-camera YAML with lane polygons and `expected_heading_deg`, plus optional homography/metres-per-pixel for speed.
 **Files** `services/vision_worker/config.py`, `config/cameras.yaml` (new) · **API** none · **DB** none · **UI** optional overlay
 **Tests** SN-122 · **Acceptance** Lane polygons render correctly over the demo clip · **Demo** E
 
 ### SN-076 · Wrong-way detector
-**Component** Vision · **Priority** **P1 — best CV ROI** · **Depends** SN-071, SN-075 · **Status** `NOT_STARTED`
+**Component** Vision · **Priority** **P1 — best CV ROI** · **Depends** SN-071, SN-075 · **Status** `DONE`
 **Description** The highest-value real CV feature available: unambiguous output, near-zero false-positive rate.
 **Implementation** Motion heading over the last 10 positions vs. lane heading; `delta > 135°` and displacement > 15 px increments `opposed_frames`; flag at ≥30 frames (~2 s). One flag per track.
 **Files** `services/vision_worker/wrongway.py` (new) · **API** `GET /vision/flags` · **DB** `behavior_flags` · **UI** flag list
 **Tests** SN-122 · **Acceptance** A wrong-way vehicle raises exactly one flag; a full normal run raises zero · **Demo** E
 
 ### SN-077 · Flag persistence and resolution
-**Component** Vision · **Priority** P1 · **Depends** SN-076, SN-070 · **Status** `NOT_STARTED`
+**Component** Vision · **Priority** P1 · **Depends** SN-076, SN-070 · **Status** `DONE`
 **Description** Flags are suspicion, not evidence, and must carry that state in the data model.
 **Implementation** Persist with `UNVERIFIED`, measured evidence and the mandatory note "Behaviour flagged for review. Not a confirmed violation." `PATCH /vision/flags/{id}/resolve` is operator-only and audited.
 **Files** `backend/app/api/vision.py` (new), `models/vision.py` · **API** flags list + resolve · **DB** `behavior_flags` · **UI** UNVERIFIED badge, resolve/dismiss
 **Tests** SN-122, SN-124 · **Acceptance** No automated path sets `CONFIRMED`; every resolution writes an audit row · **Demo** E
 
 ### SN-078 · CV panel with real detections
-**Component** Frontend · **Priority** P1 · **Depends** SN-004, SN-072 · **Status** `NOT_STARTED`
+**Component** Frontend · **Priority** P1 · **Depends** SN-004, SN-072 · **Status** `DONE`
 **Description** Complete the replacement started in SN-004 with real data.
 **Implementation** Render boxes from `GET /vision/detections/latest`, real confidence, real FPS from the worker, blurred frames, flag side-list.
 **Files** `frontend/dashboard/src/components/CommandCenter/ComputerVisionFeed.tsx` · **API** `/vision/*` · **DB** none · **UI** real CV panel
 **Tests** SN-121 · **Acceptance** Every box traces to a `cv_detections` row · **Demo** all
 
 ### SN-079 · Restricted-zone editor
-**Component** Vision · **Priority** P2 · **Depends** SN-075 · **Status** `NOT_STARTED`
+**Component** Vision · **Priority** P2 · **Depends** SN-075 · **Status** `DONE`
 **Description** No-parking detection needs operator-drawn polygons with optional active windows.
 **Implementation** `POST /vision/zones`, `GET /vision/zones` plus a polygon drawing tool on the CV panel.
 **Files** `backend/app/api/vision.py`, `frontend/.../ComputerVisionFeed.tsx` · **API** two endpoints · **DB** `no_parking_zones` · **UI** polygon editor
 **Tests** SN-122 · **Acceptance** A drawn zone persists and is used by the detector · **Demo** optional
 
 ### SN-080 · No-parking detector
-**Component** Vision · **Priority** P2 · **Depends** SN-071, SN-079 · **Status** `NOT_STARTED`
+**Component** Vision · **Priority** P2 · **Depends** SN-071, SN-079 · **Status** `DONE`
 **Description** Must not fire on vehicles queued at a red signal — without queue context the detector is worthless.
 **Implementation** Dwell timer inside an active zone (displacement < 20 px over 30 s, threshold 180 s) with `queue_context()` suppression when the controlling signal is or was recently red, or when ≥3 tracks are stationary in line.
 **Files** `services/vision_worker/parking.py` (new) · **API** flags · **DB** `behavior_flags` · **UI** flag list
 **Tests** SN-122 · **Acceptance** A vehicle queued at red raises no flag; a genuinely parked one does · **Demo** optional
 
 ### SN-081 · Rash-driving proxies
-**Component** Vision · **Priority** P2 · **Depends** SN-071 · **Status** `NOT_STARTED`
+**Component** Vision · **Priority** P2 · **Depends** SN-071 · **Status** `DONE`
 **Description** Kinematic proxies are measurable; intent is not.
 **Implementation** Speed vs. limit, lane-change rate, lateral variance, headway, harsh braking — thresholds per [13-computer-vision.md §7](13-computer-vision.md). Output `DANGEROUS_DRIVING` flags only.
 **Files** `services/vision_worker/behavior.py` (new) · **API** flags · **DB** `behavior_flags` · **UI** flag list
 **Tests** SN-122 · **Acceptance** Flags record which proxies exceeded which thresholds · **Demo** optional
 
 ### SN-082 · Language policy enforcement
-**Component** Testing · **Priority** **P0** · **Depends** SN-077 · **Status** `NOT_STARTED`
+**Component** Testing · **Priority** **P0** · **Depends** SN-077 · **Status** `DONE`
 **Description** The distinction between "AI detected a pattern" and "an offence is proven" must live in code, not only in slides.
 **Implementation** `tests/test_language_policy.py` greps the whole repository (code, docs, UI strings, comments) and fails on guilt/violation phrasing from AI alone, and on any intoxication-detection claim (see SN-096).
 **Files** `tests/test_language_policy.py` (new) · **API** none · **DB** none · **UI** wording constrained
@@ -1055,16 +1070,17 @@ persisted to Postgres from the bridge process. `tests/critical/` (35) and
 **Files** `tests/critical/test_10_citizen_advisory.py` (new) · **Mutation** allow publish without approval → fails · **Acceptance** gate asserted · **Demo** D
 
 ### SN-121 · Vision pipeline
-**Component** Testing · **Priority** P1 · **Depends** SN-069…SN-074 · **Status** `NOT_STARTED`
+**Component** Testing · **Priority** P1 · **Depends** SN-069…SN-074 · **Status** `DONE`
 **Description** Vision must be a real telemetry source, and PCU must be single-sourced.
 **Implementation** `test_11_vision_pipeline.py`: worker on a committed 10 s fixture clip writes readings with `source='vision'`; PCU matches the SUMO path for the same mix; stopping the worker yields the unavailable state; blurring applied.
 **Files** `tests/critical/test_11_vision_pipeline.py` (new), fixture clip · **Mutation** restore the duplicate PCU table → fails · **Acceptance** cross-producer PCU equality asserted · **Demo** all
 
 ### SN-122 · Incident gate and wrong-way
-**Component** Testing · **Priority** P1 · **Depends** SN-076, SN-090, SN-092, SN-094 · **Status** `NOT_STARTED`
+**Component** Testing · **Priority** P1 · **Depends** SN-076, SN-090, SN-092, SN-094 · **Status** `DONE`
 **Description** Both human gates plus the wrong-way true/false positive behaviour.
 **Implementation** `test_12_incident_gate.py`: incident raised from measured indicators; publish-warning before confirmation returns 409; no automation before confirmation; wrong-way TP on the fixture manoeuvre and TN over a full normal run.
 **Files** `tests/critical/test_12_incident_gate.py` (new) · **Mutation** allow publish-warning on UNVERIFIED → fails · **Acceptance** both gates and both CV cases asserted · **Demo** E
+
 
 ### SN-123 · Provenance contract
 **Component** Testing · **Priority** **P0** · **Depends** SN-008, SN-009 · **Status** `NOT_STARTED`
@@ -1260,3 +1276,5 @@ persisted to Postgres from the bridge process. `tests/critical/` (35) and
 | 2026-09-11 | SN-041 (live refresh wiring) | 35% | `routing_telemetry.py` (new) feeds live JunctionTelemetry into the routing graph every 10s via a background task; `corridor_topology.py` gained a `telemetry_approach` map to translate junction-approach telemetry to edges. Verified by a new unit test exercising the real translation path end to end. |
 | 2026-09-11 | SN-041 … SN-050 (live SUMO verification) | 41% | Phase 3 genuinely closed. Fixed `seed_city.py`/`initialize_from_db()`'s junction-naming mismatch (real corridor junctions now seeded alongside the decorative ones). Then ran the actual SUMO bridge against `corridor.sumocfg` with a seeded demo Postgres+Redis and activated a real corridor end to end — which surfaced and required fixing three more real bugs: a broken `traci.trafficlight` import that silently defeated every real capture despite a live connection; a relative/absolute time-base mismatch producing a nonsensical 511s recovery figure; and a flush-ordering race dropping the final resolved recovery value before it reached the DB. After all fixes, a live corridor genuinely completed with real capture/restore, `recovery_s=2` from real samples, and `cross_street_max_red_s=34`, all persisted to Postgres from the bridge process. All 12 Phase 3 SN items now `DONE`; 66/161 (41%). |
 | 2026-09-11 | SN-051 … SN-068, SN-113, SN-119, SN-120 | 54% | Phase 4 (Event Management + Citizen Advisory) implemented same-day, marked DONE, then re-audited before starting Phase 5 — same pattern as Phase 3. Found and fixed: `build_advisory()`'s INCIDENT/EMERGENCY/FORECAST branches were fully fabricated (hardcoded delay ranges, invented place names like "Ring Road via outer bypass" which doesn't exist in this network) on the public-facing advisory surface — EMERGENCY now uses real Phase 3 EmergencyEvent data, INCIDENT/FORECAST now honestly refuse; `run_event_whatif()` silently capped demand injection at 100 vehicles regardless of true assumed trips, undisclosed — cap raised to a documented 2000 and the real assumed-vs-injected counts are now always reported; hardcoded edge lengths and a fixed W_entry→E_exit alternative-route span with a hardcoded "LOW" congestion band, both replaced with real corridor-topology/measured data; EventsPage.tsx recomputed demand client-side in violation of the spec's explicit "no numeric value may originate in the browser," and offered a link-closure picker with entirely fictional edge ids (e.g. "E_J3_J4" — J4 doesn't exist) that silently no-op'd every closure/injection — both fixed. Two showstopper bugs found only by a real DB/SUMO run: every event Enum column defaulted to a native Postgres enum type the migration never created, so event creation 500'd on every attempt; and a third occurrence of the tz-aware/naive datetime mismatch (documented in CLAUDE.md's Phase 2 addendum) broke every advisory publish. A closure could also fatally crash the whole SUMO run by invalidating a base-demand vehicle's route; fixed with `--ignore-route-errors`. After every fix, the full lifecycle was run for real: event creation → two real SUMO runs → approve → publish → audit rows → unauthenticated public advisory, all genuinely working. 66/66 critical tests passing; 87/161 (54%). |
+| 2026-09-11 | SN-069 … SN-082, SN-121, SN-122 | 64% | Phase 5 (Computer Vision) implemented and fully verified end-to-end. Single canonical PCU engine (SN-074) wired across vision, SUMO bridge, SUMO env, and traffic API, resolving alias inconsistencies and omitting duplicate factor tables; Alembic migration 005 and models for cv_detections (hypertable, 72h retention), behavior_flags (UNVERIFIED default, strict human gate requiring operator action for CONFIRMED), and no_parking_zones; VisionWorker with 15 fps decode, YOLOv8n inference every 3rd frame, IoU/centroid tracker with stable IDs across frames (SN-071), canonical JunctionTelemetry emission with source=VISION (SN-072), explicit unavailable failure behavior with no synthetic detections (SN-073); camera calibration and lane heading configurations (SN-075); wrong-way detector with sustained opposition threshold (>135° over >=30 frames) with verified TP on opposing manoeuvre and TN on normal traffic (SN-076); operator resolution endpoint with mandatory audit logging (SN-077); CV feed panel with real detections, live worker FPS, side-list of suspicion flags, and restricted-zone drawing tool with zero Math.random (SN-078, SN-079); no-parking detector with signal red and platoon queue context suppression (SN-080); rash-driving kinematic proxies (SN-081); repo-wide language policy enforcement rejecting guilt/violation claims by AI alone and intoxication-detection claims (SN-082, SN-096); critical tests test_11_vision_pipeline.py and test_12_incident_gate.py passing with 100% assertions. 77 critical tests passing. 103/161 (64%). |
+

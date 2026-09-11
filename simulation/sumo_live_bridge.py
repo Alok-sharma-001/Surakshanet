@@ -41,6 +41,7 @@ from shared.constants import (
     DataSource,
     DEMO_SEED,
     PCU_FACTORS,
+    compute_pcu,
     REDIS_CHANNELS,
     MQTT_JUNCTION_TELEMETRY_TOPIC,
 )
@@ -415,12 +416,10 @@ class SumoLiveBridge:
                                     try:
                                         v_type = traci.vehicle.getTypeID(v)
                                         breakdown[v_type] = breakdown.get(v_type, 0) + 1
-                                        pcu += PCU_FACTORS.get(v_type, 1.0)
                                         accum_wait += float(traci.vehicle.getAccumulatedWaitingTime(v))
                                     except Exception:
                                         pass
-                                if v_count > 0 and pcu == 0.0:
-                                    pcu = v_count * 1.0
+                                pcu = compute_pcu(breakdown) if breakdown else (v_count * 1.0 if v_count > 0 else 0.0)
 
                                 approaches.append(ApproachTelemetry(
                                     direction=dir_code,

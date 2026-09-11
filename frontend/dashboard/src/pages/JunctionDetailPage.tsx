@@ -22,7 +22,7 @@ interface ApproachData {
   icon: React.ElementType;
   pcu: number;
   queueLength: number;
-  speed: number;
+  speed: number | null; // null when no producer resolved a speed this window (e.g. an uncalibrated vision camera) — never a fabricated 0
 }
 
 const DIRECTION_META: Record<ApproachDirection, { label: string; icon: React.ElementType }> = {
@@ -87,7 +87,7 @@ export default function JunctionDetailPage() {
             icon: DIRECTION_META[a.direction as ApproachDirection]?.icon ?? ArrowDown,
             pcu: a.pcu,
             queueLength: a.queue_length_m,
-            speed: a.mean_speed_kmh,
+            speed: a.mean_speed_kmh ?? null,
           }))
         );
       }
@@ -246,7 +246,7 @@ export default function JunctionDetailPage() {
                     <span className="text-xs text-slate-500 ml-1">PCU</span>
                   </div>
                   <div className="text-right text-xs font-mono text-slate-600">
-                    <div>Spd: {app.speed.toFixed(1)} km/h</div>
+                    <div>Spd: {app.speed !== null ? `${app.speed.toFixed(1)} km/h` : 'unavailable'}</div>
                     <div>Que: {app.queueLength.toFixed(0)}m</div>
                   </div>
                 </div>

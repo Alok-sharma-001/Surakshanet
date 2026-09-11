@@ -42,6 +42,45 @@ PCU_FACTORS: Dict[str, float] = {
     'lcv': 1.5
 }
 
+
+def compute_pcu(vehicle_counts: Dict[str, Any]) -> float:
+    """Computes total PCU from vehicle counts using the canonical PCU_FACTORS (SN-074).
+    Normalizes common class aliases so all callers (vision, SUMO, MQTT, API) produce identical results.
+    """
+    alias_map = {
+        "cars": "car",
+        "motorcycles": "motorcycle",
+        "two_wheelers": "motorcycle",
+        "two_wheeler": "motorcycle",
+        "tw": "motorcycle",
+        "bike": "motorcycle",
+        "bikes": "motorcycle",
+        "buses": "bus",
+        "trucks": "truck",
+        "auto_rickshaws": "auto_rickshaw",
+        "autorickshaw": "auto_rickshaw",
+        "auto_rickshaw": "auto_rickshaw",
+        "auto": "auto_rickshaw",
+        "autos": "auto_rickshaw",
+        "bicycles": "bicycle",
+        "cycle": "bicycle",
+        "cycles": "bicycle",
+        "lcvs": "lcv",
+    }
+    pcu = 0.0
+    for key, count in vehicle_counts.items():
+        if count is None:
+            continue
+        try:
+            cnt = float(count)
+        except (ValueError, TypeError):
+            continue
+        norm_key = alias_map.get(str(key).lower(), str(key).lower())
+        factor = PCU_FACTORS.get(norm_key, 1.0)
+        pcu += cnt * factor
+    return round(pcu, 2)
+
+
 SIGNAL_CONSTRAINTS: Dict[str, int] = {
     'min_green_s': 10,
     'max_green_s': 60,
