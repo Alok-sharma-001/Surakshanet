@@ -83,10 +83,17 @@ check "SN-004 no client-side data fabrication" \
 check "no decorative length assertions in tests" \
   grep -rn 'assert len("' tests/
 
-# An assertion that passes whether or not auth works tests nothing. These now
-# use the `authed_client` fixture and assert the real status.
+# An assertion mixing one 2xx code with one 4xx/5xx code passes whether or
+# not the feature actually works, so it tests nothing. Originally just
+# "(200, 401)" (auth), but the identical anti-pattern resurfaced later as
+# "(200, 429)" (rate limiting): a 429 proves nothing about whether the
+# endpoint is genuinely public, so a broken-but-always-rate-limited endpoint
+# would pass identically to a working one. Generalized to any 2xx paired
+# with any 4xx/5xx in one status_code tuple — deliberately narrower than
+# "any second number", since e.g. "(200, 201)" or "(200, 204)" pairs two
+# legitimately-ambiguous *success* codes and is not this anti-pattern.
 check "no decorative status-code assertions in tests" \
-  grep -rn "status_code in (200, 401)" tests/
+  grep -rnE "status_code in \(200, ?[45][0-9]{2}\)" tests/
 
 # --- Gaps found after Phase 0 was declared complete -------------------------
 

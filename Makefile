@@ -1,4 +1,4 @@
-.PHONY: help build up down dev test test-backend test-frontend test-e2e lint format migrate smoke clean
+.PHONY: help build up down dev test test-critical test-unit test-integration test-sumo test-backend test-frontend test-e2e lint format migrate smoke clean
 
 help:
 	@echo "Surakshanet ITS - Development & Operations Commands"
@@ -44,7 +44,7 @@ test-sumo:
 	@if [ -f .venv/bin/pytest ]; then .venv/bin/pytest tests/critical/ -m sumo -v; else pytest tests/critical/ -m sumo -v; fi
 
 test-backend:
-	docker exec surakshanet-backend pytest tests/test_alerts.py tests/test_auth.py tests/test_marl.py tests/test_ml.py tests/test_pcu_engine.py tests/test_routing.py tests/test_rtsp_worker.py tests/test_signal_bridge.py tests/test_signals.py tests/test_spatial.py tests/test_traffic.py -v
+	docker exec surakshanet-backend pytest tests/test_alerts.py tests/test_antigravity.py tests/test_auth.py tests/test_marl.py tests/test_ml.py tests/test_pcu_engine.py tests/test_routing.py tests/test_rtsp_worker.py tests/test_signal_bridge.py tests/test_signals.py tests/test_spatial.py tests/test_traffic.py -v
 
 test-frontend:
 	npm --prefix frontend/dashboard test

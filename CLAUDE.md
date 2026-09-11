@@ -429,6 +429,35 @@ execution surface is `docs/CHECKLIST.md` (SN-001…SN-150, grouped into Phases 0
     documented as a workaround elsewhere in this file). `scripts/check_phase0_regressions.sh`
     extended to 29 checks, all pass. `ruff check app/` clean. `npx tsc --noEmit` and a full
     `npm run build` clean, all chunks within the 500 KB budget. `npm test` (Vitest): 6/6.
+  - **2026-09-12 follow-up — deeper Phase 8 pass, on explicit request to check it specifically**:
+    read all 17 files in `tests/critical/` (16 SN-numbered suites; `test_13_incident_system.py`
+    and `test_13_provenance.py` share the "13" number) including the six pre-existing files this
+    pass's earlier audit hadn't opened (`test_03_public_exposure.py`, `test_04_telemetry_ingest.py`,
+    `test_05_sumo_telemetry.py`, `test_07_safety_envelope.py`, `test_09_event_whatif.py`,
+    `test_15_ab_reproducibility.py`) — all five genuinely call the real functions under test (no
+    mocking of the thing being verified) with correctly hand-computed expected values;
+    `test_05`/`test_15`'s `@pytest.mark.sumo` tests were confirmed to actually execute real SUMO
+    runs (not skip) and complete in under 8 seconds total, live-verifying byte-identical
+    determinism at a fixed seed. Found and fixed one real regression: `test_03_public_exposure.py`
+    had reintroduced the exact "decorative status-code assertion" anti-pattern this project's own
+    §16 convention already prohibits — `assert response.status_code in (200, 429)` for
+    `/public/advisories` and `/public/status` passes identically whether the endpoint is genuinely
+    public or is broken in some unrelated way that happens to also 429, proving nothing about the
+    actual claim being tested. Fixed to clear the shared Redis rate-limit key first and assert a
+    strict `== 200`; `scripts/check_phase0_regressions.sh`'s existing guard for this class (which
+    only matched the literal string `"status_code in (200, 401)"`, missing this `429` variant
+    entirely) generalized to catch any 2xx-paired-with-4xx/5xx status-code tuple, narrow enough to
+    not flag legitimate all-success ambiguity like `(200, 201)` or `(200, 204)` found elsewhere in
+    the test suite. Also found and fixed two Makefile gaps (pre-existing, not new to this phase):
+    `.PHONY` was missing the four new `test-critical`/`test-unit`/`test-integration`/`test-sumo`
+    targets Phase 8 added; `test-backend`'s hardcoded file list omitted `test_antigravity.py` (a
+    real, substantial pre-existing suite), silently under-covering that one specific `make` target
+    even though a plain `pytest backend/tests/` directory run already picked it up correctly.
+    Confirmed the new CI step (`.github/workflows/ci.yml`, "Run Critical Path Test Suite") is
+    correctly wired to real `timescaledb`/`redis` services and runs after a real `alembic upgrade
+    head` step — meaning the migration-collision bugs fixed above would have failed this exact CI
+    step had they shipped unfixed. Re-ran the full suite after all fixes: 259 passed, 1 honest
+    skip. `scripts/check_phase0_regressions.sh`: 29/29. `ruff check app/` clean.
 - **Phases 9–10:** NOT_STARTED (Phase 9: Demo Hardening, Phase 10: Final Acceptance).
 
 **2026-09-11 addendum — full pre-Phase-5 audit of the "Antigravity" copilot/agent-tools

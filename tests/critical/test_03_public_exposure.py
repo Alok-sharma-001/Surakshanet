@@ -67,20 +67,41 @@ def setup_db_override():
     app.dependency_overrides.pop(get_db, None)
 
 
+def _clear_public_rate_limit():
+    """Clears the shared Redis IP rate-limit counter so these tests assert a
+    real, single expected 200 rather than accepting a rate-limited response
+    too — accepting either would pass identically whether the endpoint is
+    genuinely public or is actually broken in some other way that happens to
+    also trigger the limiter. Same "passes whether or not the feature
+    actually works" anti-pattern this project's own conventions already
+    prohibit for an unauthenticated-vs-401 pairing.
+    """
+    try:
+        import redis
+        from app.config import get_settings
+        settings = get_settings()
+        r = redis.from_url(settings.REDIS_URL, decode_responses=True)
+        for key in r.scan_iter("rate_limit:public:*"):
+            r.delete(key)
+    except Exception:
+        pass
+
+
 def test_public_endpoint_unauthenticated():
     """Verifies that /public/advisories is accessible without Authorization header."""
+    _clear_public_rate_limit()
     client = TestClient(app)
     # Explicitly verify request contains NO authorization header
     response = client.get("/public/advisories")
-    # Response must not be 401 Unauthorized or 403 Forbidden
-    assert response.status_code in (200, 429)
+    assert response.status_code == 200
 
 
 def test_public_status_unauthenticated():
     """Verifies that /public/status is accessible without Authorization header."""
+    _clear_public_rate_limit()
     client = TestClient(app)
     response = client.get("/public/status")
-    assert response.status_code in (200, 429)
+    assert response.status_code == 200
 
 
 def test_serialize_public_advisory_zero_leaks():
