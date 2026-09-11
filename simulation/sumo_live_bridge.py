@@ -115,6 +115,7 @@ class SumoLiveBridge:
         self.corridor_route_length_m: Dict[str, float] = {}  # event_id -> total route length
         self._last_db_write: Dict[str, float] = {}          # event_id -> last wall-clock write time
         self._last_delay_sample_sec = -1
+        self._recovery_final_flushed: set = set()  # event_ids whose resolved recovery has been written once
         self.db_dsn = self._build_db_dsn()
         self.db_conn = None
 
@@ -340,7 +341,7 @@ class SumoLiveBridge:
                 #    "everything green" override.
                 if self.green_wave_ctrl.active_events:
                     self._step_active_corridors(sim_time_s)
-                if should_sample_delay and any(self.green_wave_ctrl._recovery_open.values()):
+                if should_sample_delay and self.green_wave_ctrl._recovery_open:
                     self._flush_open_recovery_events()
 
                 # 1. Collect live vehicle data from TraCI
@@ -605,7 +606,10 @@ class SumoLiveBridge:
         if not event_id or event_id not in self.green_wave_ctrl.active_events:
             return
         sim_time_s = float(traci.simulation.getTime())
-        self.green_wave_ctrl.deactivate(event_id, end_time=sim_time_s)
+        started_at = self.green_wave_ctrl.active_events[event_id]["started_at"]
+        self.green_wave_ctrl.deactivate(
+            event_id, end_time=sim_time_s - started_at, absolute_time=sim_time_s
+        )
         self._flush_corridor_state(event_id, force=True)
         logger.info(f"✅ [SUMO SIMULATION] Corridor {event_id} deactivated on request; signals restored.")
 
@@ -628,7 +632,9 @@ class SumoLiveBridge:
                     # Vehicle already arrived (removed from the simulation) or was never inserted.
                     progress = 1.0
 
-            self.green_wave_ctrl.step_corridor(event_id, elapsed_s=elapsed_s, vehicle_progress=progress)
+            self.green_wave_ctrl.step_corridor(
+                event_id, elapsed_s=elapsed_s, vehicle_progress=progress, absolute_time=sim_time_s
+            )
             self._flush_corridor_state(event_id)
 
             if event_id not in self.green_wave_ctrl.active_events:
@@ -644,10 +650,19 @@ class SumoLiveBridge:
                 logger.info(f"✅ [SUMO SIMULATION] Corridor {event_id} completed; all junctions restored and verified.")
 
     def _flush_open_recovery_events(self):
-        """Writes evolving post-close recovery series to the DB as real samples keep arriving."""
+        """Writes evolving post-close recovery series to the DB as real samples keep arriving.
+
+        Flushes once more even after a corridor's recovery resolves (still_open
+        flips to False the instant it resolves) — otherwise the final
+        recovery_s/series never reaches the DB, since resolution and
+        de-registration happen in the same instant inside green_wave.py.
+        """
         for event_id, still_open in list(self.green_wave_ctrl._recovery_open.items()):
             if still_open:
                 self._flush_corridor_state(event_id, force=True)
+            elif event_id not in self._recovery_final_flushed:
+                self._flush_corridor_state(event_id, force=True)
+                self._recovery_final_flushed.add(event_id)
 
     def _flush_corridor_state(self, event_id: str, force: bool = False):
         """Writes the corridor's current real state to Redis (live UI) and the DB (throttled)."""

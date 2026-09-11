@@ -13,6 +13,7 @@ from app.models.signal import SignalPlan, SignalMode
 from app.models.traffic import TrafficReading
 from app.models.alert import Alert, AlertType, AlertSeverity
 from app.models.network import NetworkLink
+from shared.corridor_topology import CORRIDOR_JUNCTIONS, CORRIDOR_EDGES
 
 settings = get_settings()
 
@@ -198,12 +199,39 @@ async def seed_city():
         db.add_all(alerts)
         await db.commit()
 
+        # Seed the real SUMO corridor junctions (SN-041) — distinct from the
+        # decorative CITY_JUNCTIONS above. RoutingService.initialize_from_db()
+        # builds graph nodes keyed by Junction.name, and network_links below
+        # references junction ids like "J0"/"W_entry" — without these rows,
+        # a DB-built graph would share zero node names with its own edges.
+        res_corridor = await db.execute(
+            select(Junction).where(Junction.name.in_([j["id"] for j in CORRIDOR_JUNCTIONS]))
+        )
+        existing_corridor = {j.name for j in res_corridor.scalars().all()}
+        if len(existing_corridor) < len(CORRIDOR_JUNCTIONS):
+            print("Seeding real SUMO corridor junctions for the routing graph...")
+            corridor_junctions = [
+                Junction(
+                    id=uuid.uuid4(),
+                    name=cj["id"],
+                    latitude=cj["lat"],
+                    longitude=cj["lon"],
+                    num_approaches=4,
+                    is_active=True,
+                    created_at=datetime.utcnow(),
+                )
+                for cj in CORRIDOR_JUNCTIONS
+                if cj["id"] not in existing_corridor
+            ]
+            db.add_all(corridor_junctions)
+            await db.commit()
+            print(f"Created {len(corridor_junctions)} corridor junctions ({', '.join(j.name for j in corridor_junctions)}).")
+
         # Seed network links for A* routing (SN-041)
         res_links = await db.execute(select(NetworkLink))
         existing_links = res_links.scalars().all()
         if len(existing_links) == 0:
             print("Seeding corridor network links for A* routing...")
-            from app.services.routing_service import CORRIDOR_EDGES
             links = [
                 NetworkLink(
                     id=uuid.uuid4(),
@@ -222,7 +250,7 @@ async def seed_city():
             await db.commit()
             print(f"Created {len(links)} network links for routing engine.")
 
-        print("City topology, baseline readings, active alerts, and network links successfully seeded!")
+        print("City topology, baseline readings, active alerts, corridor junctions, and network links successfully seeded!")
 
 if __name__ == "__main__":
     asyncio.run(seed_city())

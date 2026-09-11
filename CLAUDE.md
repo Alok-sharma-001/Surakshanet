@@ -37,70 +37,63 @@ execution surface is `docs/CHECKLIST.md` (SN-001…SN-150, grouped into Phases 0
     A/B evaluation executed via `POST /ab/run` and persisted to TimescaleDB table `ab_runs`
     (run `8646126e-da0b-4602-ae0c-fdd8e0b2af3b`, Webster: 726.84s delay vs MARL: 826.32s delay,
     honest delta reporting).
-- **Phase 3 (Emergency corridor, SN-039…SN-050 + SN-118):** IN_PROGRESS, not DONE — a
-  2026-09-11 re-audit found this phase had been marked DONE while still fabricating exactly
-  the class of output Phase 0 exists to eliminate; those defects are now fixed at the code
-  level and covered by rewritten tests, but the fix has **not been exercised against a live
-  SUMO instance** in any session — do not re-mark DONE until it has:
-  - **Fixed, verified by unit/critical tests:** `GreenWaveController.capture_program()`
-    ([green_wave.py](ml/emergency/green_wave.py)) no longer fabricates a plausible default
-    4-phase program when no real TraCI capture is possible — it returns `None`, and the
-    caller leaves that junction on its normal cycle (`capture_unavailable` state) rather than
-    pre-empting on a fake plan. `restore_and_verify_program()` no longer force-overrides a
-    failed verification to `True` — failure is now reported as `restore_failed`, not silently
-    claimed as success. Recovery measurement (SN-048) no longer generates a curve from a
-    hardcoded baseline (`19.4`) and a closed-form exponential formula — `recovery_s` stays
-    `null` until real samples (`GreenWaveController.ingest_delay_sample`) actually resolve it,
-    and `/emergency/{id}/recovery` reports this honestly instead of a placeholder number.
-    Origin/destination no longer default to a fabricated "District Hospital" coordinate when
-    omitted — both are `None` unless the caller actually supplies them, and `resolve_route()`
-    requires both origin and destination (not just destination) before computing an A* route.
-  - **Fixed, integration NOT independently verified end-to-end:** the corridor's rolling
-    activation/capture/restore previously ran only in the API process (no TraCI access) while
-    `simulation/sumo_live_bridge.py` still ran its own disconnected blanket
-    "every-light-to-phase-0" pre-emption — meaning none of SN-043/044/045/046 ever reached the
-    live simulation regardless of what the API-side code did. The bridge now drives
-    `GreenWaveController` directly (the only process with a live TraCI connection),
-    dynamically builds the ambulance's SUMO route from `shared/corridor_topology.py`'s real
-    edge ids, feeds real per-junction cross-street delay samples every 5 sim-seconds
-    (continuously, so a genuine pre-activation baseline exists), and writes corridor state
-    back to `emergency_events` directly via `psycopg2` (mirroring how `control_service`
-    writes `control_decisions` from its own process) since the API process's own
-    `GreenWaveController` instance never sees the bridge's progress. `backend/app/api/emergency.py`'s
-    GET endpoints now read live status from that DB row rather than the API process's
-    never-updated in-memory copy. **None of this has been run against the actual
-    `corridor.sumocfg` simulation** — no environment with TimescaleDB + Redis + SUMO reachable
-    was available in the session that made this fix, so `docs/CHECKLIST.md`'s acceptance
-    criteria (junctions visibly propagate in the SUMO GUI, exact post-corridor program
-    equality, recovery chart populates from a real run) are unverified. Do this before
-    trusting the phase.
-  - Frontend `EmergencyPage.tsx` updated to render the now-honest states (`recovery_s: null`
-    while unresolved, `baseline_available: false` when no pre-activation sample exists) instead
-    of assuming a number is always present.
-  - `grep -rn "mock_plan\|DEL-CP-01"` across `ml/`, `backend/` still returns nothing.
-  - Checklist progress claim from the reverted-DONE edit (66/161, 41%) is not reliable — SN-039,
-    SN-040, SN-049 are genuinely verified by tests; SN-041…SN-048, SN-050 need the live
-    run above before they're truthfully `DONE`. SN-118's own job — the mutation-checked test
-    file — is complete and passing (proven by the fact it fails against the old fabricating
-    code and passes against the fix), so it stays `DONE`.
-  - **2026-09-11, later same day — SN-041 live refresh wired and verified:**
-    `backend/app/services/routing_telemetry.py` (new) caches each JunctionTelemetry message the
-    existing Redis-to-WebSocket bridge (`main.py::redis_pubsub_bridge`) already receives on
-    `REDIS_CHANNELS["traffic"]`, and a background task started in `lifespan()` calls
-    `RoutingService.update_live_telemetry()` from that cache every 10s. `shared/corridor_topology.py`
-    gained a `telemetry_approach` mapping per edge (which real junction + compass-direction
-    approach a vehicle traveling that edge arrives via) so junction-level telemetry translates to
-    the right edge. Verified by `tests/test_routing_engine_phase3.py::test_live_junction_telemetry_reroutes_within_one_refresh`
-    (feeds a real JunctionTelemetry payload, asserts the route changes) — not exercised against a
-    live SUMO run, same caveat as the rest of Phase 3 above.
-    **Found but deliberately left unfixed:** `RoutingService.initialize_from_db()` builds graph
-    nodes keyed by `junctions.name`, but `backend/scripts/seed_city.py` only ever seeds decorative
-    Delhi/Bengaluru junctions into that table — never the real corridor nodes (`J0`..`J3` etc.)
-    `network_links` actually references. If `initialize_from_db()` were ever called, it would
-    silently build a graph whose nodes share nothing with its own edges. Left un-called rather
-    than guessed at, since fixing it means deciding how the decorative city-display junctions and
-    the real simulated corridor relate — a product call, not one to make while wiring telemetry.
-    See `docs/CHECKLIST.md`'s SN-041 entry for the full detail.
+- **Phase 3 (Emergency corridor, SN-039…SN-050 + SN-118):** DONE, genuinely live-verified. This
+  phase was marked DONE once already on 2026-09-11, re-audited the same day and found to be
+  fabricating capture/restore/recovery output while never reaching the live SUMO bridge, fixed,
+  and then actually run end-to-end against a real `corridor.sumocfg` simulation with a seeded
+  demo Postgres + Redis — which caught three *more* real bugs the unit tests couldn't see. Full
+  trail, oldest to newest:
+  - **Fabrication fixes** (`ml/emergency/green_wave.py`, `backend/app/api/emergency.py`):
+    `capture_program()` returns `None` instead of fabricating a plausible default program when
+    no real TraCI capture is possible — caller leaves that junction on its normal cycle
+    (`capture_unavailable`) rather than pre-empting on a fake plan. `restore_and_verify_program()`
+    no longer force-overrides a failed verification to `True` — reported as `restore_failed`.
+    Recovery measurement no longer generates a curve from a hardcoded baseline and a closed-form
+    formula — `recovery_s` stays `null` until real samples (`ingest_delay_sample`) resolve it.
+    Origin/destination no longer default to a fabricated coordinate when omitted.
+  - **Bridge integration** (`simulation/sumo_live_bridge.py`): previously ran its own disconnected
+    blanket "every-light-to-phase-0" pre-emption regardless of what the API-side code computed.
+    Now drives `GreenWaveController` directly (the only process with a live TraCI connection),
+    builds the ambulance's SUMO route from `shared/corridor_topology.py`'s real edge ids, feeds
+    real per-junction cross-street delay samples every 5 sim-seconds, and writes corridor state
+    to `emergency_events` directly via `psycopg2` (mirroring how `control_service` writes
+    `control_decisions` from its own process). `backend/app/api/emergency.py`'s GET endpoints
+    read that DB row instead of the API process's own never-updated in-memory copy.
+  - **SN-041 live-refresh wiring** (`backend/app/services/routing_telemetry.py`, new): caches
+    JunctionTelemetry the existing Redis-to-WebSocket bridge already receives, and a background
+    task in `lifespan()` calls `RoutingService.update_live_telemetry()` from it every 10s.
+    `shared/corridor_topology.py` gained a `telemetry_approach` map (which real junction +
+    compass-direction approach a vehicle traveling each edge arrives via) to translate
+    junction-level telemetry to edges.
+  - **`seed_city.py` / `initialize_from_db()` junction-naming mismatch, fixed**: real corridor
+    junctions (`J0`..`J3`, `W_entry`, `E_exit`, `N0`-`N3`, `S0`-`S3`) are now seeded as their own
+    `Junction` rows alongside the decorative Delhi/Bengaluru landmarks (both coexist; the
+    decorative ones simply have no `network_links` edges). `main.py`'s `lifespan()` now calls
+    `RoutingService.initialize_from_db()` at startup, falling back to the in-code corridor
+    topology when the DB isn't seeded yet.
+  - **Live SUMO run, 2026-09-11**: brought up `infra/docker-compose.demo.yml`'s timescaledb
+    (port 5433, avoiding a local port-5432 conflict with an unrelated container) + redis, seeded
+    fresh, ran `simulation/sumo_live_bridge.py --no-gui` against the real `corridor.sumocfg`, and
+    activated a real corridor via `POST /emergency/activate`. This surfaced three more real bugs,
+    all fixed: (1) `green_wave.py` was doing `import traci.trafficlight` — not a real importable
+    submodule in this TraCI client (it's a connection-time attribute) — so every real capture
+    attempt silently reported "no TraCI connection" even inside the bridge process that had a
+    live connection the whole time; fixed to `import traci` throughout, all five occurrences.
+    (2) Recovery measurement mixed the corridor's relative elapsed-time clock with the bridge's
+    absolute simulation clock (`ingest_delay_sample` samples on the absolute clock;
+    `deactivate()`'s `closed_at` was set from the relative one), producing a nonsensical 511s
+    recovery figure on the first live run; `deactivate()`/`step_corridor()` now take an explicit
+    `absolute_time` parameter for this. (3) A flush-ordering race dropped the final resolved
+    `recovery_s`/series from the DB entirely — `_recovery_open[event_id]` flips to `False` in the
+    same instant recovery resolves, and the bridge's flush guard excluded anything not `True`;
+    fixed with a one-shot final flush. After all three fixes, a live corridor genuinely completed
+    with real TraCI capture/restore ("all junctions restored and verified"), `recovery_s=2` from
+    a real 3-sample series, `cross_street_max_red_s=34`, all persisted to Postgres from the bridge
+    process — and `/routing/congestion` showed 16 of 34 edges with `source: "sumo"` and real
+    measured speeds, confirming SN-041's live refresh too.
+  - `grep -rn "mock_plan\|DEL-CP-01"` across `ml/`, `backend/` returns nothing.
+  - `tests/critical/` (35 tests) and `tests/test_routing_engine_phase3.py` (5 tests) pass after
+    every fix above. Checklist: all 12 Phase 3 SN items `DONE`; 66/161 (41%).
 - **Phases 4–10:** NOT_STARTED.
 
 **2026-09-11 addendum — Phase 2 re-audit findings, fixed, and one open limitation:**

@@ -55,7 +55,7 @@ class ProgramLogicCapture:
     def deserialize_logics(serialized_logics: List[Dict[str, Any]]) -> Any:
         """Reconstructs TraCI Logic objects when traci is available, else returns the raw structure."""
         try:
-            import traci.trafficlight
+            import traci
             deserialized = []
             for item in serialized_logics:
                 phases = []
@@ -377,7 +377,7 @@ class GreenWaveController:
             return captured
 
         try:
-            import traci.trafficlight
+            import traci
             logics = traci.trafficlight.getAllProgramLogics(junction_id)
             if not logics:
                 logger.warning(f"TraCI returned no program logics for junction {junction_id}; capture failed.")
@@ -427,7 +427,7 @@ class GreenWaveController:
             return False
 
         try:
-            import traci.trafficlight
+            import traci
             deserialized = ProgramLogicCapture.deserialize_logics(captured_data["logics"])
             if isinstance(deserialized, list) and deserialized and hasattr(deserialized[0], "phases"):
                 traci.trafficlight.setProgramLogic(junction_id, deserialized[0])
@@ -454,10 +454,18 @@ class GreenWaveController:
         elapsed_s: float,
         env: Any = None,
         vehicle_progress: Optional[float] = None,
+        absolute_time: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Periodic tick: activates/restores junctions on the rolling schedule,
 
         tracks cross-street red time, and feeds the recovery baseline.
+
+        `elapsed_s` is relative to this corridor's own start (what the ETA
+        schedule is expressed in). `absolute_time`, when the caller has one
+        (the bridge's own simulation clock), is threaded through to
+        `deactivate()` so recovery sampling — which is measured on that same
+        absolute clock via `ingest_delay_sample` — isn't compared against a
+        relative timestamp from a different time base.
         """
         if event_id not in self.active_events:
             return {"status": "error", "message": "Event not found"}
@@ -564,7 +572,7 @@ class GreenWaveController:
         all_passed = all(e["state"] in terminal_states for e in route_etas)
         if all_passed and event["status"] == "ACTIVE":
             logger.info(f"Corridor {event_id}: final junction passed. Deactivating and entering recovery measurement.")
-            self.deactivate(event_id, env=env, end_time=elapsed_s)
+            self.deactivate(event_id, env=env, end_time=elapsed_s, absolute_time=absolute_time)
 
         return self.get_corridor_status(event_id)
 
@@ -585,13 +593,28 @@ class GreenWaveController:
         self._apply_green_preemption(jid, env=env)
         logger.info(f"Corridor {event['id']}: rolling preemption activated at {jid} (ETA: {entry['eta_s']}s).")
 
-    def deactivate(self, event_id: str, env: Any = None, end_time: Optional[float] = None) -> Dict[str, Any]:
-        """Restores any remaining junctions, sets restored_at, and opens recovery measurement (SN-045, SN-048)."""
+    def deactivate(
+        self,
+        event_id: str,
+        env: Any = None,
+        end_time: Optional[float] = None,
+        absolute_time: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Restores any remaining junctions, sets restored_at, and opens recovery measurement (SN-045, SN-048).
+
+        `end_time` stamps `restored_at`/entry timestamps in the corridor's own
+        relative clock. `absolute_time` — the caller's real/simulation clock,
+        the same one `ingest_delay_sample` timestamps samples with — is what
+        recovery is measured against; it defaults to `end_time` when the
+        caller has only one clock (e.g. tests, or a caller with no separate
+        absolute time source).
+        """
         if event_id not in self.active_events:
             return {"status": "error", "message": "Event not found"}
 
         event = self.active_events[event_id]
         now = end_time if end_time is not None else time.time()
+        recovery_clock = absolute_time if absolute_time is not None else now
 
         for entry in event["route_etas"]:
             jid = entry["junction_id"]
@@ -608,7 +631,7 @@ class GreenWaveController:
 
         event["status"] = "COMPLETED"
         event["restored_at"] = now
-        event["recovery"]["closed_at"] = now
+        event["recovery"]["closed_at"] = recovery_clock
 
         del self.active_events[event_id]
         self.completed_events[event_id] = event
@@ -736,7 +759,7 @@ class GreenWaveController:
 
     def _apply_green_preemption(self, junction_id: str, env: Any = None):
         try:
-            import traci.trafficlight
+            import traci
             traci.trafficlight.setPhase(junction_id, 0)
             traci.trafficlight.setPhaseDuration(junction_id, self.green_hold_s)
         except ImportError:
@@ -749,7 +772,7 @@ class GreenWaveController:
 
     def _insert_compensating_phase(self, junction_id: str, env: Any = None):
         try:
-            import traci.trafficlight
+            import traci
             traci.trafficlight.setPhase(junction_id, 2)
             traci.trafficlight.setPhaseDuration(junction_id, 15.0)
         except ImportError:

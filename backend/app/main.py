@@ -102,7 +102,19 @@ async def lifespan(app: FastAPI):
     # 2. Start Redis-to-WebSocket live bridge
     bridge_task = asyncio.create_task(redis_pubsub_bridge())
 
-    # 3. Start the routing graph's live telemetry refresh loop (SN-041)
+    # 3. Build the routing graph from the DB when it's actually seeded with the
+    #    real corridor junctions/network_links (SN-041); falls back to the
+    #    in-code corridor topology otherwise (RoutingService.initialize_from_db
+    #    already does this internally).
+    try:
+        from app.database import async_session_factory
+        from app.services.routing_service import routing_service
+        async with async_session_factory() as _db:
+            await routing_service.initialize_from_db(_db)
+    except Exception as e:
+        print(f"Routing graph DB initialization skipped, using in-code corridor topology: {e}")
+
+    # 4. Start the routing graph's live telemetry refresh loop (SN-041)
     from app.services.routing_telemetry import periodic_routing_refresh
     routing_refresh_task = asyncio.create_task(periodic_routing_refresh())
 
