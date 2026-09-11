@@ -21,7 +21,6 @@ from app.database import get_db, async_session_factory
 from app.models.control import ABRun
 from services.control_service.ab_runner import (
     ABRunner,
-    compute_ab_improvement,
     generate_ab_statement,
     DEMO_SEED,
 )

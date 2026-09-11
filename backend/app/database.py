@@ -51,9 +51,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
-import asyncio
 import logging
-import os
 from alembic.config import Config
 from alembic import command
 

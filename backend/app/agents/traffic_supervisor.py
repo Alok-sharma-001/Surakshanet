@@ -20,7 +20,6 @@ from app.agent_tools.its_tools import (
     get_junction_status,
 )
 from app.agent_tools.safety_guardrails import (
-    validate_signal_plan_safety,
     enforce_safe_action_or_fallback,
 )
 

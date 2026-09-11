@@ -23,7 +23,6 @@ from shared.telemetry import (
     validate_telemetry,
     resolve_junction_uuid,
     TelemetryValidationError,
-    JunctionTelemetry,
 )
 
 logger = logging.getLogger(__name__)

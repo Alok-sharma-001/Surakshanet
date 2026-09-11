@@ -6,7 +6,7 @@ and 'what-if' action simulation for city traffic engineers.
 
 import json
 import logging
-from typing import Dict, Any, Optional
+from typing import Optional
 try:
     from fastapi import APIRouter, HTTPException, Depends
     from fastapi.responses import StreamingResponse
@@ -32,10 +32,8 @@ from app.config import get_settings
 from app.agents.traffic_supervisor import get_incident_commander_agent, ANTIGRAVITY_AVAILABLE
 from app.agents.incident_analyzer import analyze_junction_camera_snapshot, TrafficIncidentReport
 from app.agent_tools.its_tools import (
-    forecast_junction_traffic,
     clear_emergency_corridor,
     compute_optimal_reroute,
-    get_junction_status,
 )
 
 logger = logging.getLogger(__name__)

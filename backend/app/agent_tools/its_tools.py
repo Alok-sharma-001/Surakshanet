@@ -222,7 +222,6 @@ def compute_optimal_reroute(
         A dictionary containing the recommended route, estimated travel time in minutes,
         total distance in km, and list of avoided junctions.
     """
-    engine = _get_routing_engine()
     avoid_set = set(avoid_junction_ids or [])
 
     # Haversine distance helper
