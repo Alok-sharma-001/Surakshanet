@@ -44,12 +44,17 @@ def test_forecast_junction_traffic():
 
 
 def test_clear_emergency_corridor():
-    corridor = ["j-silkboard", "j-koramangala", "j-mg-road"]
+    # A real request through the shared EmergencyEvent/green-wave pathway never
+    # claims "ACTIVE" — actual pre-emption depends on a live SUMO bridge being
+    # connected, which this unit test does not have. It honestly reports
+    # "requested" plus whether the bridge was actually notified.
+    corridor = ["J0", "J1", "J2"]
     result = clear_emergency_corridor(corridor_junctions=corridor, vehicle_type="AMBULANCE", priority_level=1)
-    assert result["status"] == "ACTIVE"
+    assert result["status"] == "requested"
     assert result["priority_level"] == 1
     assert result["corridor"] == corridor
-    assert result["green_hold_seconds"] >= 30
+    assert "event_id" in result
+    assert "bridge_notified" in result
 
 
 def test_compute_optimal_reroute():
@@ -67,12 +72,13 @@ def test_compute_optimal_reroute():
 
 
 def test_query_nearby_junctions():
-    # Silk Board coordinates
+    # Queries the real junctions table (never a hardcoded landmark list) —
+    # these coordinates match the seeded "Bangalore Silk Board" junction.
     nearby = query_nearby_junctions(latitude=12.9176, longitude=77.6238, radius_meters=3000.0)
     assert isinstance(nearby, list)
     assert len(nearby) > 0
-    # Silk Board should be first (closest)
-    assert nearby[0]["id"] == "j-silkboard"
+    # The seeded junction at these exact coordinates should be first (closest)
+    assert nearby[0]["name"] == "Bangalore Silk Board"
     assert nearby[0]["distance_meters"] < 100.0
 
 
@@ -90,10 +96,25 @@ def test_broadcast_vms_advisory():
 
 
 def test_get_junction_status():
-    status = get_junction_status("j-hebbal")
-    assert status["junction_id"] == "j-hebbal"
-    assert status["current_pcu_per_hour"] > 0
+    # Queries the real junctions/traffic_readings/control_decisions tables for
+    # a seeded corridor junction. It must never report a plausible-looking
+    # fixed number when nothing has actually been measured — the demo DB has
+    # no simulation-generated readings for this junction, so an honest
+    # "no_recent_data" status with null fields is the CORRECT result here,
+    # not a failure.
+    status = get_junction_status("J0")
+    assert status["junction_name"] == "J0"
+    assert status["status"] in ("ok", "no_recent_data")
+    if status["status"] == "no_recent_data":
+        assert status["current_pcu"] is None
+    else:
+        assert status["current_pcu"] > 0
     assert "current_phase" in status
+
+
+def test_get_junction_status_unknown_junction_is_honest_not_found():
+    status = get_junction_status("j-does-not-exist")
+    assert status["status"] == "not_found"
 
 
 def test_safety_guardrails_validation_success():
@@ -184,14 +205,19 @@ async def client():
 
 @pytest.mark.asyncio
 async def test_copilot_simulate_action_api(client):
+    # This endpoint only requests the real emergency-corridor activation — it
+    # never fabricates a delay-reduction percentage or a "safety interlocks
+    # validated" claim nothing here actually checked.
     response = await client.post("/api/v1/copilot/simulate-action", json={
         "action_type": "PREEMPT_CORRIDOR",
-        "corridor_junctions": ["j-silkboard", "j-koramangala"]
+        "corridor_junctions": ["J0", "J1"]
     })
     assert response.status_code == 200
     data = response.json()
     assert data["simulation_type"] == "PREEMPTION_CORRIDOR_EVALUATION"
-    assert data["predicted_delay_reduction_pct"] > 0
+    assert "predicted_delay_reduction_pct" not in data
+    assert "safety_interlocks_validated" not in data
+    assert data["cabinet_details"]["status"] == "requested"
 
 
 @pytest.mark.asyncio
@@ -221,8 +247,13 @@ async def test_resilient_traffic_supervisor_tier3_fallback():
     result = await supervisor.decide_signal_action("j-silkboard", {"congestion": 0.85})
     assert result["tier"] == "tier_3_deterministic_webster"
     assert result["status"] == "FAILSAFE_ACTIVE"
-    assert result["phase_string"] == "rrrrGGGggrrrrGGGgg"
+    # No hardcoded phase string — a real per-topology TraCI phase string is
+    # not knowable from this unit test's context, so applied_plan (the real
+    # Webster ns_green/ew_green/cycle plan) is what is asserted instead.
+    assert "phase_string" not in result
     assert "applied_plan" in result
+    assert "ns_green" in result["applied_plan"]
+    assert "ew_green" in result["applied_plan"]
 
 
 def test_supervisor_config_structure():
@@ -257,23 +288,54 @@ def test_traffic_incident_report_schema():
 async def test_copilot_simulate_action_direct():
     req = SimulationActionRequest(
         action_type="PREEMPT_CORRIDOR",
-        corridor_junctions=["j-silkboard", "j-koramangala"]
+        corridor_junctions=["J0", "J1"]
     )
     result = await simulate_action(req)
     assert result["simulation_type"] == "PREEMPTION_CORRIDOR_EVALUATION"
-    assert result["predicted_delay_reduction_pct"] > 0
-    assert result["safety_interlocks_validated"] is True
+    # No independent evaluation runs here, so no unvalidated predictive/safety
+    # claims may appear in the response.
+    assert "predicted_delay_reduction_pct" not in result
+    assert "safety_interlocks_validated" not in result
+
+
+@pytest.mark.asyncio
+async def test_copilot_simulate_action_direct_requires_corridor():
+    # A corridor must never be assumed from a hardcoded default.
+    req = SimulationActionRequest(action_type="PREEMPT_CORRIDOR")
+    try:
+        from fastapi import HTTPException
+    except ImportError:
+        from app.api.copilot import HTTPException
+    with pytest.raises(HTTPException) as exc_info:
+        await simulate_action(req)
+    assert exc_info.value.status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_copilot_simulate_detour_direct():
     req = SimulationActionRequest(
         action_type="DETOUR_REROUTE",
+        origin_lat=12.9176, origin_lon=77.6238,
+        dest_lat=12.9756, dest_lon=77.6066,
         avoid_junctions=["j-tin-factory"]
     )
     result = await simulate_action(req)
     assert result["simulation_type"] == "DYNAMIC_REROUTE_EVALUATION"
     assert "j-tin-factory" in result["avoided_chokepoints"]
+
+
+@pytest.mark.asyncio
+async def test_copilot_simulate_detour_direct_requires_coordinates():
+    # An origin/destination must never be silently defaulted to a fixed
+    # location — that was the exact anti-pattern SN-049 exists to eliminate.
+    req = SimulationActionRequest(action_type="DETOUR_REROUTE", avoid_junctions=["j-tin-factory"])
+    try:
+        from fastapi import HTTPException
+    except ImportError:
+        from app.api.copilot import HTTPException
+    with pytest.raises(HTTPException) as exc_info:
+        await simulate_action(req)
+    assert exc_info.value.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -310,9 +372,11 @@ async def test_resilient_traffic_supervisor_safety_interlock_override():
     result = await supervisor.decide_signal_action("j-silkboard", unsafe_context)
     assert result["status"] == "SAFETY_INTERLOCK_OVERRIDE"
     assert result["tier"] == "tier_3_deterministic_webster"
-    assert result["phase_string"] == "rrrrGGGggrrrrGGGgg"
+    # No hardcoded phase string — see test_resilient_traffic_supervisor_tier3_fallback.
+    assert "phase_string" not in result
     assert len(result["violations_prevented"]) >= 2
     assert "applied_plan" in result
+    assert "ns_green" in result["applied_plan"]
 
 
 def test_supervisor_policies_and_budgets():
@@ -334,17 +398,18 @@ def test_resilient_supervisor_tools_bound():
 
 
 @pytest.mark.asyncio
-async def test_copilot_analyze_snapshot_demo_fallback(client):
-    """Validates snapshot endpoint behavior for simulated/sample CCTV camera frames."""
+async def test_copilot_analyze_snapshot_demo_path_is_not_special_cased(client):
+    """A snapshot path that merely LOOKS like a demo/sample path must never be
+    fabricated into a plausible-looking incident report — a missing file is a
+    404 regardless of what its path contains. (This endpoint previously had a
+    special-cased "demo path" fallback that fabricated a fake NORMAL_FLOW
+    report; that fallback has been removed as a fabrication defect.)
+    """
     response = await client.post("/api/v1/copilot/analyze-snapshot", json={
         "image_path": "/opt/surakshanet/cctv_snapshots/frame_0842.jpg",
         "junction_id": "j-silkboard"
     })
-    assert response.status_code == 200
-    data = response.json()
-    assert data["junction_id"] == "j-silkboard"
-    assert data["incident_type"] in ["NORMAL_FLOW", "COLLISION"]
-    assert "recommended_vms_advisory" in data
+    assert response.status_code == 404
 
 
 @pytest.mark.asyncio

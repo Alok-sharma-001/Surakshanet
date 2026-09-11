@@ -37,6 +37,30 @@ class TrafficIncidentReport(BaseModel):
     tactical_recommendation: str = Field(description="Arterial routing or signal adjustment instructions")
 
 
+def _analysis_unavailable_report(junction_id: str, reason: str) -> "TrafficIncidentReport":
+    """Honest 'we could not analyze this frame' report.
+
+    Never claims NORMAL_FLOW / a high confidence when no real inspection
+    happened — that would be a confidently wrong "all clear" exactly when the
+    vision pipeline is the thing that failed, which is the one moment an
+    operator most needs to know the automated check didn't run. Mirrors
+    ml/vision/vehicle_detector.py's VisionUnavailable convention: report
+    unavailable, never invent a detection.
+    """
+    return TrafficIncidentReport(
+        junction_id=junction_id,
+        incident_type="ANALYSIS_UNAVAILABLE",
+        severity="UNKNOWN",
+        confidence=0.0,
+        lanes_blocked=0,
+        estimated_pcu_impact=0.0,
+        requires_emergency_dispatch=False,
+        dispatch_units=[],
+        recommended_vms_advisory="SIGNAL STATUS UNAVAILABLE",
+        tactical_recommendation=f"Automated camera analysis unavailable ({reason}) — requires manual operator review."
+    )
+
+
 async def analyze_junction_camera_snapshot(
     image_path: str,
     junction_id: str = "j-incident-site",
@@ -44,19 +68,7 @@ async def analyze_junction_camera_snapshot(
 ) -> TrafficIncidentReport:
     """Analyzes a junction camera snapshot frame using Gemini Multimodal understanding."""
     if not ANTIGRAVITY_AVAILABLE:
-        # Fallback structured report when SDK runtime is not installed
-        return TrafficIncidentReport(
-            junction_id=junction_id,
-            incident_type="NORMAL_FLOW",
-            severity="NORMAL",
-            confidence=0.9,
-            lanes_blocked=0,
-            estimated_pcu_impact=0.0,
-            requires_emergency_dispatch=False,
-            dispatch_units=[],
-            recommended_vms_advisory="ROADS CLEAR - DRIVE SAFELY",
-            tactical_recommendation="Maintain standard adaptive signal plan."
-        )
+        return _analysis_unavailable_report(junction_id, "google.antigravity SDK not installed")
 
     if not os.path.exists(image_path):
         raise FileNotFoundError(f"CCTV camera snapshot not found at path: '{image_path}'")
@@ -106,17 +118,6 @@ async def analyze_junction_camera_snapshot(
             else:
                 raise ValueError(f"Failed to parse structured output from multimodal model: {data}")
     except Exception as err:
-        logger.warning(f"Multimodal vision model unavailable or encountered error ({err}). Returning structured fallback.")
-        return TrafficIncidentReport(
-            junction_id=junction_id,
-            incident_type="NORMAL_FLOW",
-            severity="NORMAL",
-            confidence=0.85,
-            lanes_blocked=0,
-            estimated_pcu_impact=0.0,
-            requires_emergency_dispatch=False,
-            dispatch_units=[],
-            recommended_vms_advisory="ROADS CLEAR - DRIVE SAFELY",
-            tactical_recommendation=f"Multimodal agent degraded to fallback ({type(err).__name__}). Maintain adaptive cycle."
-        )
+        logger.warning(f"Multimodal vision model unavailable or encountered error ({err}). Reporting unavailable.")
+        return _analysis_unavailable_report(junction_id, f"{type(err).__name__}: {err}")
 

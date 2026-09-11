@@ -14,6 +14,26 @@ from typing import Dict, Any, List, Optional
 logger = logging.getLogger(__name__)
 
 
+async def _run_and_dispose(coro):
+    """Awaits `coro`, then disposes the shared async engine's connection pool.
+
+    The engine's pool holds asyncpg connections bound to the event loop that
+    created them. Each _run_async call below runs on a brand-new loop
+    (asyncio.run()), so without this, a second tool call in the same process
+    would try to reuse a connection from the first (now-closed) loop and fail
+    with "Future ... attached to a different loop". Disposing forces a clean
+    reconnect on the next call instead.
+    """
+    try:
+        return await coro
+    finally:
+        try:
+            from app.database import engine
+            await engine.dispose()
+        except Exception:
+            pass
+
+
 def _run_async(coro):
     """Runs an async coroutine from this module's synchronous tool functions.
 
@@ -26,10 +46,10 @@ def _run_async(coro):
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(coro)
+        return asyncio.run(_run_and_dispose(coro))
     import concurrent.futures
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, coro).result()
+        return pool.submit(asyncio.run, _run_and_dispose(coro)).result()
 
 
 async def _fetch_recent_readings(junction_id: str, limit: int = 36) -> List[Dict[str, Any]]:
@@ -64,31 +84,7 @@ async def _fetch_recent_readings(junction_id: str, limit: int = 36) -> List[Dict
         return [{"timestamp": ts, "pcu_value": pcu} for ts, pcu in reversed(rows)]
 
 # Global singletons for ML engines to avoid reload overhead
-_green_wave_controller = None
-_routing_engine = None
 _forecaster = None
-
-
-def _get_green_wave_controller():
-    global _green_wave_controller
-    if _green_wave_controller is None:
-        try:
-            from ml.emergency.green_wave import GreenWaveController
-            _green_wave_controller = GreenWaveController(lookahead=3, green_hold_s=30)
-        except Exception as e:
-            logger.warning(f"Could not initialize GreenWaveController: {e}")
-    return _green_wave_controller
-
-
-def _get_routing_engine():
-    global _routing_engine
-    if _routing_engine is None:
-        try:
-            from ml.routing.routing_engine import RoutingEngine
-            _routing_engine = RoutingEngine()
-        except Exception as e:
-            logger.warning(f"Could not initialize RoutingEngine: {e}")
-    return _routing_engine
 
 
 def _get_forecaster():
@@ -150,12 +146,122 @@ def forecast_junction_traffic(junction_id: str) -> Dict[str, Any]:
     }
 
 
+async def _activate_emergency_corridor_async(
+    corridor_junctions: List[str],
+    vehicle_type: str,
+    priority_level: int,
+) -> Dict[str, Any]:
+    """Requests a real emergency corridor through the same pathway POST /emergency/activate
+
+    uses: persists a real EmergencyEvent row and publishes the real Redis command the
+    live SUMO bridge (simulation/sumo_live_bridge.py) listens for. Whether any junction
+    is actually pre-empted depends on that bridge genuinely being connected — this
+    function only ever reports what it actually did (persisted + published a real
+    request), never a fabricated "corridor cleared" claim.
+    """
+    import json as _json
+    import redis.asyncio as aioredis
+    from app.database import async_session_maker
+    from app.config import get_settings
+    from app.models.alert import EmergencyEvent, EmergencyPriority, EmergencyVehicleType, EmergencyStatus
+    from app.services.routing_service import routing_service
+    from ml.emergency.green_wave import green_wave_ctrl
+    from shared.constants import REDIS_CHANNELS, DataSource
+    from datetime import datetime
+
+    settings = get_settings()
+    event_uuid = uuid.uuid4()
+    event_id = str(event_uuid)
+
+    priority_map = {1: "CRITICAL", 2: "HIGH", 3: "MEDIUM"}
+    priority_str = priority_map.get(priority_level, "CRITICAL")
+    try:
+        priority_enum = EmergencyPriority[priority_str]
+    except KeyError:
+        priority_enum = EmergencyPriority.CRITICAL
+    try:
+        vehicle_enum = EmergencyVehicleType[vehicle_type.upper()]
+    except KeyError:
+        vehicle_enum = EmergencyVehicleType.AMBULANCE
+
+    # Real ETA schedule from the shared corridor controller, seeded with real
+    # per-link lengths/speeds — the same computation POST /emergency/activate uses.
+    result = green_wave_ctrl.activate(
+        event_id=event_id,
+        priority=priority_str,
+        vehicle_type=vehicle_type,
+        route_junction_ids=corridor_junctions,
+        edge_lengths_m=routing_service.get_edge_lengths_m(corridor_junctions),
+        link_speeds=routing_service.get_edge_speeds_kmh(corridor_junctions),
+    )
+
+    async with async_session_maker() as db:
+        event = EmergencyEvent(
+            id=event_uuid,
+            priority=priority_enum,
+            vehicle_type=vehicle_enum,
+            route=corridor_junctions,
+            route_etas=result.get("route_etas"),
+            clearance_time_s=result.get("clearance_time_s"),
+            status=EmergencyStatus.ACTIVE,
+            started_at=datetime.utcnow(),
+        )
+        db.add(event)
+        await db.commit()
+
+    published = False
+    try:
+        redis = aioredis.from_url(settings.REDIS_URL)
+        payload = {
+            "type": "EMERGENCY_ACTIVATED",
+            "event_id": event_id,
+            "vehicle_id": f"AMB-{event_id[:4].upper()}",
+            "priority": priority_str,
+            "vehicle_type": vehicle_type,
+            "route": corridor_junctions,
+            "route_etas": result.get("route_etas"),
+            "clearance_time_s": result.get("clearance_time_s"),
+            "activation_policy": "rolling",
+            "source": DataSource.SUMO.value,
+        }
+        await redis.publish(REDIS_CHANNELS["emergency"], _json.dumps(payload))
+        await redis.aclose()
+        published = True
+    except Exception as e:
+        logger.warning(f"Could not publish emergency activation to Redis: {e}")
+
+    return {
+        "status": "requested",
+        "event_id": event_id,
+        "corridor": corridor_junctions,
+        "priority_level": priority_level,
+        "vehicle_type": vehicle_type,
+        "route_etas": result.get("route_etas"),
+        "clearance_time_s": result.get("clearance_time_s"),
+        "bridge_notified": published,
+        "message": (
+            "Corridor activation request persisted and published; actual pre-emption "
+            "depends on a live SUMO bridge picking it up. Poll GET /emergency/{event_id}/corridor "
+            "for real junction-by-junction status."
+            if published else
+            "Corridor activation request persisted, but the live SUMO bridge could not be "
+            "notified (Redis unreachable) — no junction has actually been pre-empted."
+        ),
+    }
+
+
 def clear_emergency_corridor(
     corridor_junctions: List[str],
     vehicle_type: str = "AMBULANCE",
     priority_level: int = 1
 ) -> Dict[str, Any]:
-    """Activates preemption green-wave along a sequence of junctions for an approaching emergency vehicle.
+    """Requests preemption green-wave along a sequence of junctions for an approaching emergency vehicle.
+
+    This goes through the same real pathway POST /emergency/activate uses (real
+    ETA computation, a real persisted EmergencyEvent row, and a real Redis
+    notification to the live SUMO bridge) — it never fabricates a "corridor
+    cleared" result. Whether junctions are actually pre-empted depends on a
+    live bridge being connected; check via GET /emergency/{event_id}/corridor.
 
     Args:
         corridor_junctions: Ordered list of junction IDs along the emergency route.
@@ -163,43 +269,20 @@ def clear_emergency_corridor(
         priority_level: Priority level (1 = Highest, 2 = Medium, 3 = Low).
 
     Returns:
-        A dictionary with the corridor activation status, preemption hold duration,
-        and list of preempted junctions.
+        A dictionary with the real activation request status, event_id for
+        follow-up polling, and whether the live bridge was actually notified.
     """
-    event_id = f"GW-{int(time.time())}-{uuid.uuid4().hex[:6]}"
-    controller = _get_green_wave_controller()
-
-    if controller:
-        try:
-            result = controller.activate(
-                event_id=event_id,
-                priority=f"P{priority_level}",
-                vehicle_type=vehicle_type,
-                route_junction_ids=corridor_junctions
-            )
-            return {
-                "status": "ACTIVE",
-                "event_id": event_id,
-                "corridor": corridor_junctions,
-                "priority_level": priority_level,
-                "vehicle_type": vehicle_type,
-                "green_hold_seconds": controller.green_hold_s,
-                "active_lookahead_junctions": result.get("event", {}).get("active_junctions", corridor_junctions[:3]),
-                "message": f"Green wave corridor successfully cleared across {len(corridor_junctions)} junctions."
-            }
-        except Exception as e:
-            logger.error(f"Error activating green wave controller: {e}")
-
-    return {
-        "status": "ACTIVE",
-        "event_id": event_id,
-        "corridor": corridor_junctions,
-        "priority_level": priority_level,
-        "vehicle_type": vehicle_type,
-        "green_hold_seconds": 30,
-        "active_lookahead_junctions": corridor_junctions[:3],
-        "message": f"Preemption triggered for {vehicle_type} along corridor."
-    }
+    try:
+        return _run_async(_activate_emergency_corridor_async(corridor_junctions, vehicle_type, priority_level))
+    except Exception as e:
+        logger.error(f"Error requesting emergency corridor activation: {e}")
+        return {
+            "status": "error",
+            "corridor": corridor_junctions,
+            "priority_level": priority_level,
+            "vehicle_type": vehicle_type,
+            "message": f"Corridor activation request failed: {e}",
+        }
 
 
 def compute_optimal_reroute(
@@ -211,6 +294,11 @@ def compute_optimal_reroute(
 ) -> Dict[str, Any]:
     """Computes optimal, congestion-aware detour routing between two geographic points, avoiding specified junctions.
 
+    Runs the real A* routing engine (the same one backing /routing/* and the
+    event what-if alternative-route engine) over the live-refreshed corridor
+    graph — never a distance-formula estimate. Returns an honest error if no
+    path exists rather than inventing a plausible-looking one.
+
     Args:
         origin_lat: Origin latitude coordinate.
         origin_lon: Origin longitude coordinate.
@@ -219,37 +307,95 @@ def compute_optimal_reroute(
         avoid_junction_ids: Optional list of junction IDs with active incidents/gridlock to bypass.
 
     Returns:
-        A dictionary containing the recommended route, estimated travel time in minutes,
-        total distance in km, and list of avoided junctions.
+        A dictionary containing the real measured route, travel time in minutes,
+        total distance in km, and list of avoided junctions — or an honest
+        "no path found" status if the routing graph has none.
     """
+    from app.services.routing_service import routing_service
+
     avoid_set = set(avoid_junction_ids or [])
+    engine = routing_service.engine
 
-    # Haversine distance helper
-    def haversine(lat1, lon1, lat2, lon2):
-        r = 6371.0
-        phi1, phi2 = math.radians(lat1), math.radians(lat2)
-        dphi = math.radians(lat2 - lat1)
-        dlambda = math.radians(lon2 - lon1)
-        a = math.sin(dphi / 2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2)**2
-        return 2 * r * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    penalties: Dict[Any, float] = {}
+    if avoid_set:
+        for u in engine.graph:
+            for v in engine.graph[u]:
+                if u in avoid_set or v in avoid_set:
+                    penalties[(u, v)] = 9999.0
 
-    direct_dist = round(haversine(origin_lat, origin_lon, destination_lat, destination_lon), 2)
-    # Estimated average urban detour speed (km/h)
-    detour_speed = 32.0
-    detour_factor = 1.18 if avoid_set else 1.05
-    estimated_distance = round(direct_dist * detour_factor, 2)
-    estimated_time_min = round((estimated_distance / detour_speed) * 60, 1)
+    baseline = engine.find_route((origin_lat, origin_lon), (destination_lat, destination_lon), profile="citizen")
+    result = engine.find_route(
+        (origin_lat, origin_lon), (destination_lat, destination_lon),
+        profile="citizen", penalties=penalties or None,
+    )
+
+    if "error" in result or not result.get("path"):
+        return {
+            "status": "NO_ROUTE_FOUND",
+            "origin": {"lat": origin_lat, "lon": origin_lon},
+            "destination": {"lat": destination_lat, "lon": destination_lon},
+            "avoided_junctions": list(avoid_set),
+            "advisory": "No route could be computed between these coordinates on the current routing graph.",
+        }
+
+    actually_avoided = [j for j in avoid_set if j not in result["path"]]
+    baseline_time = baseline.get("eta_minutes") if "error" not in baseline else None
+    savings_min = (
+        round(baseline_time - result["eta_minutes"], 1)
+        if baseline_time is not None and baseline_time > result["eta_minutes"]
+        else 0.0
+    )
 
     return {
         "status": "COMPUTED",
         "origin": {"lat": origin_lat, "lon": origin_lon},
         "destination": {"lat": destination_lat, "lon": destination_lon},
-        "avoided_junctions": list(avoid_set),
-        "total_distance_km": estimated_distance,
-        "estimated_travel_time_min": estimated_time_min,
-        "congestion_savings_min": round(estimated_time_min * 0.35, 1) if avoid_set else 0.0,
-        "advisory": f"Detour routes traffic around {len(avoid_set)} congested intersection(s)."
+        "route_text": result.get("route_text"),
+        "avoided_junctions": actually_avoided,
+        "total_distance_km": result["distance_km"],
+        "estimated_travel_time_min": result["eta_minutes"],
+        "congestion_level": result.get("congestion_level"),
+        "stale": result.get("stale", False),
+        "congestion_savings_min": savings_min,
+        "advisory": (
+            f"Route avoids {len(actually_avoided)} requested junction(s)."
+            if actually_avoided else "Direct route used; no detour was necessary or possible."
+        ),
+        "source": "sumo",
     }
+
+
+def _haversine_m(lat1, lon1, lat2, lon2):
+    r = 6371000.0
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    return 2 * r * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+async def _query_nearby_junctions_async(latitude: float, longitude: float, radius_meters: float) -> List[Dict[str, Any]]:
+    from sqlalchemy import select
+    from app.database import async_session_maker
+    from app.models.junction import Junction
+
+    async with async_session_maker() as db:
+        result = await db.execute(select(Junction).where(Junction.is_active.is_(True)))
+        junctions = result.scalars().all()
+
+    nearby = []
+    for j in junctions:
+        dist = _haversine_m(latitude, longitude, j.latitude, j.longitude)
+        if dist <= radius_meters:
+            nearby.append({
+                "id": str(j.id),
+                "name": j.name,
+                "lat": j.latitude,
+                "lon": j.longitude,
+                "distance_meters": round(dist, 1),
+            })
+    nearby.sort(key=lambda x: x["distance_meters"])
+    return nearby
 
 
 def query_nearby_junctions(
@@ -257,7 +403,11 @@ def query_nearby_junctions(
     longitude: float,
     radius_meters: float = 1500.0
 ) -> List[Dict[str, Any]]:
-    """Performs a spatial search to locate junctions and traffic sensors within a radius of coordinates.
+    """Performs a spatial search to locate real junctions within a radius of coordinates.
+
+    Queries the actual `junctions` table — never a hardcoded list — so results
+    reflect whatever is genuinely seeded, not a fixed set of Bangalore
+    landmarks unrelated to this deployment's data.
 
     Args:
         latitude: Center latitude coordinate.
@@ -265,37 +415,39 @@ def query_nearby_junctions(
         radius_meters: Search radius in meters (default: 1500m).
 
     Returns:
-        A list of nearby junctions with their IDs, names, coordinates, and distance from center.
+        A list of real nearby junctions with their IDs, names, coordinates,
+        and distance from center — empty if none are within range.
     """
-    # Canonical arterial junctions in Bangalore ITS network
-    known_junctions = [
-        {"id": "j-silkboard", "name": "Silk Board Junction", "lat": 12.9176, "lon": 77.6238, "status": "CONGESTED"},
-        {"id": "j-mg-road", "name": "MG Road & Brigade Junction", "lat": 12.9756, "lon": 77.6066, "status": "MODERATE"},
-        {"id": "j-hebbal", "name": "Hebbal Flyover Junction", "lat": 13.0358, "lon": 77.5970, "status": "CONGESTED"},
-        {"id": "j-marathahalli", "name": "Marathahalli Bridge Junction", "lat": 12.9562, "lon": 77.7011, "status": "HEAVY"},
-        {"id": "j-tin-factory", "name": "Tin Factory Junction", "lat": 12.9942, "lon": 77.6663, "status": "SEVERE"},
-        {"id": "j-koramangala", "name": "Sony World Koramangala", "lat": 12.9345, "lon": 77.6265, "status": "MODERATE"},
-    ]
+    try:
+        return _run_async(_query_nearby_junctions_async(latitude, longitude, radius_meters))
+    except Exception as e:
+        logger.warning(f"query_nearby_junctions DB lookup failed: {e}")
+        return []
 
-    def haversine_m(lat1, lon1, lat2, lon2):
-        r = 6371000.0
-        phi1, phi2 = math.radians(lat1), math.radians(lat2)
-        dphi = math.radians(lat2 - lat1)
-        dlambda = math.radians(lon2 - lon1)
-        a = math.sin(dphi / 2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2)**2
-        return 2 * r * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
-    nearby = []
-    for j in known_junctions:
-        dist = haversine_m(latitude, longitude, j["lat"], j["lon"])
-        if dist <= radius_meters:
-            j_copy = dict(j)
-            j_copy["distance_meters"] = round(dist, 1)
-            nearby.append(j_copy)
+async def _broadcast_vms_advisory_async(
+    junction_id: str, message_line_1: str, message_line_2: str, duration_minutes: int
+) -> Dict[str, Any]:
+    # Reuses the same in-memory VMS store /routing/vms/broadcast writes to and
+    # /routing/vms/active + /routing/vms/history read from, so a message
+    # published here genuinely shows up on the real VMS surfaces — never a
+    # claim of "PUBLISHED" with no actual side effect.
+    from app.api.routing import vms_broadcasts
 
-    # Sort by distance
-    nearby.sort(key=lambda x: x["distance_meters"])
-    return nearby
+    line1 = message_line_1.upper()[:20]
+    line2 = message_line_2.upper()[:20]
+    broadcast = {
+        "id": f"vms-{int(time.time())}",
+        "panel_cluster": junction_id,
+        "line1": line1,
+        "line2": line2,
+        "priority": "HIGH",
+        "timestamp": time.time(),
+        "duration_minutes": duration_minutes,
+        "status": "ACTIVE",
+    }
+    vms_broadcasts.insert(0, broadcast)
+    return broadcast
 
 
 def broadcast_vms_advisory(
@@ -304,7 +456,11 @@ def broadcast_vms_advisory(
     message_line_2: str = "",
     duration_minutes: int = 15
 ) -> Dict[str, Any]:
-    """Dispatches dynamic detour text and safety warnings to roadside NTCIP 1203 Variable Message Signs (VMS).
+    """Dispatches dynamic detour text and safety warnings to Variable Message Signs (VMS).
+
+    Writes to the same VMS store the /routing/vms/* endpoints read from, so
+    this genuinely appears on GET /routing/vms/active — it does not just
+    return a "PUBLISHED" status with no real effect.
 
     Args:
         junction_id: Target junction ID where the VMS sign is located.
@@ -313,42 +469,106 @@ def broadcast_vms_advisory(
         duration_minutes: Active display duration before returning to default message.
 
     Returns:
-        A dictionary confirming VMS publication status, sign ID, text payload, and expiration timestamp.
+        A dictionary confirming the real broadcast record that was created.
     """
-    # Clean text to fit standard 20-character matrix display lines
-    line1 = message_line_1.upper()[:20]
-    line2 = message_line_2.upper()[:20]
-    expiry_time = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(time.time() + duration_minutes * 60))
+    try:
+        broadcast = _run_async(_broadcast_vms_advisory_async(junction_id, message_line_1, message_line_2, duration_minutes))
+        return {
+            "status": "PUBLISHED",
+            "broadcast_id": broadcast["id"],
+            "junction_id": junction_id,
+            "display_line_1": broadcast["line1"],
+            "display_line_2": broadcast["line2"],
+            "duration_minutes": duration_minutes,
+        }
+    except Exception as e:
+        logger.error(f"Failed to publish VMS advisory: {e}")
+        return {
+            "status": "error",
+            "junction_id": junction_id,
+            "message": f"Could not publish VMS advisory: {e}",
+        }
 
-    return {
-        "status": "PUBLISHED",
-        "sign_id": f"VMS-{junction_id.replace('j-', '').upper()}-01",
-        "junction_id": junction_id,
-        "display_line_1": line1,
-        "display_line_2": line2,
-        "duration_minutes": duration_minutes,
-        "expires_at": expiry_time,
-        "ntcip_protocol": "NTCIP_1203_v03"
-    }
+
+async def _get_junction_status_async(junction_id: str) -> Optional[Dict[str, Any]]:
+    from sqlalchemy import select, desc
+    from app.database import async_session_maker
+    from app.models.junction import Junction
+    from app.models.traffic import TrafficReading
+    from app.models.control import ControlDecision
+
+    async with async_session_maker() as db:
+        j_id = None
+        try:
+            j_id = uuid.UUID(junction_id)
+        except (ValueError, AttributeError, TypeError):
+            result = await db.execute(select(Junction).where(Junction.name.ilike(junction_id)))
+            row = result.scalars().first()
+            j_id = row.id if row else None
+
+        if j_id is None:
+            return None
+
+        junction = (await db.execute(select(Junction).where(Junction.id == j_id))).scalar_one_or_none()
+        if not junction:
+            return None
+
+        latest_reading = (
+            await db.execute(
+                select(TrafficReading)
+                .where(TrafficReading.junction_id == j_id)
+                .order_by(desc(TrafficReading.timestamp))
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+        latest_decision = (
+            await db.execute(
+                select(ControlDecision)
+                .where(ControlDecision.junction_id == j_id)
+                .order_by(desc(ControlDecision.timestamp))
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+        return {
+            "junction_id": str(junction.id),
+            "junction_name": junction.name,
+            "current_pcu": latest_reading.pcu_value if latest_reading else None,
+            "average_speed_kmh": latest_reading.avg_speed if latest_reading else None,
+            "queue_length": latest_reading.queue_length if latest_reading else None,
+            "reading_source": latest_reading.source if latest_reading else None,
+            "reading_timestamp": latest_reading.timestamp.isoformat() if latest_reading else None,
+            "current_phase": latest_decision.applied_phase if latest_decision else None,
+            "controller": latest_decision.controller if latest_decision else None,
+            "decision_timestamp": latest_decision.timestamp.isoformat() if latest_decision else None,
+        }
 
 
 def get_junction_status(junction_id: str) -> Dict[str, Any]:
-    """Retrieves live operational metrics (PCU flow, average speed, congestion level, current signal state).
+    """Retrieves real operational metrics for a junction from the database.
+
+    Queries the most recent traffic_readings row (PCU, speed, queue) and the
+    most recent control_decisions row (current phase, controller) for the
+    given junction — every field is `None` rather than a plausible-looking
+    number when no measurement exists yet, and results genuinely differ
+    between junctions since they come from that junction's own rows.
 
     Args:
-        junction_id: Identifier of the junction.
+        junction_id: UUID or name of the junction.
 
     Returns:
-        A dictionary with live PCU count, speed (km/h), congestion level, and active signal cycle details.
+        A dictionary with real measured PCU, speed, queue length, and signal
+        state, or an honest "not found"/"no data" result.
     """
-    return {
-        "junction_id": junction_id,
-        "current_pcu_per_hour": 1420.0,
-        "average_speed_kmh": 16.4,
-        "congestion_level": "HEAVY",
-        "current_phase": "PHASE_2_NORTH_SOUTH_GREEN",
-        "active_cycle_time_s": 120,
-        "queue_length_meters": 185.0,
-        "incident_reported": False,
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
-    }
+    try:
+        status_data = _run_async(_get_junction_status_async(junction_id))
+    except Exception as e:
+        logger.warning(f"get_junction_status DB lookup failed: {e}")
+        return {"junction_id": junction_id, "status": "error", "message": str(e)}
+
+    if status_data is None:
+        return {"junction_id": junction_id, "status": "not_found", "message": "No such junction in the database."}
+
+    status_data["status"] = "ok" if status_data.get("current_pcu") is not None else "no_recent_data"
+    return status_data

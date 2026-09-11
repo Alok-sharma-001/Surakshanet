@@ -17,7 +17,12 @@ the operator UI, and a native-Postgres-enum migration mismatch that made every e
 fail with a 500 in a real database — none of it caught by the 66 mocked unit tests. All fixed and
 then live-verified end to end (real event → two real SUMO runs → real approve/publish → real
 audit rows → real unauthenticated public advisory). See CLAUDE.md §1 for the full trail. 66
-critical tests passing.)*
+critical tests passing. A follow-up pre-Phase-5 audit (2026-09-11) additionally found and fixed
+the same fabrication class throughout the un-numbered "Antigravity" LLM-copilot subsystem
+(`backend/app/agents/`, `backend/app/agent_tools/`, `backend/app/api/copilot.py`) — not gated by
+any SN item, but present in the codebase and reviewed as part of confirming no fabricated content
+remains before Phase 5. See CLAUDE.md §1's 2026-09-11 addendum for the full trail; `backend/tests/`
+now passes 79/79 (1 honest skip) against a real Postgres for the first time.)*
 
 | Phase | Tasks | Done |
 |---|---|---|

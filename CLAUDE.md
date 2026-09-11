@@ -194,6 +194,122 @@ execution surface is `docs/CHECKLIST.md` (SN-001…SN-150, grouped into Phases 0
     clean. `ruff check app/` clean.
 - **Phases 5–10:** NOT_STARTED.
 
+**2026-09-11 addendum — full pre-Phase-5 audit of the "Antigravity" copilot/agent-tools
+subsystem, fixed and live-verified.** Requested explicitly ("check all errors/bugs up through
+Phase 4, no fabricated content, before Phase 5"). This subsystem (`backend/app/agents/`,
+`backend/app/agent_tools/`, `backend/app/api/copilot.py`) is an LLM-copilot layer on top of the
+already-hardened Phase 2-4 code, gated by an optional `google.antigravity` SDK dependency — and
+it turned out to be riddled with the same fabrication class already fixed twice elsewhere in this
+project. Found and fixed, file by file:
+- `backend/app/agent_tools/its_tools.py` — five of its tool functions were fabricating outright:
+  `compute_optimal_reroute` used a haversine-formula + fixed `1.18`/`1.05` detour-factor guess
+  instead of the real A* engine; `clear_emergency_corridor` instantiated a disconnected throwaway
+  `GreenWaveController(env=None)` and unconditionally returned `"status": "ACTIVE"` even on the
+  fallback branch where no controller could be created at all; `query_nearby_junctions` returned
+  a hardcoded list of 6 fictional Bangalore junctions with fabricated congestion strings;
+  `broadcast_vms_advisory` claimed `"PUBLISHED"` with zero actual side effect (never touched the
+  real `vms_broadcasts` store `/routing/vms/*` reads from); `get_junction_status` returned
+  **identical hardcoded numbers regardless of which junction was asked about**
+  (`current_pcu_per_hour: 1420.0`, `average_speed_kmh: 16.4`, always `"HEAVY"`). All five rewritten
+  to use real data sources: `compute_optimal_reroute` now calls the real `RoutingEngine.find_route`
+  twice (baseline + avoided) and returns `"NO_ROUTE_FOUND"` honestly when no path exists;
+  `clear_emergency_corridor` now goes through a new `_activate_emergency_corridor_async()` that
+  uses the real shared `green_wave_ctrl` singleton, persists a real `EmergencyEvent` row, and
+  publishes the real `EMERGENCY_ACTIVATED` Redis event — the same pathway `POST
+  /emergency/activate` uses — returning an honest `"status": "requested"` (never "ACTIVE": actual
+  pre-emption depends on a live bridge) plus `bridge_notified: bool`; `query_nearby_junctions`
+  queries the real `Junction` table; `broadcast_vms_advisory` appends to the real shared
+  `vms_broadcasts` list; `get_junction_status` queries the most recent real `TrafficReading` and
+  `ControlDecision` rows, returning `null` fields and `"status": "no_recent_data"` — never a
+  plausible-looking number — when nothing has actually been measured yet. Also found and removed:
+  two now-fully-dead helper functions (`_get_green_wave_controller`, `_get_routing_engine`) that
+  the fixes above made obsolete (the latter built a permanently-empty `RoutingEngine()` with no
+  graph). Also found and fixed a genuine, previously-undiscovered concurrency bug in `_run_async`:
+  each call created a brand-new event loop via `asyncio.run()`, but SQLAlchemy's module-level
+  async `engine` pools asyncpg connections bound to whichever loop created them — calling two
+  DB-touching tool functions back to back in the same process raised `Future ... attached to a
+  different loop`. Fixed with a new `_run_and_dispose()` wrapper that calls `engine.dispose()` in
+  a `finally` block after every call, forcing a clean reconnect next time.
+- `backend/app/agents/traffic_supervisor.py` — `ResilientTrafficSupervisor.decide_signal_action()`
+  had a hardcoded `"phase_string": "rrrrGGGggrrrrGGGgg"` in two fallback branches — the exact
+  "don't hardcode a phase string from memory" anti-pattern §8 already warns about, guessed rather
+  than derived from the actual topology. Confirmed via grep this function is not called from
+  anywhere else in the app (fully dead/unwired), but the fabricated content itself is still a
+  defect; removed both occurrences. `applied_plan` (the real Webster `ns_green`/`ew_green`/`cycle`
+  plan) is unaffected and remains the only signal-timing data this function returns.
+- `backend/app/agents/incident_analyzer.py` — the most severe finding of this pass:
+  `analyze_junction_camera_snapshot()`'s two fallback paths (vision SDK not installed; vision
+  model raised an exception) both returned `TrafficIncidentReport(incident_type="NORMAL_FLOW",
+  severity="NORMAL", confidence=0.9, recommended_vms_advisory="ROADS CLEAR - DRIVE SAFELY")` — a
+  **confidently wrong false-negative**: a real collision behind a vision-pipeline failure would be
+  reported to an operator as clear roads at 90% confidence. Fixed by adding a new
+  `_analysis_unavailable_report(junction_id, reason)` helper (mirrors
+  `ml/vision/vehicle_detector.py`'s `VisionUnavailable` convention) returning honest
+  `incident_type="ANALYSIS_UNAVAILABLE"`, `severity="UNKNOWN"`, `confidence=0.0`, and a
+  `tactical_recommendation` that says analysis is unavailable and manual review is required; both
+  call sites now use it.
+- `backend/app/api/copilot.py` — three more fabrication issues: (1) `analyze_snapshot` special-
+  cased any `image_path` containing `"demo"`/`"sample"`/`"mock"`/`"cctv_snapshots"` to return a
+  fabricated `NORMAL_FLOW`/`confidence=0.91`/"ALL CORRIDORS CLEAR" report instead of a 404 when the
+  file didn't exist — same fabrication class as above, wider trigger condition. Fixed: a missing
+  snapshot is always 404, demo-looking path or not. (2) `simulate_action`'s `PREEMPT_CORRIDOR`
+  branch hardcoded `predicted_delay_reduction_pct: 38.5`, `estimated_corridor_transit_seconds:
+  180`, `cross_street_queue_impact: "MODERATE (+12%...)"`, and — most seriously — asserted
+  `safety_interlocks_validated: True` with nothing in the endpoint actually validating anything.
+  Fixed: those unvalidated fields are gone; `estimated_corridor_transit_seconds` now comes from
+  the real `clearance_time_s` the fixed `clear_emergency_corridor` computes, and
+  `corridor_junctions` is now a required field (422 if omitted) rather than silently defaulting to
+  three hardcoded junction names. (3) `simulate_action`'s `DETOUR_REROUTE` branch silently
+  defaulted `origin_lat`/`origin_lon`/`dest_lat`/`dest_lon` to a fixed Bangalore coordinate when
+  the caller omitted them — the exact "never assume a route origin/destination" anti-pattern
+  SN-049 already eliminated elsewhere — and had a fabricated `4.5`-minute fallback for
+  `predicted_time_savings_minutes`. Fixed: all four coordinates are now required (422 if any is
+  missing), and the real `route_data.get("congestion_savings_min")` is returned with no invented
+  fallback.
+- `backend/app/agent_tools/safety_guardrails.py` was also reviewed in full and found to already be
+  genuinely correct — real safety-envelope math, real `WebsterFallback` integration, no
+  fabrication. No changes made.
+- **Stale tests found and fixed to match the real (now-honest) contracts, not reverted to match
+  the old fabricated ones**: `backend/tests/test_antigravity.py` had been written against the
+  fabricated behavior above and asserted things like `result["status"] == "ACTIVE"`,
+  `result["green_hold_seconds"] >= 30`, `data["predicted_delay_reduction_pct"] > 0`,
+  `result["phase_string"] == "rrrrGGGggrrrrGGGgg"`, and a 200 for the demo-path snapshot fallback
+  — i.e. it was a regression guard *for* the fabrication, not against it. All updated to assert the
+  real, honest values (`"requested"` status + `event_id`/`bridge_notified`; no
+  `predicted_delay_reduction_pct`/`safety_interlocks_validated` keys at all; `applied_plan`'s real
+  `ns_green`/`ew_green` instead of a phase string; 404 for any missing snapshot); two new tests
+  added for the newly-required-field 422s on `PREEMPT_CORRIDOR`/`DETOUR_REROUTE`, and one for the
+  honest `"not_found"` status on an unknown junction. `backend/tests/test_routing.py::
+  test_get_alternatives` was separately found to predate the Phase 3 SN-041/063
+  `/routing/alternatives` endpoint and asserted the old bare-list shape against the real
+  `{primary, alternatives, advice}` object — fixed to match the real (and correct) API contract.
+- **Live verification, 2026-09-11**: for the first time in this project's audit history, ran
+  `backend/tests/` (the original 11 backend test files, previously only exercised against a mocked
+  DB session in CI) against a real Postgres (`infra/docker-compose.demo.yml`'s timescaledb on
+  `localhost:5433`) and Redis. This is exactly how the ten test failures above were caught — every
+  one was `its_tools`/`copilot`/`traffic_supervisor` code genuinely persisting real
+  `EmergencyEvent` rows, querying the real `junctions`/`traffic_readings`/`control_decisions`
+  tables, and returning real UUIDs, confirmed via the SQL insert/select statements pytest printed.
+  Result: 79 passed, 1 honestly skipped (`test_rtsp_worker.py` — YOLO weights not installed on
+  this runner, a real and expected gap, not a defect). `tests/critical/` (66) +
+  `tests/test_routing_engine_phase3.py` (5) also pass unchanged.  `scripts/check_phase0_regressions.sh`
+  (26/26) passes. `ruff check app/` clean. `npx tsc --noEmit` clean. `npm run build` (full
+  production build, not just type-check — not previously run in any session) succeeds, all chunks
+  within the 500 KB budget (Invariant §13.9); two pre-existing `Circular chunk` warnings
+  (`vendor-misc`↔`vendor-core`, `vendor-three-render`↔`vendor-three-core`) are non-fatal build
+  warnings unrelated to this pass's changes, not yet investigated.
+- **Reviewed and found correct, no changes needed**: `POST /emergency/deactivate/{event_id}`
+  (`backend/app/api/emergency.py`) — an honest thin wrapper that only requests deactivation via
+  Redis and never itself claims the corridor is restored, matching the documented invariant that
+  only the bridge process (which holds the live TraCI connection) may report completion; RBAC on
+  Phase 4's mutating endpoints (`backend/app/api/events.py`) — confirmed `require_role("OPERATOR",
+  "ADMIN")`/`require_role("ADMIN")` dependencies genuinely gate event creation/approval/publish,
+  not just a docstring claim.
+- **Not yet exercised live in this pass** (lower-priority residual gaps, not known defects):
+  multiple simultaneous emergency corridors: RBAC-VIEWER-role rejection at the HTTP layer (only
+  confirmed via code inspection, not an actual login-as-VIEWER-and-get-403 run); public advisory
+  expiry/cleanup; public-endpoint rate limiting.
+
 **2026-09-11 addendum — Phase 2 re-audit findings, fixed, and one open limitation:**
 A deep re-verification (not just re-reading this file — actually exercising the running system)
 found that several Phase 2 items marked DONE were code-complete but not actually working

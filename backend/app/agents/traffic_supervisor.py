@@ -233,7 +233,6 @@ class ResilientTrafficSupervisor:
                     "source": DataSource.HEURISTIC.value,
                     "tier": "tier_3_deterministic_webster",
                     "junction_id": junction_id,
-                    "phase_string": "rrrrGGGggrrrrGGGgg",
                     "applied_plan": safety_eval.get("applied_plan"),
                     "status": "SAFETY_INTERLOCK_OVERRIDE",
                     "violations_prevented": safety_eval.get("violations_prevented"),
@@ -309,7 +308,6 @@ class ResilientTrafficSupervisor:
             "source": DataSource.HEURISTIC.value,
             "tier": "tier_3_deterministic_webster",
             "junction_id": junction_id,
-            "phase_string": "rrrrGGGggrrrrGGGgg",
             "applied_plan": plan,
             "status": "FAILSAFE_ACTIVE",
             "reason": "Cloud and Edge AI layers offline or bypassed; Webster time-of-day plan enforced."

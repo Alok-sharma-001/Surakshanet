@@ -163,20 +163,10 @@ async def analyze_snapshot(payload: SnapshotAnalysisRequest):
     """Inspects CCTV camera frame using Gemini Multimodal vision to diagnose incidents."""
     import os
     if not os.path.exists(payload.image_path):
-        # If it's a simulated or sample path used in tests/dashboard demo, provide a simulated incident report
-        if any(keyword in payload.image_path for keyword in ["cctv_snapshots", "demo", "sample", "mock"]):
-            return TrafficIncidentReport(
-                junction_id=payload.junction_id,
-                incident_type="NORMAL_FLOW",
-                severity="NORMAL",
-                confidence=0.91,
-                lanes_blocked=0,
-                estimated_pcu_impact=0.0,
-                requires_emergency_dispatch=False,
-                dispatch_units=[],
-                recommended_vms_advisory="ALL CORRIDORS CLEAR",
-                tactical_recommendation="Simulated CCTV snapshot diagnostic: Traffic flowing within normal capacity bounds."
-            )
+        # A missing snapshot is never fabricated into a plausible-looking "all
+        # clear" report, demo path or not — that was the exact class of
+        # defect Phase 0 exists to eliminate (mirrors ml/vision's
+        # VisionUnavailable convention).
         raise HTTPException(status_code=404, detail=f"Camera snapshot file not found: '{payload.image_path}'")
 
     try:
@@ -197,31 +187,44 @@ async def simulate_action(payload: SimulationActionRequest):
     action = payload.action_type.upper()
 
     if action == "PREEMPT_CORRIDOR":
-        corridor = payload.corridor_junctions or ["j-silkboard", "j-koramangala", "j-mg-road"]
-        result = clear_emergency_corridor(corridor_junctions=corridor, vehicle_type="AMBULANCE", priority_level=1)
+        if not payload.corridor_junctions:
+            raise HTTPException(
+                status_code=422,
+                detail="corridor_junctions is required — a corridor is never assumed."
+            )
+        result = clear_emergency_corridor(
+            corridor_junctions=payload.corridor_junctions, vehicle_type="AMBULANCE", priority_level=1
+        )
+        # No independent evaluation runs here — this endpoint only requests the
+        # same real activation clear_emergency_corridor() performs (persisted
+        # EmergencyEvent + Redis notification to the live bridge). It cannot
+        # honestly claim a delay-reduction percentage, a queue-impact estimate,
+        # or a validated safety interlock nothing here actually checked.
         return {
             "simulation_type": "PREEMPTION_CORRIDOR_EVALUATION",
             "action": "CLEAR_GREEN_WAVE",
-            "predicted_delay_reduction_pct": 38.5,
-            "estimated_corridor_transit_seconds": 180,
-            "cross_street_queue_impact": "MODERATE (+12% temporary hold)",
-            "safety_interlocks_validated": True,
+            "estimated_corridor_transit_seconds": result.get("clearance_time_s"),
+            "route_etas": result.get("route_etas"),
             "cabinet_details": result
         }
 
     elif action == "DETOUR_REROUTE":
-        origin_lat = payload.origin_lat or 12.9176
-        origin_lon = payload.origin_lon or 77.6238
-        dest_lat = payload.dest_lat or 12.9756
-        dest_lon = payload.dest_lon or 77.6066
-        avoid = payload.avoid_junctions or ["j-tin-factory"]
+        if None in (payload.origin_lat, payload.origin_lon, payload.dest_lat, payload.dest_lon):
+            raise HTTPException(
+                status_code=422,
+                detail="origin_lat, origin_lon, dest_lat, and dest_lon are all required — "
+                       "a route origin/destination is never assumed."
+            )
+        avoid = payload.avoid_junctions or []
 
-        route_data = compute_optimal_reroute(origin_lat, origin_lon, dest_lat, dest_lon, avoid_junction_ids=avoid)
+        route_data = compute_optimal_reroute(
+            payload.origin_lat, payload.origin_lon, payload.dest_lat, payload.dest_lon, avoid_junction_ids=avoid
+        )
         return {
             "simulation_type": "DYNAMIC_REROUTE_EVALUATION",
             "action": "ARTERIAL_DETOUR",
             "avoided_chokepoints": avoid,
-            "predicted_time_savings_minutes": route_data.get("congestion_savings_min", 4.5),
+            "predicted_time_savings_minutes": route_data.get("congestion_savings_min"),
             "route_metrics": route_data
         }
 
