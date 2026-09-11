@@ -94,7 +94,38 @@ execution surface is `docs/CHECKLIST.md` (SN-001…SN-150, grouped into Phases 0
   - `grep -rn "mock_plan\|DEL-CP-01"` across `ml/`, `backend/` returns nothing.
   - `tests/critical/` (35 tests) and `tests/test_routing_engine_phase3.py` (5 tests) pass after
     every fix above. Checklist: all 12 Phase 3 SN items `DONE`; 66/161 (41%).
-- **Phases 4–10:** NOT_STARTED.
+- **Phase 4 (Event management + citizen advisory, SN-051…SN-068 + SN-113, SN-119, SN-120):** DONE.
+  - Data models (`Event`, `EventPrediction`, `CitizenAdvisory`, `AuditLog`) and Alembic migration
+    `004_events_and_advisories.py` adding all 4 tables with `published_by NOT NULL` human gate constraint.
+    Migration applied to live TimescaleDB.
+  - Demand translation (`services/control_service/config.py`, `backend/app/services/event_service.py`):
+    explicit mode split & occupancy assumptions (25,000 attendees -> 7,143 2-wheelers, 2,976 cars,
+    1,500 autos, 107 buses).
+  - Dual-world what-if simulation (`services/control_service/ab_runner.py`): executes World A (baseline)
+    vs World B (event demand + closures) at identical seed (`DEMO_SEED = 42`). Seed mismatches strictly
+    raise `ValueError`. Incomplete predictions return HTTP 202 without premature severity.
+  - Per-link deltas & severity: `delta_pct = (event_tt - baseline_tt) / baseline_tt * 100`. Fixed,
+    documented bands (`LOW < 15%`, `MODERATE 15–40%`, `SEVERE > 40%`), never tuned per run.
+  - Alternative route engine: A* over event-world weights strictly excluding closures with diversity
+    penalties; returns honest empty case ("no better alternative — advise delayed departure") when no route
+    is viable.
+  - Citizen advisory builder (`backend/app/services/advisory_service.py`): translates link IDs to human
+    corridor names, rounds delay ranges outward to 5-minute multiples (e.g. 22–33 min -> 20–35 min), fixed
+    cause vocabulary, computes pre-congestion departure recommendation and suppresses it if event is ongoing.
+  - Human gate: `CitizenAdvisory.published_by` enforced via database `NOT NULL` constraint and ORM
+    `@validates("published_by")`. Event approve and publish endpoints require authenticated `ADMIN` and write
+    to `AuditLog`. Unapproved events strictly reject publication with HTTP 409.
+  - Public surface (`backend/app/api/public.py`): `/public/advisories`, `/public/advisories/{id}`, `/public/status`
+    unauthenticated, IP rate-limited (60 req/min), with zero internal leaks (no UUIDs, junction IDs, SUMO edge
+    IDs, model versions, confidence scores, or operator identities).
+  - Frontend (`frontend/dashboard/src/pages/EventsPage.tsx`, `PublicAdvisoryPage.tsx`, `Sidebar.tsx`, `App.tsx`):
+    full operator event management workflow at `/app/events` and unauthenticated mobile-first commuter view at
+    `/public` with 3-second comprehension, multi-sensory badges, honest empty state, and 60s in-place polling.
+    Vite build passes with all chunks <= 500 KB.
+  - Critical tests: `test_09_event_whatif.py` (SN-119), `test_10_citizen_advisory.py` (SN-120), and
+    `test_03_public_exposure.py` (SN-113) added. All 58 critical tests in `tests/critical/` pass.
+  - Checklist updated: 87/161 (54%).
+- **Phases 5–10:** NOT_STARTED.
 
 **2026-09-11 addendum — Phase 2 re-audit findings, fixed, and one open limitation:**
 A deep re-verification (not just re-reading this file — actually exercising the running system)

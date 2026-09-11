@@ -201,10 +201,13 @@ app.include_router(ws_router)
 
 from app.api.health import router as health_router
 from app.api.ab import router as ab_router
+from app.api.public import router as public_router
 
 app.include_router(health_router)
 app.include_router(health_router, prefix=settings.API_PREFIX)
 app.include_router(ab_router)
+app.include_router(public_router)
+app.include_router(public_router, prefix=settings.API_PREFIX)
 
 
 @app.get("/", tags=["Health"])

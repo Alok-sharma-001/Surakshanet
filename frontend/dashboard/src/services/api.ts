@@ -112,5 +112,22 @@ export const api = {
       dest_lon?: number;
       avoid_junctions?: string[];
     }) => axiosInstance.post('/copilot/simulate-action', data),
-  }
+  },
+  events: {
+    getAll: (status?: string) => axiosInstance.get(`/events${status ? `?status=${status}` : ''}`),
+    getById: (id: string) => axiosInstance.get(`/events/${id}`),
+    create: (data: Record<string, unknown>) => axiosInstance.post('/events', data),
+    update: (id: string, data: Record<string, unknown>) => axiosInstance.patch(`/events/${id}`, data),
+    predict: (id: string) => axiosInstance.post(`/events/${id}/predict`),
+    getPrediction: (id: string) => axiosInstance.get(`/events/${id}/prediction`),
+    approve: (id: string) => axiosInstance.post(`/events/${id}/approve`),
+    publish: (id: string) => axiosInstance.post(`/events/${id}/publish`),
+    cancel: (id: string) => axiosInstance.post(`/events/${id}/cancel`),
+  },
+  public: {
+    getAdvisories: () => axios.get('/api/v1/public/advisories'),
+    getAdvisoryById: (id: string) => axios.get(`/api/v1/public/advisories/${id}`),
+    getStatus: () => axios.get('/api/v1/public/status'),
+  },
 };
+

@@ -9,6 +9,7 @@ import {
   TrendingUp,
   Siren,
   Route,
+  CalendarDays,
   BarChart3,
   Leaf,
   Bell,
@@ -35,6 +36,7 @@ const mainNavItems: NavItem[] = [
   { name: 'Forecasting', path: '/app/forecasting', icon: TrendingUp },
   { name: 'Emergency', path: '/app/emergency', icon: Siren, badge: 1 },
   { name: 'Routing', path: '/app/routing', icon: Route },
+  { name: 'Events & Rallies', path: '/app/events', icon: CalendarDays },
 ];
 
 const analyticsNavItems: NavItem[] = [

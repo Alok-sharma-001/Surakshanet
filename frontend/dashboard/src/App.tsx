@@ -19,6 +19,8 @@ const EdgeDevicesPage = lazy(() => import('./pages/EdgeDevicesPage'));
 const SimulationPage = lazy(() => import('./pages/SimulationPage'));
 const UserManagementPage = lazy(() => import('./pages/UserManagementPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const EventsPage = lazy(() => import('./pages/EventsPage'));
+const PublicAdvisoryPage = lazy(() => import('./pages/PublicAdvisoryPage'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const StudioHomePage = lazy(() => import('./pages/StudioHomePage').then(m => ({ default: m.StudioHomePage })));
 const CommandCenterPage = lazy(() => import('./pages/CommandCenterPage').then(m => ({ default: m.CommandCenterPage })));
@@ -69,9 +71,14 @@ function App() {
             <Route path="alerts" element={<AlertsPage />} />
             <Route path="edge-devices" element={<EdgeDevicesPage />} />
             <Route path="simulation" element={<SimulationPage />} />
+            <Route path="events" element={<EventsPage />} />
             <Route path="users" element={<UserManagementPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
+
+          {/* Public Citizen Information Service (Unauthenticated, Mobile-First) */}
+          <Route path="/public" element={<PublicAdvisoryPage />} />
+          <Route path="/public/advisories" element={<PublicAdvisoryPage />} />
 
           {/* Studio Innovation Showcase */}
           <Route path="/studio" element={<StudioHomePage />} />

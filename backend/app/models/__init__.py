@@ -6,6 +6,9 @@ from app.models.signal import SignalPlan, SignalMode
 from app.models.alert import Alert, EmergencyEvent, AlertType, AlertSeverity, EmergencyPriority, EmergencyVehicleType, EmergencyStatus
 from app.models.control import ControlDecision, ABRun
 from app.models.network import NetworkLink
+from app.models.event import Event, EventPrediction, EventType, EventIntensity, EventStatus
+from app.models.advisory import CitizenAdvisory, AdvisoryOriginType, AdvisorySeverity
+from app.models.audit import AuditLog, AuditActorType, AuditResult
 
 __all__ = [
     "Base",
@@ -28,4 +31,15 @@ __all__ = [
     "ControlDecision",
     "ABRun",
     "NetworkLink",
+    "Event",
+    "EventPrediction",
+    "EventType",
+    "EventIntensity",
+    "EventStatus",
+    "CitizenAdvisory",
+    "AdvisoryOriginType",
+    "AdvisorySeverity",
+    "AuditLog",
+    "AuditActorType",
+    "AuditResult",
 ]

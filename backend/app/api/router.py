@@ -12,6 +12,7 @@ from app.api.signals import router as signals_router
 from app.api.junctions import router as junctions_router
 from app.api.copilot import router as copilot_router
 from app.api.ab import router as ab_router
+from app.api.events import router as events_router
 
 api_router = APIRouter()
 
@@ -27,3 +28,4 @@ api_router.include_router(emergency_router)
 api_router.include_router(signals_router)
 api_router.include_router(copilot_router)
 api_router.include_router(ab_router)
+api_router.include_router(events_router)

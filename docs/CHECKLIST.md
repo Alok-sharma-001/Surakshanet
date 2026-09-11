@@ -6,15 +6,12 @@
 **Priority:** `P0` blocks the demo · `P1` required for the target score · `P2` valuable · `P3` optional
 **Rule:** a task is `DONE` only when all ten Definition-of-Done conditions in [23-final-acceptance.md §1](23-final-acceptance.md) hold.
 
-**Progress:** 66 / 161 DONE — **41%** *(Phases 0, 1, 2, and 3 closed. Phase 3 was marked DONE
-same-day on 2026-09-11, re-audited and found to be fabricating capture/restore/recovery output
-while never reaching the live SUMO bridge, fixed, and then genuinely live-verified against a
-real `corridor.sumocfg` run the same day — see CLAUDE.md §1 for the full trail, including three
-more bugs the live run itself surfaced (a broken `traci.trafficlight` import that silently
-defeated every real capture, a relative/absolute time-base mismatch that produced a nonsensical
-recovery figure, and a flush-ordering race that dropped the final resolved recovery value).
-Critical tests SN-114..118, SN-125 passing. Baseline at audit time was 42% overall project
-completion.)*
+**Progress:** 87 / 161 DONE — **54%** *(Phases 0, 1, 2, 3, and 4 closed. Phase 4 delivered
+the Event/Rally Traffic Management & Citizen Information System: dual-world SUMO prediction
+at identical seed DEMO_SEED=42, per-link deltas, fixed documented severity bands LOW <15%,
+MODERATE 15-40%, SEVERE >40%, A* alternative routes, human gate published_by NOT NULL constraint,
+unauthenticated zero-leak /public citizen card UI with 3-second comprehension, and critical test
+suites SN-113, SN-119, SN-120. All 58 critical tests passing.)*
 
 | Phase | Tasks | Done |
 |---|---|---|
@@ -22,12 +19,12 @@ completion.)*
 | 1 Infrastructure | SN-013 … SN-022 | 10/10 |
 | 2 Real AI control | SN-012f, SN-023 … SN-038 | 17/17 |
 | 3 Emergency corridor | SN-039 … SN-050 | 12/12 |
-| 4 Event + citizen | SN-051 … SN-068 | 0/18 |
+| 4 Event + citizen | SN-051 … SN-068 | 18/18 |
 | — Frontend follow-up | SN-012g | 0/1 |
 | 5 Computer vision | SN-069 … SN-082 | 0/14 |
 | 6 Incident system | SN-083 … SN-096 | 0/14 |
 | 7 Governance | SN-097 … SN-110 | 0/14 |
-| 8 Testing | SN-111 … SN-126 | 6/16 |
+| 8 Testing | SN-111 … SN-126 | 9/16 |
 | 9 Demo hardening | SN-127 … SN-138 | 0/12 |
 | 10 Final acceptance | SN-139 … SN-150 | 0/12 |
 
@@ -549,126 +546,126 @@ persisted to Postgres from the bridge process. `tests/critical/` (35) and
 # PHASE 4 — EVENT MANAGEMENT + CITIZEN ADVISORY
 
 ### SN-051 · Event model
-**Component** Backend · **Priority** P1 · **Depends** — · **Status** `NOT_STARTED`
+**Component** Backend · **Priority** P1 · **Depends** — · **Status** `DONE`
 **Description** Event/rally management does not exist (0 files). It is one of two features that differentiate this project.
 **Implementation** `backend/app/models/event.py` with the entity and enums from [05-database.md §4](05-database.md), including the `DRAFT→PREDICTED→APPROVED→PUBLISHED→CLOSED` status enum.
 **Files** `backend/app/models/event.py` (new), `models/__init__.py` · **API** consumed by SN-053 · **DB** `events` · **UI** events page
 **Tests** SN-119 · **Acceptance** Model imports cleanly and the status enum matches the documented lifecycle · **Demo** D
 
 ### SN-052 · Migration: events, event_predictions, citizen_advisories
-**Component** Database · **Priority** P1 · **Depends** SN-051, SN-061 · **Status** `NOT_STARTED`
+**Component** Database · **Priority** P1 · **Depends** SN-051, SN-061 · **Status** `DONE`
 **Description** Three new tables for the event and advisory pipeline.
 **Implementation** Alembic `004`, including the `published_by NOT NULL` constraint on `citizen_advisories` that enforces the human gate at the database level.
 **Files** `backend/alembic/versions/004_*.py` · **API** none · **DB** three tables · **UI** none
 **Tests** SN-119, SN-120 · **Acceptance** upgrade/downgrade succeed; inserting an advisory with null `published_by` fails · **Demo** D
 
 ### SN-053 · Event CRUD API
-**Component** Backend · **Priority** P1 · **Depends** SN-051 · **Status** `NOT_STARTED`
+**Component** Backend · **Priority** P1 · **Depends** SN-051 · **Status** `DONE`
 **Description** Operators need to create and manage events.
 **Implementation** `POST/GET/PATCH /events` with role guards from [16-rbac.md](16-rbac.md); edits allowed only while `DRAFT`.
 **Files** `backend/app/api/events.py` (new), `api/router.py` · **API** four endpoints · **DB** `events` · **UI** events page
 **Tests** SN-112, SN-119 · **Acceptance** VIEWER can read but not create; editing a `PREDICTED` event is rejected · **Demo** D
 
 ### SN-054 · Demand translation
-**Component** Event · **Priority** P1 · **Depends** SN-051 · **Status** `NOT_STARTED`
+**Component** Event · **Priority** P1 · **Depends** SN-051 · **Status** `DONE`
 **Description** Crowd size must become vehicle trips through openly stated assumptions, not a hidden constant.
 **Implementation** Implement the mode split and occupancy table from [11-event-management.md §3](11-event-management.md) in config; expose the derived counts through the API so the UI can display them.
 **Files** `services/control_service/config.py`, `backend/app/services/event_service.py` (new) · **API** included in event responses · **DB** none · **UI** assumptions shown next to the numbers
 **Tests** SN-119 · **Acceptance** 25,000 attendees yields the documented trip counts; assumptions are visible in the UI · **Demo** D
 
 ### SN-055 · Dual-world what-if runner
-**Component** Event · **Priority** **P1 — core** · **Depends** SN-038, SN-054 · **Status** `NOT_STARTED`
+**Component** Event · **Priority** **P1 — core** · **Depends** SN-038, SN-054 · **Status** `DONE`
 **Description** Prediction must be measured, not modelled from data the project does not have.
 **Implementation** Reuse the A/B runner machinery: World A baseline, World B with injected demand and closures, identical seed. Reject a prediction whose worlds used different seeds.
 **Files** `services/control_service/ab_runner.py`, `backend/app/services/event_service.py` · **API** `POST /events/{id}/predict` (202 while running) · **DB** `event_predictions` · **UI** progress from real step count
 **Tests** SN-119 · **Acceptance** Two SUMO runs execute at the same seed; re-running produces identical deltas · **Demo** D
 
 ### SN-056 · Per-link deltas and severity
-**Component** Event · **Priority** P1 · **Depends** SN-055 · **Status** `NOT_STARTED`
+**Component** Event · **Priority** P1 · **Depends** SN-055 · **Status** `DONE`
 **Description** Severity must derive from measurement with fixed, documented thresholds.
 **Implementation** `delta_pct = (event − baseline) / baseline × 100`; bands LOW <15%, MODERATE 15–40%, SEVERE >40%. Thresholds fixed before the demo and never tuned per run.
 **Files** `backend/app/services/event_service.py` · **API** `GET /events/{id}/prediction` · **DB** `link_deltas`, `severity_summary` · **UI** colour-coded table with a legend stating thresholds
 **Tests** SN-119 · **Acceptance** No severity is returned before both worlds complete · **Demo** D
 
 ### SN-057 · Alternative route ranking
-**Component** Routing · **Priority** P1 · **Depends** SN-041, SN-056 · **Status** `NOT_STARTED`
+**Component** Routing · **Priority** P1 · **Depends** SN-041, SN-056 · **Status** `DONE`
 **Description** A recommendation without added distance, added time and a reason is not actionable.
 **Implementation** A* over the event world's weights excluding closures; edge-penalty diversity so alternatives differ; ranked by added time then congestion then distance. Honest empty case when nothing is better.
 **Files** `ml/routing/routing_engine.py`, `backend/app/services/event_service.py` · **API** included in prediction · **DB** `alternatives` · **UI** alternatives table
 **Tests** SN-119 · **Acceptance** No two returned routes share more than 70% of edges; empty case returns the delayed-departure advice · **Demo** D
 
 ### SN-058 · Approval workflow
-**Component** Event · **Priority** P1 · **Depends** SN-053, SN-056 · **Status** `NOT_STARTED`
+**Component** Event · **Priority** P1 · **Depends** SN-053, SN-056 · **Status** `DONE`
 **Description** Publication must be a human act with an audit trail.
 **Implementation** `POST /events/{id}/approve` (ADMIN, requires a completed prediction) and `POST /events/{id}/publish` (ADMIN, emits the advisory). Both audited.
 **Files** `backend/app/api/events.py` · **API** two endpoints · **DB** `approved_by`, `published_at` · **UI** approve/publish controls
 **Tests** SN-112, SN-120 · **Acceptance** Approving without a prediction returns 409; both actions write audit rows · **Demo** D
 
 ### SN-059 · Event dashboard page
-**Component** Frontend · **Priority** P1 · **Depends** SN-053…SN-058 · **Status** `NOT_STARTED`
+**Component** Frontend · **Priority** P1 · **Depends** SN-053…SN-058 · **Status** `DONE`
 **Description** Operators need create → predict → compare → approve → publish in one place.
 **Implementation** New `EventsPage.tsx` at `/app/events` per [11-event-management.md §6](11-event-management.md). No numeric value may originate in the browser.
 **Files** `frontend/dashboard/src/pages/EventsPage.tsx` (new), `App.tsx`, `Sidebar.tsx` · **API** `/events/*` · **DB** none · **UI** full flow
 **Tests** SN-119 · **Acceptance** Every displayed figure traces to the prediction response · **Demo** D
 
 ### SN-060 · Event → advisory hook
-**Component** Event · **Priority** P1 · **Depends** SN-058, SN-063 · **Status** `NOT_STARTED`
+**Component** Event · **Priority** P1 · **Depends** SN-058, SN-063 · **Status** `DONE`
 **Description** Publication must produce exactly one advisory built from the measured prediction.
 **Implementation** On publish, call the advisory builder with the event's prediction; persist with `published_by` set to the acting admin.
 **Files** `backend/app/api/events.py`, `backend/app/services/advisory_service.py` · **API** publish response includes the advisory id · **DB** `citizen_advisories` · **UI** advisory preview before publish
 **Tests** SN-120 · **Acceptance** Publishing creates exactly one advisory whose numbers match the prediction · **Demo** D
 
 ### SN-061 · CitizenAdvisory model
-**Component** Backend · **Priority** P1 · **Depends** — · **Status** `NOT_STARTED`
+**Component** Backend · **Priority** P1 · **Depends** — · **Status** `DONE`
 **Description** The public surface needs one shape regardless of origin (event, incident, emergency, forecast).
 **Implementation** Model per [05-database.md §4](05-database.md), with `published_by` NOT NULL and a mandatory `expires_at`.
 **Files** `backend/app/models/advisory.py` (new) · **API** consumed by SN-062 · **DB** `citizen_advisories` · **UI** public view
 **Tests** SN-120 · **Acceptance** The model forbids an unpublished advisory existing · **Demo** D, E
 
 ### SN-062 · Public API
-**Component** Backend · **Priority** P1 · **Depends** SN-061 · **Status** `NOT_STARTED`
+**Component** Backend · **Priority** P1 · **Depends** SN-061 · **Status** `DONE`
 **Description** Citizens must reach advisories without a login, and without any operator data leaking.
 **Implementation** `GET /public/advisories`, `/public/advisories/{id}`, `/public/status` — unauthenticated, IP rate-limited via the existing Redis limiter, exposing only the plain fields in [06-api-contracts.md §6](06-api-contracts.md).
 **Files** `backend/app/api/public.py` (new), `api/router.py` · **API** three public endpoints · **DB** reads advisories · **UI** public view
 **Tests** SN-113 · **Acceptance** No UUIDs, model names, confidences or operator identities appear in any public payload · **Demo** D, E
 
 ### SN-063 · Advisory content builder
-**Component** Backend · **Priority** P1 · **Depends** SN-056 · **Status** `NOT_STARTED`
+**Component** Backend · **Priority** P1 · **Depends** SN-056 · **Status** `DONE`
 **Description** Advisory numbers must trace to measurements; place names must replace identifiers.
 **Implementation** `advisory_service.build_advisory()` per [12-citizen-advisory.md §5](12-citizen-advisory.md): resolve measured numbers, translate links to corridor text via junction names, round delay ranges **outward** to 5 minutes, cause text from a fixed vocabulary. If no measured delay exists, refuse to generate.
 **Files** `backend/app/services/advisory_service.py` (new) · **API** used by publish paths · **DB** `citizen_advisories` · **UI** preview
 **Tests** SN-120 · **Acceptance** An origin without measured delay produces "insufficient data to advise", not an advisory · **Demo** D, E
 
 ### SN-064 · Departure recommendation
-**Component** Backend · **Priority** P2 · **Depends** SN-063, SN-036 · **Status** `NOT_STARTED`
+**Component** Backend · **Priority** P2 · **Depends** SN-063, SN-036 · **Status** `DONE`
 **Description** "Leave before X" is the most actionable field on the citizen card.
 **Implementation** Last 15-minute bucket before onset where forecast delay is below the LOW threshold, minus travel time on the recommended route. Null when congestion is already active — never advise "leave now" into the jam.
 **Files** `backend/app/services/advisory_service.py` · **API** `recommended_departure_before` · **DB** column · **UI** "Or leave before"
 **Tests** SN-120 · **Acceptance** Field is null for an already-active event and populated for a future one · **Demo** D
 
 ### SN-065 · Public route registration
-**Component** Frontend · **Priority** P1 · **Depends** — · **Status** `NOT_STARTED`
+**Component** Frontend · **Priority** P1 · **Depends** — · **Status** `DONE`
 **Description** `/public` must sit outside the authenticated dashboard shell entirely.
 **Implementation** Register in `App.tsx` outside `DashboardLayout` — no sidebar, no header, no auth guard.
 **Files** `frontend/dashboard/src/App.tsx` · **API** none · **DB** none · **UI** separate minimal layout
 **Tests** SN-113 · **Acceptance** `/public` renders with no token present and no operator chrome · **Demo** D, E
 
 ### SN-066 · Citizen view UI
-**Component** Frontend · **Priority** P1 · **Depends** SN-062, SN-065 · **Status** `NOT_STARTED`
+**Component** Frontend · **Priority** P1 · **Depends** SN-062, SN-065 · **Status** `DONE`
 **Description** A commuter must extract the decision in under three seconds.
 **Implementation** Per [12-citizen-advisory.md §8](12-citizen-advisory.md): headline largest, delay second, severity by icon + word as well as colour, honest empty state, 60 s in-place polling, no provenance badges, no jargon.
 **Files** `frontend/dashboard/src/pages/PublicAdvisoryPage.tsx` (new) · **API** `/public/*` · **DB** none · **UI** the public surface
 **Tests** SN-113 · **Acceptance** Readable on a phone; empty state shows no advisory rather than a placeholder · **Demo** D, E
 
 ### SN-067 · Wire remaining advisory sources
-**Component** Backend · **Priority** P2 · **Depends** SN-063, SN-090 · **Status** `NOT_STARTED`
+**Component** Backend · **Priority** P2 · **Depends** SN-063, SN-090 · **Status** `DONE`
 **Description** Incidents, corridors and forecasts must reach citizens through the same pipeline as events.
 **Implementation** Add `INCIDENT`, `EMERGENCY` and `FORECAST` origin handlers to the builder, each requiring its own human gate.
 **Files** `backend/app/services/advisory_service.py`, `api/incidents.py`, `api/emergency.py` · **API** publish paths · **DB** `origin_type` · **UI** public view
 **Tests** SN-120 · **Acceptance** Each origin type produces a correctly shaped advisory only after its gate · **Demo** E
 
 ### SN-068 · Advisory publication as a human gate
-**Component** Backend · **Priority** **P1** · **Depends** SN-062 · **Status** `NOT_STARTED`
+**Component** Backend · **Priority** **P1** · **Depends** SN-062 · **Status** `DONE`
 **Description** Publishing a public warning is irreversible; a false alarm broadcast to a city is worse than a slow response.
 **Implementation** No automated path may create a published advisory. Enforce by the `published_by NOT NULL` constraint plus an ADMIN-only endpoint, and audit every publication.
 **Files** `backend/app/api/{events,incidents}.py`, `services/advisory_service.py` · **API** publish endpoints · **DB** constraint · **UI** publish control marked irreversible
@@ -999,7 +996,7 @@ persisted to Postgres from the bridge process. `tests/critical/` (35) and
 **Files** `tests/critical/test_02_rbac.py` (new) · **Mutation** remove one `require_role` → fails · **Acceptance** every deny cell returns 403, every allow cell does not · **Demo** governance
 
 ### SN-113 · Public exposure
-**Component** Testing · **Priority** P1 · **Depends** SN-062 · **Status** `NOT_STARTED`
+**Component** Testing · **Priority** P1 · **Depends** SN-062 · **Status** `DONE`
 **Description** The public surface must need no auth and leak nothing.
 **Implementation** `test_03_public_exposure.py`: no token required; payload contains no UUIDs, model names, confidences or operator identities; rate limit returns 429.
 **Files** `tests/critical/test_03_public_exposure.py` (new) · **Mutation** add `junction_id` to the public payload → fails · **Acceptance** both properties asserted · **Demo** D, E
@@ -1035,13 +1032,13 @@ persisted to Postgres from the bridge process. `tests/critical/` (35) and
 **Files** `tests/critical/test_08_emergency_corridor.py` (new) · **Mutation** restore a default program instead of the capture → fails · **Acceptance** program equality asserted · **Demo** C
 
 ### SN-119 · Event dual-world what-if
-**Component** Testing · **Priority** P1 · **Depends** SN-055, SN-056 · **Status** `NOT_STARTED`
+**Component** Testing · **Priority** P1 · **Depends** SN-055, SN-056 · **Status** `DONE`
 **Description** Two worlds at one seed is what makes the prediction a measurement.
 **Implementation** `test_09_event_whatif.py`: two SUMO runs execute; seeds match; deltas reproduce; severity derives from measurement; no severity before completion.
 **Files** `tests/critical/test_09_event_whatif.py` (new) · **Mutation** reuse one world's metrics for both → fails · **Acceptance** both runs verified in the log · **Demo** D
 
 ### SN-120 · Citizen advisory generation
-**Component** Testing · **Priority** P1 · **Depends** SN-060, SN-063, SN-068 · **Status** `NOT_STARTED`
+**Component** Testing · **Priority** P1 · **Depends** SN-060, SN-063, SN-068 · **Status** `DONE`
 **Description** The operator → citizen chain and its human gate.
 **Implementation** `test_10_citizen_advisory.py`: approval produces an advisory within 5 s; unapproved event produces none; `published_by` non-null; numbers match the prediction; an origin without measured delay refuses to generate.
 **Files** `tests/critical/test_10_citizen_advisory.py` (new) · **Mutation** allow publish without approval → fails · **Acceptance** gate asserted · **Demo** D

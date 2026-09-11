@@ -37,6 +37,22 @@ WEIGHTS_PATH = os.environ.get(
     "ml/marl/weights/marl_policy_downtown.pth"
 )
 
+# Demand translation parameters (docs/11-event-management.md §3)
+DEFAULT_MODE_SPLIT = {
+    "two_wheeler": {"share": 0.40, "occupancy": 1.4},
+    "car": {"share": 0.25, "occupancy": 2.1},
+    "auto": {"share": 0.15, "occupancy": 2.5},
+    "bus": {"share": 0.15, "occupancy": 35.0},
+    "walk_other": {"share": 0.05, "occupancy": None},
+}
+
+ARRIVAL_PROFILE = {
+    "arrival_pre_start_min": 90,
+    "arrival_pre_start_pct": 0.60,
+    "departure_post_end_min": 60,
+    "departure_post_end_pct": 0.80,
+}
+
 
 @dataclass
 class ControlConfig:
