@@ -6,20 +6,25 @@
 **Priority:** `P0` blocks the demo · `P1` required for the target score · `P2` valuable · `P3` optional
 **Rule:** a task is `DONE` only when all ten Definition-of-Done conditions in [23-final-acceptance.md §1](23-final-acceptance.md) hold.
 
-**Progress:** 48 / 161 DONE — **30%** *(Phases 0, 1, and 2 closed. Baseline at audit time was 42% overall project completion.)*
+**Progress:** 57 / 161 DONE — **35%** *(Phases 0, 1, and 2 closed. Phase 3 IN_PROGRESS — a
+2026-09-11 re-audit found it had been marked DONE while still fabricating capture/restore/recovery
+output and never reaching the live SUMO bridge; those defects are fixed and unit-tested, but the
+fix has not been run against a live simulation, so only SN-039/040/049 and the SN-118 test suite
+are genuinely DONE — see CLAUDE.md §1. Critical tests SN-114..118, SN-125 passing. Baseline at
+audit time was 42% overall project completion.)*
 
 | Phase | Tasks | Done |
 |---|---|---|
 | 0 Cleanup | SN-001 … SN-012k (less SN-012f/g) | 21/21 |
 | 1 Infrastructure | SN-013 … SN-022 | 10/10 |
 | 2 Real AI control | SN-012f, SN-023 … SN-038 | 17/17 |
-| 3 Emergency corridor | SN-039 … SN-050 | 0/12 |
+| 3 Emergency corridor | SN-039 … SN-050 | 3/12 |
 | 4 Event + citizen | SN-051 … SN-068 | 0/18 |
 | — Frontend follow-up | SN-012g | 0/1 |
 | 5 Computer vision | SN-069 … SN-082 | 0/14 |
 | 6 Incident system | SN-083 … SN-096 | 0/14 |
 | 7 Governance | SN-097 … SN-110 | 0/14 |
-| 8 Testing | SN-111 … SN-126 | 0/16 |
+| 8 Testing | SN-111 … SN-126 | 6/16 |
 | 9 Demo hardening | SN-127 … SN-138 | 0/12 |
 | 10 Final acceptance | SN-139 … SN-150 | 0/12 |
 
@@ -417,84 +422,101 @@
 # PHASE 3 — EMERGENCY CORRIDOR
 
 ### SN-039 · Emergency vehicle model
-**Component** Backend · **Priority** P1 · **Depends** — · **Status** `NOT_STARTED`
+**Component** Backend · **Priority** P1 · **Depends** — · **Status** `DONE`
 **Description** `emergency_events` lacks origin, destination, ETAs, captured programs and recovery fields.
 **Implementation** Extend the model per [05-database.md §3](05-database.md); add the vehicle fields and the `COMPLETED` precondition (restored + all junctions passed or timed out).
 **Files** `backend/app/models/alert.py` · **API** activate/status payloads · **DB** new columns · **UI** emergency panel
 **Tests** SN-118 · **Acceptance** `status` cannot become `COMPLETED` before `restored_at` is set · **Demo** C
 
 ### SN-040 · Migration for corridor fields
-**Component** Database · **Priority** P1 · **Depends** SN-039 · **Status** `NOT_STARTED`
+**Component** Database · **Priority** P1 · **Depends** SN-039 · **Status** `DONE`
 **Description** Schema change for SN-039.
 **Implementation** Alembic `003` with a working `downgrade()`.
 **Files** `backend/alembic/versions/003_*.py` · **API** none · **DB** `emergency_events` extended · **UI** none
 **Tests** SN-118 · **Acceptance** upgrade/downgrade both succeed · **Demo** C
 
 ### SN-041 · Feed the routing graph live data
-**Component** Routing · **Priority** P1 · **Depends** SN-025 · **Status** `NOT_STARTED`
+**Component** Routing · **Priority** P1 · **Depends** SN-025 · **Status** `IN_PROGRESS`
 **Description** `update_edge_weights()` exists but is never called with live data, and the graph is never built from the DB — so routes never respond to traffic.
 **Implementation** Build the graph from `junctions` + a new `network_links` seed matching SUMO edges; refresh weights every 10 s from telemetry; mark edges with telemetry older than 60 s as `stale`.
-**Files** `backend/app/services/routing_service.py` (new), `ml/routing/routing_engine.py`, `scripts/seed_demo.py` · **API** `/routing/*` · **DB** `network_links` · **UI** routing page
+**Files** `backend/app/services/routing_service.py`, `backend/app/services/routing_telemetry.py` (new), `ml/routing/routing_engine.py`, `shared/corridor_topology.py`, `scripts/seed_demo.py` · **API** `/routing/*` · **DB** `network_links` · **UI** routing page
 **Tests** SN-118 · **Acceptance** Congesting a link changes the returned route within one refresh interval · **Demo** C, D, E
+**2026-09-11 status:** Live-refresh half fixed and verified — `backend/app/services/routing_telemetry.py`
+(new) caches each JunctionTelemetry message the Redis-to-WebSocket bridge already receives
+(`backend/app/main.py::redis_pubsub_bridge`), translates cached approach-level speed/PCU into
+edge-keyed `traffic_data` via `shared/corridor_topology.py`'s new `telemetry_approach` mapping
+(which real junction+compass-direction approach a vehicle traveling each edge arrives via), and
+calls `RoutingService.update_live_telemetry()` every 10s from a background task started in
+`lifespan()`. Verified by `tests/test_routing_engine_phase3.py::test_live_junction_telemetry_reroutes_within_one_refresh`
+(feeds a real JunctionTelemetry-shaped payload, asserts the citizen route changes). **Still
+broken, not fixed:** `RoutingService.initialize_from_db()` builds graph nodes keyed by
+`junctions.name` — but `backend/scripts/seed_city.py` only ever seeds decorative Delhi/Bengaluru
+landmark junctions (`"Connaught Place Outer Circle"` etc.) into that table, never the real
+corridor nodes (`J0`..`J3`, `W_entry`, `E_exit`, `N0`-`N3`, `S0`-`S3`) that `network_links`
+actually references by id. If `initialize_from_db()` were ever called, it would build a graph
+whose nodes share zero names with its own edges — silently broken, not caught by any test since
+nothing calls it yet. Left un-called and undecided rather than "fixed" blind: resolving it means
+deciding how the decorative city-display junctions and the real simulated corridor relate, which
+is a product call, not something to guess at while wiring telemetry.
 
 ### SN-042 · Per-junction ETA
-**Component** Emergency · **Priority** P1 · **Depends** SN-041 · **Status** `NOT_STARTED`
+**Component** Emergency · **Priority** P1 · **Depends** SN-041 · **Status** `IN_PROGRESS`
 **Description** The corridor currently pre-empts every junction at once because no arrival prediction exists.
 **Implementation** Compute `eta_j` from live link speeds with a 5 km/h floor and a 1.3× emergency speed factor capped at the link limit; recompute every 2 s.
 **Files** `ml/emergency/green_wave.py`, `backend/app/api/emergency.py` · **API** `GET /emergency/{id}/eta` · **DB** `route_etas` · **UI** per-junction ETA labels
 **Tests** SN-118 · **Acceptance** ETAs update as the vehicle moves and are monotonic along the route · **Demo** C
 
 ### SN-043 · Rolling activation scheduler
-**Component** Emergency · **Priority** **P1 — core correction** · **Depends** SN-042 · **Status** `NOT_STARTED`
+**Component** Emergency · **Priority** **P1 — core correction** · **Depends** SN-042 · **Status** `IN_PROGRESS`
 **Description** Simultaneous pre-emption is unrealistic and needlessly damages cross traffic.
 **Implementation** Activate at `eta_j − clearance_lead_s`, where the lead covers amber + all-red + queue discharge. States `scheduled → preempted → passed → restored`. Timeout guard releases a junction stuck in `preempted`.
 **Files** `ml/emergency/green_wave.py` · **API** `GET /emergency/{id}/corridor` · **DB** `route_etas` state fields · **UI** propagating corridor
 **Tests** SN-118 · **Acceptance** Junctions activate in ETA order with measurable spacing, never simultaneously · **Demo** C
 
 ### SN-044 · Capture real signal programs
-**Component** Emergency · **Priority** **P1** · **Depends** SN-030 · **Status** `NOT_STARTED`
+**Component** Emergency · **Priority** **P1** · **Depends** SN-030 · **Status** `IN_PROGRESS`
 **Description** `ml/emergency/green_wave.py:22` stores the baseline as the literal `{"mock_plan": True}` — so "returns to normal" is untrue.
 **Implementation** Capture via `traci.trafficlight.getAllProgramLogics()` plus current program and phase; serialise into `captured_programs`.
 **Files** `ml/emergency/green_wave.py`, `simulation/sumo_live_bridge.py` · **API** none · **DB** `captured_programs` · **UI** none
 **Tests** SN-118 · **Acceptance** `grep -rn "mock_plan" ml/ backend/` returns nothing · **Demo** C
 
 ### SN-045 · Restore and verify
-**Component** Emergency · **Priority** P1 · **Depends** SN-044 · **Status** `NOT_STARTED`
+**Component** Emergency · **Priority** P1 · **Depends** SN-044 · **Status** `IN_PROGRESS`
 **Description** Restoration must be verified, not assumed.
 **Implementation** `setProgramLogic` + `setProgram` from the captured copy, then read back and compare. A mismatch logs an error and releases the junction to the control service.
 **Files** `ml/emergency/green_wave.py` · **API** corridor status · **DB** `restored_at` · **UI** junction state `restored`
 **Tests** SN-118 · **Acceptance** Post-corridor `getAllProgramLogics()` matches the capture exactly · **Demo** C
 
 ### SN-046 · Cross-street starvation guard
-**Component** Emergency · **Priority** P1 · **Depends** SN-043 · **Status** `NOT_STARTED`
+**Component** Emergency · **Priority** P1 · **Depends** SN-043 · **Status** `IN_PROGRESS`
 **Description** A corridor that starves conflicting approaches is the weakness a judge will probe.
 **Implementation** Track continuous red per conflicting approach; above `cross_street_max_red_s` (default 90) insert a compensating phase **only at junctions already passed** — never ahead of the vehicle.
 **Files** `ml/emergency/green_wave.py`, `services/control_service/safety.py` · **API** corridor status · **DB** `cross_street_max_red_s` · **UI** cross-traffic impact panel
 **Tests** SN-118 · **Acceptance** No conflicting approach exceeds the threshold without a compensating phase · **Demo** C
 
 ### SN-047 · Clearance-time estimate
-**Component** Emergency · **Priority** P2 · **Depends** SN-042 · **Status** `NOT_STARTED`
+**Component** Emergency · **Priority** P2 · **Depends** SN-042 · **Status** `IN_PROGRESS`
 **Description** Operators need to know how long the corridor will hold.
 **Implementation** Final-junction ETA plus its queue-discharge time; expose as a live countdown.
 **Files** `ml/emergency/green_wave.py` · **API** activate response, corridor status · **DB** `clearance_time_s` · **UI** countdown
 **Tests** SN-118 · **Acceptance** Countdown decreases monotonically and matches measured passage within 20% · **Demo** C
 
 ### SN-048 · Recovery measurement
-**Component** Emergency · **Priority** P1 · **Depends** SN-046 · **Status** `NOT_STARTED`
+**Component** Emergency · **Priority** P1 · **Depends** SN-046 · **Status** `IN_PROGRESS`
 **Description** This is the answer to "what about everyone else?" — and it must be measured, not claimed.
 **Implementation** Sample cross-street delay for 120 s before activation as baseline; sample every 5 s during and after; `recovery_s` = time until within 10% of baseline for three consecutive samples. Store the series. Endpoint returns 503 while the corridor is active.
 **Files** `backend/app/api/emergency.py`, `ml/emergency/green_wave.py` · **API** `GET /emergency/{id}/recovery` · **DB** `recovery_s` + series · **UI** recovery chart
 **Tests** SN-118 · **Acceptance** Recovery is measured from telemetry; unavailable while active · **Demo** C — key beat
 
 ### SN-049 · Remove hardcoded default route
-**Component** Emergency · **Priority** P0 · **Depends** SN-041 · **Status** `NOT_STARTED`
+**Component** Emergency · **Priority** P0 · **Depends** SN-041 · **Status** `DONE`
 **Description** `backend/app/api/emergency.py:38` falls back to `["DEL-CP-01","DEL-ITO-02","DEL-ASH-04"]` — junction IDs that do not exist in this network.
 **Implementation** Delete `get_route()`'s fallback. Compute the route from the destination via A*; return `422` when neither a destination nor an explicit route is supplied.
 **Files** `backend/app/api/emergency.py` · **API** activate contract · **DB** none · **UI** destination required in the form
 **Tests** SN-118 · **Acceptance** `grep -rn "DEL-CP-01" backend/` returns nothing; a request without destination or route is rejected · **Demo** C
 
 ### SN-050 · Emergency dashboard panel
-**Component** Frontend · **Priority** P1 · **Depends** SN-043…SN-048 · **Status** `NOT_STARTED`
+**Component** Frontend · **Priority** P1 · **Depends** SN-043…SN-048 · **Status** `IN_PROGRESS`
 **Description** The corridor must read as a travelling wave, not a static list of green intersections.
 **Implementation** Render vehicle, destination, route polyline, per-junction ETA, colour-coded junction states, next junction countdown, cross-traffic impact and the post-close recovery chart — all from backend state.
 **Files** `frontend/dashboard/src/pages/EmergencyPage.tsx` · **API** `/emergency/*` · **DB** none · **UI** propagating corridor
@@ -961,31 +983,31 @@
 **Files** `tests/critical/test_03_public_exposure.py` (new) · **Mutation** add `junction_id` to the public payload → fails · **Acceptance** both properties asserted · **Demo** D, E
 
 ### SN-114 · Telemetry ingestion
-**Component** Testing · **Priority** P1 · **Depends** SN-027 · **Status** `COMPLETE`
+**Component** Testing · **Priority** P1 · **Depends** SN-027 · **Status** `DONE`
 **Description** Schema validation and provenance stamping must actually reject bad input.
 **Implementation** `test_04_telemetry_ingest.py`: valid MQTT payload persists with `source='mqtt'`; malformed is rejected and logged, not partially written; channel constants match between publisher and subscriber.
 **Files** `tests/critical/test_04_telemetry_ingest.py` (new) · **Mutation** remove schema validation → fails · **Acceptance** rejection path asserted · **Demo** none
 
 ### SN-115 · SUMO telemetry determinism
-**Component** Testing · **Priority** P1 · **Depends** SN-014, SN-025 · **Status** `COMPLETE`
+**Component** Testing · **Priority** P1 · **Depends** SN-014, SN-025 · **Status** `DONE`
 **Description** Determinism underpins every measured claim.
 **Implementation** `test_05_sumo_telemetry.py`: run a 60 s scenario twice at the same seed and assert identical metric series; assert `503` when SUMO is unavailable.
 **Files** `tests/critical/test_05_sumo_telemetry.py` (new) · **Mutation** drop `--seed` → fails · **Acceptance** byte-identical series · **Demo** all
 
 ### SN-116 · DQN inference
-**Component** Testing · **Priority** **P0** · **Depends** SN-030…SN-034 · **Status** `COMPLETE`
+**Component** Testing · **Priority** **P0** · **Depends** SN-030…SN-034 · **Status** `DONE`
 **Description** The single most important test in the project — it proves the audit's central defect is fixed.
 **Implementation** `test_06_dqn_inference.py`: real weights load; a fixture state produces a deterministic greedy action; a decision row records state vector and Q-values; mode switch changes behaviour; missing weights → refuses MARL rather than pretending.
 **Files** `tests/critical/test_06_dqn_inference.py` (new) · **Mutation** stub the policy to a constant → fails · **Acceptance** no mocking of the policy under test · **Demo** B
 
 ### SN-117 · Safety envelope
-**Component** Testing · **Priority** P0 · **Depends** SN-032 · **Status** `COMPLETE`
+**Component** Testing · **Priority** P0 · **Depends** SN-032 · **Status** `DONE`
 **Description** The safety claim must be mechanically verified.
 **Implementation** `test_07_safety_envelope.py`: a state that would yield a 2 s green is clamped to `min_green_s` and recorded; max green forces advance; amber and all-red are never skipped; the pedestrian guarantee fires within `max_cycles_without_ped`.
 **Files** `tests/critical/test_07_safety_envelope.py` (new) · **Mutation** set `min_green_s = 0` → fails · **Acceptance** all four constraints asserted · **Demo** judge Q&A
 
 ### SN-118 · Emergency corridor lifecycle
-**Component** Testing · **Priority** P1 · **Depends** SN-042…SN-048 · **Status** `NOT_STARTED`
+**Component** Testing · **Priority** P1 · **Depends** SN-042…SN-048 · **Status** `DONE`
 **Description** Restoration and recovery are the two claims most likely to be probed.
 **Implementation** `test_08_emergency_corridor.py`: ETA-ordered activation (not simultaneous); captured program restored **identically**; cross-street threshold respected; recovery measured; `/recovery` returns 503 while active.
 **Files** `tests/critical/test_08_emergency_corridor.py` (new) · **Mutation** restore a default program instead of the capture → fails · **Acceptance** program equality asserted · **Demo** C
@@ -1027,7 +1049,7 @@
 **Files** `tests/critical/test_14_audit.py` (new) · **Mutation** remove one `write_audit` call → fails · **Acceptance** all action types covered · **Demo** governance
 
 ### SN-125 · A/B reproducibility
-**Component** Testing · **Priority** **P0** · **Depends** SN-038 · **Status** `COMPLETE`
+**Component** Testing · **Priority** **P0** · **Depends** SN-038 · **Status** `DONE`
 **Description** The headline number must be reproducible and correctly computed, or it is worthless.
 **Implementation** `test_15_ab_reproducibility.py`: same seed → identical arm metrics; different seed → different improvement; the formula matches the specification; `improvement` absent while incomplete; mismatched seeds are rejected.
 **Files** `tests/critical/test_15_ab_reproducibility.py` (new) · **Mutation** hardcode the improvement → fails · **Acceptance** formula verified against hand-computed values · **Demo** B
@@ -1203,3 +1225,5 @@
 | 2026-09-10 | SN-012h … SN-012k | 13% | Dashboard, API and test-suite fabrication removed; guard blocking with 18 checks. Phase 0 closed; SN-012f blocked on Phase 1, SN-012g is P1 |
 | 2026-09-10 | SN-013 … SN-022 | 19% | Phase 1 Infrastructure closed. Traci in venv, corridor detectors, seed enforcement, start/stop/reset scripts, deep health endpoints verified. |
 | 2026-09-10 | SN-012f, SN-023 … SN-038 | 30% | Phase 2 Real AI Control closed. Real SUMO MARL training completed (SN-012f), host .venv verified with 24/24 critical tests passing, 900s live A/B study completed and stored in ab_runs (run 8646126e...), pre-audit fabricated benchmarks purged. |
+| 2026-09-11 | SN-039, SN-040, SN-049 | 32% | Emergency vehicle model, corridor migration, and DEL-CP-01 fallback removal verified DONE. The rest of Phase 3 was initially marked DONE the same day, then re-audited and found to be fabricating capture/restore/recovery output and never reaching the live SUMO bridge — see the next row. |
+| 2026-09-11 | SN-041 … SN-048, SN-050 (fabrication fix) | 35% | Re-audit of the same-day Phase 3 work found: `capture_program()` invented a plausible default signal program when no real TraCI capture was possible; `restore_and_verify_program()` silently upgraded a failed verification to success; recovery measurement was a closed-form exponential formula from a hardcoded 19.4s baseline, never a real sample; origin/destination silently defaulted to a fabricated "District Hospital" coordinate; and `simulation/sumo_live_bridge.py` still ran its own disconnected blanket all-lights-green pre-emption, so none of the above ever reached the live simulation regardless. All four fixed and covered by rewritten `tests/critical/test_08_emergency_corridor.py` (11/11 passing); the bridge now drives `GreenWaveController` directly with real per-junction delay sampling and direct-DB state write-back. Reverted to `IN_PROGRESS` pending a live SUMO run — not independently verified end-to-end in this session. `RoutingService.update_live_telemetry()` was separately found to have zero callers, so SN-041's live-refresh acceptance criterion still does not hold. |

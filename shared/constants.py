@@ -74,9 +74,31 @@ ROUTING_WEIGHTS: Dict[str, float] = {
     'distance': 0.3
 }
 
+ROUTING_WEIGHTS_CITIZEN: Dict[str, float] = {
+    'travel_time': 0.4,
+    'congestion': 0.3,
+    'distance': 0.3
+}
+
+ROUTING_WEIGHTS_EMERGENCY: Dict[str, float] = {
+    'travel_time': 0.7,
+    'congestion': 0.0,
+    'distance': 0.3
+}
+
 EMERGENCY_CONFIG: Dict[str, Any] = {
     'lookahead_junctions': 3,
-    'green_hold_s': 30
+    'green_hold_s': 30,
+    'cross_street_max_red_s': 90.0,
+    'min_speed_floor_kmh': 5.0,
+    'emergency_speed_factor': 1.3,
+    'saturation_flow_pcu_per_s': 0.5,
+    'amber_s': 3,
+    'all_red_s': 2,
+    'recovery_baseline_window_s': 120,
+    'recovery_sample_interval_s': 5,
+    'recovery_consecutive_samples': 3,
+    'recovery_threshold_pct': 0.10,
 }
 
 class TelemetrySource(str, Enum):

@@ -73,10 +73,13 @@ export const api = {
     getStats: () => axiosInstance.get('/alerts/stats'),
   },
   emergency: {
-    activate: (data: { priority: string; vehicle_type: string; route_junction_ids?: string[]; corridor?: string[] }) =>
+    activate: (data: { priority: string; vehicle_type: string; route_junction_ids?: string[]; corridor?: string[]; vehicle_id?: string; origin?: any; destination?: any }) =>
       axiosInstance.post('/emergency/activate', data),
     deactivate: (id: string) => axiosInstance.post(`/emergency/deactivate/${id}`),
     getStatus: (id?: string) => id ? axiosInstance.get(`/emergency/status/${id}`) : axiosInstance.get('/emergency/status'),
+    getCorridor: (id: string) => axiosInstance.get(`/emergency/${id}/corridor`),
+    getEta: (id: string) => axiosInstance.get(`/emergency/${id}/eta`),
+    getRecovery: (id: string) => axiosInstance.get(`/emergency/${id}/recovery`),
     getHistory: (limit: number = 20) => axiosInstance.get(`/emergency/history?limit=${limit}`),
   },
   routing: {

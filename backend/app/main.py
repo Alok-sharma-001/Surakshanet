@@ -70,6 +70,12 @@ async def redis_pubsub_bridge():
                         ws_target = "control"
                     elif channel_name == REDIS_CHANNELS["traffic"]:
                         ws_target = "traffic"
+                        if isinstance(payload, dict):
+                            try:
+                                from app.services.routing_telemetry import record_junction_telemetry
+                                record_junction_telemetry(payload)
+                            except Exception:
+                                pass
                     else:
                         ws_target = channel_name
 
@@ -96,10 +102,15 @@ async def lifespan(app: FastAPI):
     # 2. Start Redis-to-WebSocket live bridge
     bridge_task = asyncio.create_task(redis_pubsub_bridge())
 
+    # 3. Start the routing graph's live telemetry refresh loop (SN-041)
+    from app.services.routing_telemetry import periodic_routing_refresh
+    routing_refresh_task = asyncio.create_task(periodic_routing_refresh())
+
     yield
 
     # Shutdown
     bridge_task.cancel()
+    routing_refresh_task.cancel()
     try:
         from app.services.mqtt_consumer import mqtt_consumer
         mqtt_consumer.stop()

@@ -37,9 +37,71 @@ execution surface is `docs/CHECKLIST.md` (SN-001…SN-150, grouped into Phases 0
     A/B evaluation executed via `POST /ab/run` and persisted to TimescaleDB table `ab_runs`
     (run `8646126e-da0b-4602-ae0c-fdd8e0b2af3b`, Webster: 726.84s delay vs MARL: 826.32s delay,
     honest delta reporting).
-  - All SN items (SN-012f, SN-023…SN-038) individually verified; `docs/CHECKLIST.md` reconciled
-    to 17/17 DONE (total progress: 48/161 DONE, 30%).
-- **Phases 3–10:** NOT_STARTED.
+- **Phase 3 (Emergency corridor, SN-039…SN-050 + SN-118):** IN_PROGRESS, not DONE — a
+  2026-09-11 re-audit found this phase had been marked DONE while still fabricating exactly
+  the class of output Phase 0 exists to eliminate; those defects are now fixed at the code
+  level and covered by rewritten tests, but the fix has **not been exercised against a live
+  SUMO instance** in any session — do not re-mark DONE until it has:
+  - **Fixed, verified by unit/critical tests:** `GreenWaveController.capture_program()`
+    ([green_wave.py](ml/emergency/green_wave.py)) no longer fabricates a plausible default
+    4-phase program when no real TraCI capture is possible — it returns `None`, and the
+    caller leaves that junction on its normal cycle (`capture_unavailable` state) rather than
+    pre-empting on a fake plan. `restore_and_verify_program()` no longer force-overrides a
+    failed verification to `True` — failure is now reported as `restore_failed`, not silently
+    claimed as success. Recovery measurement (SN-048) no longer generates a curve from a
+    hardcoded baseline (`19.4`) and a closed-form exponential formula — `recovery_s` stays
+    `null` until real samples (`GreenWaveController.ingest_delay_sample`) actually resolve it,
+    and `/emergency/{id}/recovery` reports this honestly instead of a placeholder number.
+    Origin/destination no longer default to a fabricated "District Hospital" coordinate when
+    omitted — both are `None` unless the caller actually supplies them, and `resolve_route()`
+    requires both origin and destination (not just destination) before computing an A* route.
+  - **Fixed, integration NOT independently verified end-to-end:** the corridor's rolling
+    activation/capture/restore previously ran only in the API process (no TraCI access) while
+    `simulation/sumo_live_bridge.py` still ran its own disconnected blanket
+    "every-light-to-phase-0" pre-emption — meaning none of SN-043/044/045/046 ever reached the
+    live simulation regardless of what the API-side code did. The bridge now drives
+    `GreenWaveController` directly (the only process with a live TraCI connection),
+    dynamically builds the ambulance's SUMO route from `shared/corridor_topology.py`'s real
+    edge ids, feeds real per-junction cross-street delay samples every 5 sim-seconds
+    (continuously, so a genuine pre-activation baseline exists), and writes corridor state
+    back to `emergency_events` directly via `psycopg2` (mirroring how `control_service`
+    writes `control_decisions` from its own process) since the API process's own
+    `GreenWaveController` instance never sees the bridge's progress. `backend/app/api/emergency.py`'s
+    GET endpoints now read live status from that DB row rather than the API process's
+    never-updated in-memory copy. **None of this has been run against the actual
+    `corridor.sumocfg` simulation** — no environment with TimescaleDB + Redis + SUMO reachable
+    was available in the session that made this fix, so `docs/CHECKLIST.md`'s acceptance
+    criteria (junctions visibly propagate in the SUMO GUI, exact post-corridor program
+    equality, recovery chart populates from a real run) are unverified. Do this before
+    trusting the phase.
+  - Frontend `EmergencyPage.tsx` updated to render the now-honest states (`recovery_s: null`
+    while unresolved, `baseline_available: false` when no pre-activation sample exists) instead
+    of assuming a number is always present.
+  - `grep -rn "mock_plan\|DEL-CP-01"` across `ml/`, `backend/` still returns nothing.
+  - Checklist progress claim from the reverted-DONE edit (66/161, 41%) is not reliable — SN-039,
+    SN-040, SN-049 are genuinely verified by tests; SN-041…SN-048, SN-050 need the live
+    run above before they're truthfully `DONE`. SN-118's own job — the mutation-checked test
+    file — is complete and passing (proven by the fact it fails against the old fabricating
+    code and passes against the fix), so it stays `DONE`.
+  - **2026-09-11, later same day — SN-041 live refresh wired and verified:**
+    `backend/app/services/routing_telemetry.py` (new) caches each JunctionTelemetry message the
+    existing Redis-to-WebSocket bridge (`main.py::redis_pubsub_bridge`) already receives on
+    `REDIS_CHANNELS["traffic"]`, and a background task started in `lifespan()` calls
+    `RoutingService.update_live_telemetry()` from that cache every 10s. `shared/corridor_topology.py`
+    gained a `telemetry_approach` mapping per edge (which real junction + compass-direction
+    approach a vehicle traveling that edge arrives via) so junction-level telemetry translates to
+    the right edge. Verified by `tests/test_routing_engine_phase3.py::test_live_junction_telemetry_reroutes_within_one_refresh`
+    (feeds a real JunctionTelemetry payload, asserts the route changes) — not exercised against a
+    live SUMO run, same caveat as the rest of Phase 3 above.
+    **Found but deliberately left unfixed:** `RoutingService.initialize_from_db()` builds graph
+    nodes keyed by `junctions.name`, but `backend/scripts/seed_city.py` only ever seeds decorative
+    Delhi/Bengaluru junctions into that table — never the real corridor nodes (`J0`..`J3` etc.)
+    `network_links` actually references. If `initialize_from_db()` were ever called, it would
+    silently build a graph whose nodes share nothing with its own edges. Left un-called rather
+    than guessed at, since fixing it means deciding how the decorative city-display junctions and
+    the real simulated corridor relate — a product call, not one to make while wiring telemetry.
+    See `docs/CHECKLIST.md`'s SN-041 entry for the full detail.
+- **Phases 4–10:** NOT_STARTED.
 
 **2026-09-11 addendum — Phase 2 re-audit findings, fixed, and one open limitation:**
 A deep re-verification (not just re-reading this file — actually exercising the running system)
@@ -212,11 +274,13 @@ later), `controller` (marl/webster/manual).
 ab_runner.py`). `improvement` is absent until the run genuinely completes — never filled with
 a placeholder.
 
-**`alerts`**, **`emergency_events`** — see `docs/05-database.md` for full field lists.
+**`alerts`**, **`emergency_events`** — see `docs/05-database.md §3` for full field lists. `emergency_events` is extended in Phase 3 with 13 fields (`vehicle_type`, `origin_lat`, `origin_lon`, `destination_lat`, `destination_lon`, `destination_junction_id`, `route_etas`, `clearance_time_s`, `captured_programs`, `starvation_events`, `restored_at`, `recovery_s`, `recovery_series`) and an ORM precondition rejecting `status = COMPLETED` without `restored_at`.
+
+**`network_links`** (new, SN-041) — stores corridor topological links (`from_junction_id`, `to_junction_id`, `sumo_edge_id`, `length_m`, `free_flow_speed_kmh`, `capacity_veh_per_hr`).
 
 ### Alembic
-Three migrations: `001_initial_schema`, `001b_datasource_provenance`,
-`002_control_decisions_ab_runs`. `database.py::init_db()` runs migrations under a Postgres
+Four migrations: `001_initial_schema`, `001b_datasource_provenance`,
+`002_control_decisions_ab_runs`, `003_emergency_corridor`. `database.py::init_db()` runs migrations under a Postgres
 advisory lock (`pg_try_advisory_lock`) so `--workers 2` booting concurrently don't race each
 other into a spurious failure — a genuine migration failure now propagates and crashes
 startup rather than being logged and swallowed (fixed in Phase 1; see §13.12).
@@ -235,9 +299,9 @@ startup rather than being logged and swallowed (fixed in Phase 1; see §13.12).
 | `/ml` | `api/ml.py` | `POST /ml/detect` (YOLOv8, 503 if weights absent), `/ml/predict` (503 if no readings and no trained model) |
 | `/simulation` | `api/simulation.py` | SUMO TraCI control; 503 `simulation_unavailable` when SUMO absent — no fabricated fallback |
 | `/ab` | `api/ab.py` | (new, SN-038) A/B comparison runs |
-| `/routing` | `api/routing.py` | A* pathfinding |
+| `/routing` | `api/routing.py` | A* pathfinding with live telemetry weights, staleness detection (>60s), citizen/emergency profiles, and diverse alternative routes |
 | `/alerts` | `api/alerts.py` | Alert CRUD |
-| `/emergency` | `api/emergency.py` | `POST /activate` — 422 if no route supplied, never assumes a corridor |
+| `/emergency` | `api/emergency.py` | `POST /activate` (422 if unrouted/no destination), `GET /{id}/corridor` (rolling state), `GET /{id}/eta`, `GET /{id}/recovery` (503 while active, 200 post-close), `POST /deactivate/{id}` |
 | `/signals` | `api/signals.py` | Signal plan management; `mode` field now actually consumed by the control service (SN-033) |
 | `/health` | `api/health.py` | `GET /health` liveness → `{"status": "healthy"}`; `GET /health/deep` readiness → per-dependency `ok`/`degraded`/`error`/`unavailable`, never assumed |
 | `/metrics` | `main.py` | Prometheus scrape (no prefix) |

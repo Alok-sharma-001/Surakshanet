@@ -8,7 +8,7 @@ def test_rtsp_worker_frame_generation():
     """Verify synthetic frame generation and dimensions."""
     worker = RTSPStreamWorker(
         camera_url="test_url",
-        junction_id="DEL-CP-01",
+        junction_id="J0",
         target_fps=10.0,
         enable_synthetic_fallback=True
     )
@@ -25,7 +25,7 @@ def test_rtsp_worker_refuses_to_fabricate_without_a_model():
     """
     worker = RTSPStreamWorker(
         camera_url="test_url",
-        junction_id="DEL-CP-01",
+        junction_id="J0",
         target_fps=5.0
     )
     frame = worker._generate_synthetic_frame(width=1280, height=720)
@@ -45,13 +45,13 @@ def test_rtsp_worker_telemetry_contract():
     """With a real model, the payload declares what it actually measured."""
     worker = RTSPStreamWorker(
         camera_url="test_url",
-        junction_id="DEL-CP-01",
+        junction_id="J0",
         target_fps=5.0
     )
     frame = worker._generate_synthetic_frame(width=1280, height=720)
     telemetry = worker.process_frame(frame)
 
-    assert telemetry["junction_id"] == "DEL-CP-01"
+    assert telemetry["junction_id"] == "J0"
     assert "sensor_id" in telemetry
     assert telemetry["pcu_value"] >= 0.0
     # A single frame carries no displacement, so the detector cannot measure

@@ -32,7 +32,7 @@ def test_modbus_relay_encoder():
 
 def test_virtual_cabinet_emulator():
     """Verify virtual cabinet relay logic for flash all-red and phase skip."""
-    cabinet = VirtualCabinetEmulator("DEL-CP-01")
+    cabinet = VirtualCabinetEmulator("J0")
     
     # Flash all-red
     res = cabinet.apply_override("FLASH_ALL_RED")
@@ -49,10 +49,10 @@ def test_virtual_cabinet_emulator():
 
 def test_signal_controller_bridge_dispatch():
     """Verify high-level dispatch bridging to both NTCIP and Modbus outputs."""
-    bridge = SignalControllerBridge("DEL-CP-01")
+    bridge = SignalControllerBridge("J0")
     res = bridge.dispatch_command("FLASH_ALL_RED")
 
-    assert res["junction_id"] == "DEL-CP-01"
+    assert res["junction_id"] == "J0"
     assert res["action"] == "FLASH_ALL_RED"
     assert "ntcip_frame_hex" in res
     assert "modbus_frame_hex" in res

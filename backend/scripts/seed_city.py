@@ -12,6 +12,7 @@ from app.models.junction import Junction, TrafficSensor, SensorType, ApproachDir
 from app.models.signal import SignalPlan, SignalMode
 from app.models.traffic import TrafficReading
 from app.models.alert import Alert, AlertType, AlertSeverity
+from app.models.network import NetworkLink
 
 settings = get_settings()
 
@@ -197,7 +198,31 @@ async def seed_city():
         db.add_all(alerts)
         await db.commit()
 
-        print("City topology, baseline readings, and active alerts successfully seeded!")
+        # Seed network links for A* routing (SN-041)
+        res_links = await db.execute(select(NetworkLink))
+        existing_links = res_links.scalars().all()
+        if len(existing_links) == 0:
+            print("Seeding corridor network links for A* routing...")
+            from app.services.routing_service import CORRIDOR_EDGES
+            links = [
+                NetworkLink(
+                    id=uuid.uuid4(),
+                    from_junction=edge["from"],
+                    to_junction=edge["to"],
+                    sumo_edge_id=edge["sumo_edge_id"],
+                    length_m=edge.get("length_m", 300.0),
+                    lanes=2,
+                    free_flow_speed_kmh=edge.get("free_flow_speed", 50.0),
+                    capacity_pcu_h=edge.get("capacity", 2000.0),
+                    created_at=datetime.utcnow()
+                )
+                for edge in CORRIDOR_EDGES
+            ]
+            db.add_all(links)
+            await db.commit()
+            print(f"Created {len(links)} network links for routing engine.")
+
+        print("City topology, baseline readings, active alerts, and network links successfully seeded!")
 
 if __name__ == "__main__":
     asyncio.run(seed_city())

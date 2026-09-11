@@ -2,40 +2,10 @@ import time
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter
 from pydantic import BaseModel
-from ml.routing.routing_engine import RoutingEngine
+
+from app.services.routing_service import routing_service
 
 router = APIRouter(prefix="/routing", tags=["routing"])
-
-routing_engine = RoutingEngine()
-
-# Seed default city network nodes for Delhi & Bengaluru corridors
-DEFAULT_JUNCTIONS = [
-    {"id": "DEL-CP-01", "name": "Connaught Place Inner", "lat": 28.6315, "lon": 77.2167},
-    {"id": "DEL-ITO-02", "name": "ITO Crossing", "lat": 28.6289, "lon": 77.2405},
-    {"id": "DEL-AIIMS-03", "name": "AIIMS Flyover", "lat": 28.5672, "lon": 77.2100},
-    {"id": "DEL-ASH-04", "name": "Ashram Chowk", "lat": 28.5714, "lon": 77.2588},
-    {"id": "DEL-DHK-05", "name": "Dhaula Kuan", "lat": 28.5921, "lon": 77.1565},
-    {"id": "DEL-LAJ-06", "name": "Lajpat Nagar", "lat": 28.5700, "lon": 77.2370},
-    {"id": "BLR-MGR-01", "name": "MG Road - Brigade", "lat": 12.9756, "lon": 77.6066},
-    {"id": "BLR-SLK-02", "name": "Silk Board Junction", "lat": 12.9177, "lon": 77.6238},
-    {"id": "BLR-IND-03", "name": "Indiranagar 100ft", "lat": 12.9719, "lon": 77.6412},
-    {"id": "BLR-KOR-04", "name": "Koramangala Sony World", "lat": 12.9352, "lon": 77.6245},
-]
-
-DEFAULT_EDGES = [
-    {"from": "DEL-CP-01", "to": "DEL-ITO-02", "free_flow_speed": 45.0, "capacity": 1800},
-    {"from": "DEL-ITO-02", "to": "DEL-ASH-04", "free_flow_speed": 50.0, "capacity": 2200},
-    {"from": "DEL-ASH-04", "to": "DEL-LAJ-06", "free_flow_speed": 40.0, "capacity": 1600},
-    {"from": "DEL-LAJ-06", "to": "DEL-AIIMS-03", "free_flow_speed": 55.0, "capacity": 2400},
-    {"from": "DEL-AIIMS-03", "to": "DEL-DHK-05", "free_flow_speed": 60.0, "capacity": 2600},
-    {"from": "DEL-DHK-05", "to": "DEL-CP-01", "free_flow_speed": 50.0, "capacity": 2000},
-    {"from": "BLR-MGR-01", "to": "BLR-IND-03", "free_flow_speed": 35.0, "capacity": 1400},
-    {"from": "BLR-IND-03", "to": "BLR-KOR-04", "free_flow_speed": 40.0, "capacity": 1500},
-    {"from": "BLR-KOR-04", "to": "BLR-SLK-02", "free_flow_speed": 30.0, "capacity": 2000},
-    {"from": "BLR-SLK-02", "to": "BLR-MGR-01", "free_flow_speed": 35.0, "capacity": 1800},
-]
-
-routing_engine.build_graph(DEFAULT_JUNCTIONS, DEFAULT_EDGES)
 
 # VMS in-memory store.
 #
@@ -54,6 +24,7 @@ class RouteRequest(BaseModel):
     dest_lon: Optional[float] = None
     origin: Optional[Dict[str, float]] = None
     destination: Optional[Dict[str, float]] = None
+    profile: Optional[str] = "citizen"
 
     def get_coords(self) -> tuple[tuple[float, float], tuple[float, float]]:
         # Origin
@@ -88,20 +59,23 @@ class VMSBroadcastRequest(BaseModel):
 
 @router.post("/route")
 async def compute_route(data: RouteRequest):
-    """Compute optimal route between coordinates using A* search."""
+    """Compute optimal route between coordinates using A* search and live telemetry weights."""
     origin, destination = data.get_coords()
+    profile = data.profile or "citizen"
 
-    result = routing_engine.find_route(origin, destination)
+    result = routing_service.find_route(origin, destination, profile=profile)
     if "error" in result:
         # Fallback to direct path with distance estimate
-        dist_km = routing_engine._haversine(origin[0], origin[1], destination[0], destination[1])
+        dist_km = routing_service.engine._haversine(origin[0], origin[1], destination[0], destination[1])
         result = {
             "origin": [origin[0], origin[1]],
             "destination": [destination[0], destination[1]],
             "path": [[origin[0], origin[1]], [destination[0], destination[1]]],
             "estimated_time_min": round((dist_km / 35.0) * 60, 1),
             "distance_km": round(dist_km, 2),
-            "congestion_level": "MODERATE"
+            "congestion_level": "MODERATE",
+            "stale": False,
+            "profile": profile,
         }
 
     result["distance"] = result.get("distance_km", 0.0)
@@ -111,31 +85,27 @@ async def compute_route(data: RouteRequest):
 
 @router.post("/alternatives")
 async def compute_alternatives(data: RouteRequest):
-    """Compute primary and alternative routes for dynamic diversion."""
+    """Compute primary and diverse alternative routes for dynamic diversion (SN-041/063)."""
     origin, destination = data.get_coords()
+    profile = data.profile or "citizen"
 
-    routes = routing_engine.find_alternatives(origin, destination, num_routes=2)
-    for r in routes:
+    res = routing_service.find_alternatives(origin, destination, num_routes=2, profile=profile)
+    alternatives = res.get("alternatives", [])
+    for r in alternatives:
         r["distance"] = r.get("distance_km", 0.0)
         r["duration"] = r.get("estimated_time_min", r.get("eta_minutes", 0.0))
-    return routes
+
+    return {
+        "primary": res.get("primary"),
+        "alternatives": alternatives,
+        "advice": res.get("advice", "")
+    }
 
 
 @router.get("/congestion")
 async def get_congestion():
-    """Get current network edge congestion levels."""
-    edges_data = []
-    for u in routing_engine.graph:
-        for v, data in routing_engine.graph[u].items():
-            edges_data.append({
-                "from": u,
-                "to": v,
-                "distance_km": round(data["distance"], 2),
-                "current_speed_kmh": round(data.get("current_speed", data["speed"]), 1),
-                "congestion_level": routing_engine.get_congestion_level(
-                    data.get("current_speed", data["speed"]), data["speed"]
-                )
-            })
+    """Get current network edge congestion and staleness status (SN-041)."""
+    edges_data = routing_service.get_congestion()
     return {"edges": edges_data}
 
 
