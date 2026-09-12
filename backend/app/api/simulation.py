@@ -286,7 +286,32 @@ async def stop_simulation(current_user: User = Depends(require_role("ADMIN", "OP
 async def get_metrics(current_user: User = Depends(require_role("ADMIN", "OPERATOR", "VIEWER"))):
     global sim_instance
     if sim_instance and getattr(sim_instance, "is_running", False):
-        return sim_instance.get_metrics()
+        # SumoEnvironment.get_metrics() only tracks throughput/delay counters
+        # (as total_throughput, not throughput) and has no avg_speed field —
+        # the dashboard's Simulation page expects throughput/avg_speed/source,
+        # which were silently always undefined, rendering as a permanent "—"
+        # / "UNAVAILABLE" badge even while the simulation genuinely ran.
+        # avg_speed here is a real vehicle-count-weighted average across every
+        # approach's measured detector speed (get_state()), not a fabricated
+        # value — None (not 0) when no vehicle is present to measure.
+        base = sim_instance.get_metrics()
+        state = sim_instance.get_state()
+        weighted_speed_total = 0.0
+        vehicles_with_speed = 0.0
+        for junction in state.get("junctions", {}).values():
+            for approach in junction.get("approaches", {}).values():
+                vc = approach.get("vehicle_count", 0.0)
+                if vc > 0:
+                    weighted_speed_total += approach["avg_speed"] * vc
+                    vehicles_with_speed += vc
+        avg_speed = (weighted_speed_total / vehicles_with_speed) if vehicles_with_speed > 0 else None
+        return {
+            "throughput": base.get("total_throughput"),
+            "avg_delay": base.get("avg_delay"),
+            "avg_speed": avg_speed,
+            "total_vehicles": base.get("total_vehicles"),
+            "source": "sumo",
+        }
 
     redis_state = await get_redis_sim_state()
     if redis_state and redis_state.get("running"):

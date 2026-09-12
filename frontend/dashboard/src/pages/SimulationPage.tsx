@@ -19,6 +19,7 @@ const fmt = (v: number | null | undefined, digits = 0) =>
 interface SimState {
   running?: boolean;
   step?: number;
+  step_count?: number;
   sim_time?: string;
   simulation_time?: number;
   vehicles?: number;
@@ -107,9 +108,9 @@ export default function SimulationPage() {
     if (!isRunning || metrics?.throughput === null || metrics?.throughput === undefined) return;
     setThroughputHistory((h) => [
       ...h.slice(-99),
-      { step: state?.step ?? h.length, throughput: metrics.throughput as number },
+      { step: state?.step_count ?? state?.step ?? h.length, throughput: metrics.throughput as number },
     ]);
-  }, [metrics?.throughput, state?.step, isRunning]);
+  }, [metrics?.throughput, state?.step_count, state?.step, isRunning]);
 
   // SN-133: select -> state reset -> start at seed 42 (server-enforced,
   // never client-supplied). Completes in one click.
@@ -261,7 +262,7 @@ export default function SimulationPage() {
           </div>
           <div>
             <div className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Current Step</div>
-            <div className="font-mono text-xl font-bold text-slate-900">{fmt(state?.step)}</div>
+            <div className="font-mono text-xl font-bold text-slate-900">{fmt(state?.step_count ?? state?.step)}</div>
           </div>
           <div>
             <div className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Elapsed Sim Time</div>
