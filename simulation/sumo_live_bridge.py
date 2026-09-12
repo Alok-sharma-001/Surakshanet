@@ -219,7 +219,16 @@ class SumoLiveBridge:
             self.db_conn.autocommit = True
             return self.db_conn
         except Exception as e:
-            logger.debug(f"Emergency DB connection unavailable ({e}); corridor state stays Redis/in-memory only.")
+            # Was logger.debug() — invisible at this script's actual runtime
+            # log level, which is exactly how a real DB-hostname
+            # misconfiguration (POSTGRES_HOST defaulting to the in-Docker
+            # "postgres", unreachable from this bare host process) sat
+            # unnoticed: every corridor completion/recovery write silently
+            # failed here while the rest of the log looked completely
+            # healthy. A broken DB connection for a process that exists
+            # specifically to persist real TraCI observations is loud by
+            # default now, not opt-in.
+            logger.warning(f"Emergency DB connection unavailable ({e}); corridor state stays Redis/in-memory only, NOT persisted to emergency_events.")
             self.db_conn = None
             return None
 
@@ -638,6 +647,28 @@ class SumoLiveBridge:
 
             if event_id not in self.green_wave_ctrl.active_events:
                 # step_corridor deactivated it internally (final junction passed).
+                #
+                # 2026-09-12: the flush at line ~637 above
+                # (`_flush_corridor_state(event_id)`, not forced) was the only
+                # write that could persist this exact COMPLETED transition —
+                # and it's throttled (DB_WRITE_THROTTLE_S=2s). If it lands
+                # inside that window (plausible: an active corridor writes
+                # frequently right up until the instant it completes), the
+                # write is silently dropped, and since this event_id no
+                # longer appears in active_events on the next step, nothing
+                # would ever retry it. This specific transition is too
+                # important to leave to the throttle, so force a flush the
+                # instant completion is detected. (The concrete failure that
+                # first surfaced this — every corridor staying ACTIVE forever
+                # in the DB despite the bridge's own log correctly showing
+                # completion — turned out to have a different, separate root
+                # cause: start.sh launched this process without POSTGRES_HOST/
+                # PORT set, so _build_db_dsn()'s defaults pointed at the
+                # in-Docker hostname "postgres", unreachable from this bare
+                # host process; see start.sh's Step 5 for that fix. This
+                # throttle-window gap is real on its own, independent of
+                # that, so it's fixed here regardless.)
+                self._flush_corridor_state(event_id, force=True)
                 self.corridor_vehicle.pop(event_id, None)
                 self.corridor_route_length_m.pop(event_id, None)
                 if self.gui:

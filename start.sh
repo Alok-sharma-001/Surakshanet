@@ -191,6 +191,25 @@ if [[ -f "logs/sumo_bridge.pid" ]]; then
     rm -f logs/sumo_bridge.pid
 fi
 
+# The bridge runs as a bare host process (not inside the docker-compose
+# network), but simulation/sumo_live_bridge.py::_build_db_dsn() defaults to
+# POSTGRES_HOST=postgres/PORT=5432 — the in-Docker service hostname/port,
+# which never resolves from the host. .env carries that same in-Docker
+# value and is never sourced into this script's environment, so the bridge
+# always fell through to the unreachable default. Confirmed live
+# (2026-09-12): a real corridor activation completed correctly per the
+# bridge's own log ("all junctions restored and verified", a real recovery
+# figure measured) while its emergency_events row stayed ACTIVE forever —
+# every UPDATE the bridge issued was silently failing to connect. Export
+# the real host-mapped values (this demo profile's timescaledb container
+# publishes 127.0.0.1:5433) so the bridge's direct DB writes (captured
+# programs, restore verification, recovery_s) actually reach Postgres.
+export POSTGRES_HOST=127.0.0.1
+export POSTGRES_PORT=5433
+export POSTGRES_USER=surakshanet
+export POSTGRES_PASSWORD=surakshanet_dev
+export POSTGRES_DB=surakshanet
+
 nohup $PYTHON_BIN simulation/sumo_live_bridge.py --seed "$DEMO_SEED" --no-gui >> logs/sumo_bridge.log 2>&1 &
 echo $! > logs/sumo_bridge.pid
 disown $! 2>/dev/null || true
