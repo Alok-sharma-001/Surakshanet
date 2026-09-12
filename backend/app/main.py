@@ -108,6 +108,23 @@ async def lifespan(app: FastAPI):
     """Application lifespan context manager for startup and shutdown events."""
     await init_db()
 
+    # 0. Clear any stale "simulation running" flag left in Redis by a
+    # previous process incarnation. A brand-new worker's in-memory
+    # sim_instance (backend/app/api/simulation.py) is always None at this
+    # point — it cannot possibly match whatever Redis says, so any
+    # "running": true left over from before this restart is definitely
+    # stale and would otherwise make POST /simulation/start falsely 409
+    # ("already running") with no real simulation to stop or step. Found
+    # live 2026-09-12: restarting this container after a Simulation-page
+    # scenario had been running left exactly this stuck state, only
+    # recoverable by manually flushing these two Redis keys.
+    try:
+        redis_startup = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+        await redis_startup.delete("simulation:state", "simulation:running")
+        await redis_startup.aclose()
+    except Exception as e:
+        print(f"Stale simulation-state cleanup skipped: {e}")
+
     # 1. Start MQTT IoT Telemetry Consumer
     try:
         from app.services.mqtt_consumer import mqtt_consumer

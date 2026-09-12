@@ -63,6 +63,18 @@ services:
       context: ..
       dockerfile: backend/Dockerfile
     container_name: surakshanet-backend
+    # Overrides the Dockerfile's --workers 2 for this demo profile only.
+    # backend/app/api/simulation.py's SumoEnvironment handle (sim_instance)
+    # is a plain module-level global, not shared across worker processes —
+    # live-verified 2026-09-12: firing POST /simulation/step five times in a
+    # row against the real demo stack returned step_count 2, 3, 4, 1, 5 —
+    # jumping backward because requests were landing on two different
+    # workers, each with its own independent (and mostly empty) SUMO
+    # handle. The Simulation page's scenario switcher/step controls need a
+    # single worker to behave consistently; Live Traffic Map is unaffected
+    # since it's fed by the separate, always-running sumo_live_bridge.py
+    # process, not this API's worker pool.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
