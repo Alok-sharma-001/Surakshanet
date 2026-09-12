@@ -1,8 +1,10 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import DashboardLayout from './components/Layout/DashboardLayout';
 import ErrorBoundary from './components/ErrorBoundary';
+import ProtectedRoute from './components/ProtectedRoute';
+import { useAuthStore } from './store/authStore';
 
 // Route-level code splitting using React.lazy
 const TrafficMapPage = lazy(() => import('./pages/TrafficMapPage'));
@@ -36,6 +38,16 @@ const PageLoader = () => (
 );
 
 function App() {
+  const loadFromStorage = useAuthStore((s) => s.loadFromStorage);
+
+  useEffect(() => {
+    // Rehydrates isAuthenticated from a stored token on refresh / direct
+    // navigation — previously defined but never called anywhere, so a
+    // page refresh always started from a logged-out client state even
+    // when a valid token was still in localStorage.
+    loadFromStorage();
+  }, [loadFromStorage]);
+
   return (
     <ErrorBoundary>
       <Toaster 
@@ -58,7 +70,7 @@ function App() {
           <Route path="/" element={<Navigate to="/app" replace />} />
 
           {/* Main application with sidebar + header layout */}
-          <Route path="/app" element={<DashboardLayout />}>
+          <Route path="/app" element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
             <Route index element={<TrafficMapPage />} />
             <Route path="dashboard" element={<TrafficMapPage />} />
             <Route path="junctions" element={<JunctionsPage />} />
@@ -87,7 +99,10 @@ function App() {
 
           {/* Shorthand routes */}
           <Route path="/dashboard" element={<Navigate to="/app" replace />} />
-          <Route path="/command" element={<CommandCenterPage />} />
+          {/* CommandCenterPage's LiveIncidents/GlobalEmergencyModal children
+              call real operator-facing APIs (incidents, emergency corridor) —
+              same protection level as /app, not a public showcase like /studio. */}
+          <Route path="/command" element={<ProtectedRoute><CommandCenterPage /></ProtectedRoute>} />
           <Route path="/login" element={<LoginPage />} />
 
           {/* Catch-all */}

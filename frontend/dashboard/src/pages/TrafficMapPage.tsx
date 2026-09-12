@@ -123,18 +123,27 @@ export default function TrafficMapPage() {
         );
       }
 
-      // Add real-time TraCI telemetry event to live feed
+      // Add real-time TraCI telemetry event to live feed.
+      // The same step can arrive more than once (overlapping broadcasts
+      // across backend workers, WebSocket reconnects replaying a recent
+      // message) — skip it rather than pushing a second feed entry with
+      // the same id, which produced a real React "duplicate key" warning
+      // and visibly duplicated rows in this feed.
       if (data.step && data.step % 10 === 0) {
-        const stepEvent: FeedEvent = {
-          id: `step-${data.step}`,
-          title: `TraCI Step ${data.step} Synced`,
-          time: 'Just now',
-          desc: `${data.total_vehicles} vehicles active | Avg ${data.avg_speed} km/h | LOS ${data.network_los}`,
-          icon: Activity,
-          color: 'text-sky-600',
-          bg: 'bg-sky-50',
-        };
-        setFeedEvents(prev => [stepEvent, ...prev.slice(0, 5)]);
+        const stepId = `step-${data.step}`;
+        setFeedEvents(prev => {
+          if (prev.some(e => e.id === stepId)) return prev;
+          const stepEvent: FeedEvent = {
+            id: stepId,
+            title: `TraCI Step ${data.step} Synced`,
+            time: 'Just now',
+            desc: `${data.total_vehicles} vehicles active | Avg ${data.avg_speed} km/h | LOS ${data.network_los}`,
+            icon: Activity,
+            color: 'text-sky-600',
+            bg: 'bg-sky-50',
+          };
+          return [stepEvent, ...prev.slice(0, 5)];
+        });
       }
     });
 

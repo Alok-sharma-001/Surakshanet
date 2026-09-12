@@ -1,10 +1,31 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from app.websocket.manager import manager
+from app.services.auth_service import get_user_from_token_or_none
+from app.models.user import UserRole
 
 ws_router = APIRouter()
 
+# Every channel here carries the same class of live operational telemetry
+# (junction/signal/alert/emergency state) that GET /junctions, GET
+# /simulation/*, etc. already gate behind ADMIN/OPERATOR/VIEWER/
+# EMERGENCY_SERVICES — CITIZEN access to this data goes through the
+# separate, deliberately unauthenticated /public/* advisory endpoints
+# instead. Matches the REST roles already enforced for this data class,
+# rather than introducing new per-channel granularity.
+_ALLOWED_WS_ROLES = {UserRole.ADMIN, UserRole.OPERATOR, UserRole.VIEWER, UserRole.EMERGENCY_SERVICES}
+
 
 async def handle_websocket(websocket: WebSocket, channel: str):
+    token = websocket.query_params.get("token")
+    user = await get_user_from_token_or_none(token)
+    if user is None or user.role not in _ALLOWED_WS_ROLES:
+        # Found live (2026-09-12 acceptance audit): every /ws/* route
+        # previously accepted any connection with no authentication at
+        # all, unlike the equivalent REST reads. Close before accepting —
+        # never silently degrade to broadcasting anyway.
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
     await manager.connect(websocket, channel)
     try:
         while True:

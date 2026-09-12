@@ -180,6 +180,46 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession
     return user
 
 
+async def get_user_from_token_or_none(token: Optional[str]) -> Optional[User]:
+    """WebSocket-appropriate variant of get_current_user(): a WebSocket
+    handshake carries no Authorization header a browser can set, so the
+    token arrives as a query parameter instead — this mirrors the same
+    JWT/revocation/active-user checks but returns None on any failure
+    instead of raising, since the caller is closing a socket, not
+    completing an HTTP request. Found live (2026-09-12 acceptance audit):
+    every /ws/* route previously accepted any connection with zero
+    authentication, while the equivalent REST reads (e.g. GET /junctions)
+    correctly required a valid VIEWER+ token — an live, real authorization
+    inconsistency between the two channels serving the same data class.
+    """
+    if not token:
+        return None
+    try:
+        payload = decode_token(token)
+    except HTTPException:
+        return None
+
+    jti = payload.get("jti")
+    if jti and await is_token_revoked(jti):
+        return None
+
+    user_id_str = payload.get("sub")
+    if not user_id_str:
+        return None
+    try:
+        user_id = UUID(user_id_str)
+    except ValueError:
+        return None
+
+    from app.database import async_session_maker
+    async with async_session_maker() as db:
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+    if user is None or not user.is_active:
+        return None
+    return user
+
+
 oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)
 
 

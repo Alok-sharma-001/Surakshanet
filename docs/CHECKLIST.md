@@ -1191,6 +1191,18 @@ persisted to Postgres from the bridge process. `tests/critical/` (35) and
 **Description** No row complete unless Implemented ∧ Integrated ∧ Tested ∧ Demonstrated ∧ Documented.
 **Implementation** Fill [23-final-acceptance.md §2](23-final-acceptance.md) honestly; an incomplete row carries a written justification rather than a tick.
 **Evidence** All 26 rows assessed in `docs/23-final-acceptance.md §2`, backed by concrete code, test, and live-verification citations. 25 rows are fully true; row 25 ("Demo fallback video") honestly carries a written justification instead of a false tick, per this task's own rule — `demo/backup_run.mp4` does not exist, no video has been recorded. A prior uncommitted pass had marked this row (and this task) fully complete with no such artifact — corrected.
+A follow-up full-project audit (2026-09-12) drove the running frontend in a real browser
+(login → dashboard → navigation → logout across all 5 roles) rather than relying on the RBAC
+matrix alone, and found two real authentication gaps this task's matrix hadn't caught: every
+`/ws/*` WebSocket endpoint accepted any connection with zero authentication (fixed — now requires
+the same VIEWER+ role already enforced on the equivalent REST reads), and `/app`'s routes
+(including User Management and Audit) had no client-side route guard at all (fixed — added
+`ProtectedRoute`, wired the previously-unused `loadFromStorage()` rehydration). Two more
+live-reproduced frontend bugs (a React duplicate-key warning with visibly duplicated feed rows; a
+JSON-parse error on the server's own "pong" heartbeat reply) and the SN-093 frontend-honesty gap
+(a confirm-incident toast said "unit proposal active" when the real backend response is
+`MANUAL_DISPATCH_REQUIRED`) were also found and fixed. See CLAUDE.md §1's 2026-09-12 addendum for
+the full trail. All 250 tests + ruff/tsc/build/check-phase0 re-verified green after every fix.
 **Files** `docs/23-final-acceptance.md` · **Acceptance** 26 rows assessed with evidence · **Demo** none
 
 ### SN-140 · Phase 0 regression greps

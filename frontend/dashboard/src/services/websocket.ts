@@ -30,6 +30,22 @@ class WebSocketService {
       wsUrl = `${protocol}//${window.location.host}/ws/${channel}`;
     }
 
+    // A WebSocket handshake carries no Authorization header a browser can
+    // set, so the backend expects the JWT as a query param instead — the
+    // server closes the connection immediately if it's missing/invalid
+    // (found unauthenticated during a live audit; now matches the same
+    // VIEWER+ role check GET /junctions and friends already enforce).
+    const authToken = (() => {
+      try {
+        return window.localStorage.getItem('token');
+      } catch {
+        return null;
+      }
+    })();
+    if (authToken) {
+      wsUrl += `?token=${encodeURIComponent(authToken)}`;
+    }
+
     try {
       const ws = new WebSocket(wsUrl);
 
@@ -40,6 +56,11 @@ class WebSocketService {
       };
 
       ws.onmessage = (event) => {
+        // The server replies with the plain-text "pong" to this client's
+        // own heartbeat "ping" (see startHeartbeat below) — not JSON, and
+        // not meant for any subscriber callback. Every real payload this
+        // service ever sends is JSON, so this is the only non-JSON case.
+        if (event.data === 'pong') return;
         try {
           const data = JSON.parse(event.data);
           const channelCallbacks = this.callbacks.get(channel);

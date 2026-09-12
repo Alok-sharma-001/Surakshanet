@@ -646,6 +646,84 @@ execution surface is `docs/CHECKLIST.md` (SN-001…SN-150, grouped into Phases 0
     above. All 169 critical tests + 79 backend tests (1 honest skip) pass live. `ruff check
     backend/app/` clean. `npx tsc --noEmit` and `npm run build` clean.
 
+**2026-09-12 addendum — full-project audit via live browser testing, found and fixed a real
+authentication bypass.** Requested explicitly ("final full-project audit... leave this project in
+the strongest production/demo-ready state"). Everything already re-verified above still held
+(169 + 81 tests, ruff/tsc/build, check-phase0 29/29). What this pass added: actually driving the
+running frontend in a browser (login → dashboard → navigation → logout), which the RBAC matrix
+alone couldn't catch since server-side authorization was already correct. Found and fixed:
+- **Real authentication bypass**: every `/ws/*` WebSocket endpoint
+  (`backend/app/api/websocket_routes.py`) accepted any connection with **zero authentication** —
+  confirmed live by connecting with no token and receiving the full real-time traffic feed. This
+  is the same class of data `GET /junctions` etc. correctly gate behind VIEWER+ role over REST;
+  the WebSocket channel simply had no equivalent check. Fixed: `handle_websocket` now reads a
+  `token` query param (a WS handshake carries no Authorization header a browser can set), validates
+  it via a new `get_user_from_token_or_none()` (mirrors `get_current_user`'s JWT/revocation/
+  active-user checks, returns `None` instead of raising), and closes the connection
+  (`WS_1008_POLICY_VIOLATION`) before accepting if the user is missing or not one of
+  ADMIN/OPERATOR/VIEWER/EMERGENCY_SERVICES (same roles already allowed on the equivalent REST
+  reads; CITIZEN correctly excluded, matching its existing REST behavior). `websocket.ts` updated
+  to send the stored JWT as `?token=`. Live-verified via direct WebSocket connections: no token →
+  rejected; ADMIN/OPERATOR/VIEWER/EMERGENCY_SERVICES with a valid token → accepted; CITIZEN with a
+  valid token → rejected; garbage token → rejected.
+- **Real authentication bypass at the frontend routing layer, compounding the above**: `/app` and
+  every page under it — including `UserManagementPage` and `AuditPage` — had **no route guard at
+  all**. Confirmed live: a fresh browser tab with an empty `localStorage` navigated straight to
+  `/app` and rendered the full dashboard shell; before the WebSocket fix above, it would have shown
+  real live operational data with zero login. Root cause: `authStore.ts`'s `loadFromStorage()`
+  (which rehydrates `isAuthenticated` from a stored token) was defined but never called anywhere,
+  and no `ProtectedRoute`-equivalent component existed. Fixed: new
+  `frontend/dashboard/src/components/ProtectedRoute.tsx` wraps `/app` and `/command` (the latter's
+  `LiveIncidents`/`GlobalEmergencyModal` children call real operator APIs, unlike the genuinely
+  public/decorative `/studio`), redirecting to `/login` when `isAuthenticated` is false;
+  `loadFromStorage()` is now called once at `App` mount. Live-verified the full lifecycle in a real
+  browser: empty storage → redirected to `/login`; real login (all 5 seeded role accounts) →
+  dashboard renders; refresh/fresh navigation → session persists via the now-wired rehydration;
+  `Logout` → token cleared from storage → `/app` redirects to `/login` again.
+- **Real bug, live-reproduced via browser console**: `TrafficMapPage.tsx`'s live telemetry feed
+  triggered a real React "duplicate key" warning and visibly duplicated rows (e.g. two "TraCI Step
+  9370 Synced" entries back to back) — the feed unconditionally prepended a new entry keyed
+  `step-${data.step}` on every matching WebSocket message with no check for whether that step was
+  already in the list, and the same step number can legitimately arrive more than once (overlapping
+  broadcasts, reconnect replay). Fixed to skip the insert if that `id` is already present;
+  re-verified live in the browser — the feed now shows distinct, sequential step numbers with no
+  duplicate-key warning.
+- **Real bug, live-reproduced via browser console**: the client's own WebSocket heartbeat elicits a
+  plain-text `"pong"` reply from the server (`websocket_routes.py`'s existing ping/pong handling),
+  but `websocket.ts`'s `onmessage` handler tried to `JSON.parse()` every incoming message including
+  that one, throwing a real, repeating `SyntaxError: Unexpected token 'p', "pong" is not valid
+  JSON` on every heartbeat. Fixed to special-case the literal `"pong"` string before parsing.
+- **SN-093 gap, confirmed and fixed**: the backend's `POST /incidents/{id}/confirm` is correct and
+  honest (`proposed_unit.status: "MANUAL_DISPATCH_REQUIRED"`, no fabricated unit/ETA — Phase 6
+  fix), but `LiveIncidents.tsx`'s confirm handler ignored that real response and showed a toast
+  saying "unit proposal **active**" — language implying automated dispatch the backend explicitly
+  does not claim. Classified as PARTIAL, not complete, per this project's own "don't mark SN-093
+  done because the backend is correct" standard. Fixed to surface the real `proposed_unit.note`
+  text instead.
+- **RBAC re-verified with real HTTP round trips**, not just re-reading decorators: logged in as
+  all 5 seeded role accounts (ADMIN/OPERATOR/VIEWER/EMERGENCY_SERVICES/CITIZEN) against the live
+  Docker backend, fired real requests at read endpoints (`/junctions`, `/simulation/scenarios`,
+  `/alerts`), ADMIN-only mutations (`PATCH /users/{id}/role`), OPERATOR+ mutations
+  (`POST /simulation/start`), and EMERGENCY_SERVICES+ mutations (`POST /emergency/activate`) —
+  every result matched the documented role matrix exactly, including registration still forcing
+  `OPERATOR` regardless of a submitted `role: "ADMIN"`. Also ran a 10-point edge-case pass on
+  representative endpoints (missing fields → 422, wrong password → 401, nonexistent resource →
+  404, malformed JSON → 422, garbage token → 401) — all correct, no 500s.
+- **Known, not-yet-fixed finding (follow-up, not a Phase 10 blocker)**: `POST
+  /emergency/activate` corridors created via the `its_tools.py`/copilot code path (as opposed to a
+  real ambulance genuinely tracked by a live `sumo_live_bridge.py` session) never transition out of
+  `ACTIVE` status even after `POST /deactivate` is called — 80 such rows accumulated in
+  `emergency_events` across this engagement's repeated testing (including some created by this
+  pass's own RBAC probing, since cleaned up via direct deactivate calls, though the DB rows
+  themselves remain `ACTIVE` since the bridge never resolves them). Root cause: the bridge only
+  finalizes a corridor it is itself tracking against a live TraCI vehicle; a corridor activated
+  without one has no path to ever reach `COMPLETED`. Not security-relevant, not a regression from
+  this pass — flagged for a future decision (either refuse corridor creation without a live bridge
+  matched, or give the bridge a way to resolve/expire orphaned corridors).
+- Re-ran the entire verification suite after every fix above: 169 critical + 81 backend tests
+  pass, `ruff check backend/app/` clean, `npx tsc --noEmit` and `npm run build` clean,
+  `check-phase0` 29/29.
+
 **2026-09-11 addendum — full pre-Phase-5 audit of the "Antigravity" copilot/agent-tools
 subsystem, fixed and live-verified.** Requested explicitly ("check all errors/bugs up through
 Phase 4, no fabricated content, before Phase 5"). This subsystem (`backend/app/agents/`,
