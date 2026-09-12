@@ -88,8 +88,14 @@ export const LiveIncidents: React.FC = () => {
   // Action handlers
   const handleConfirm = async (id: string) => {
     try {
-      await api.incidents.confirm(id);
-      toast.success("Incident confirmed (Human Gate 1 passed). Rerouting & unit proposal active.");
+      const res = await api.incidents.confirm(id);
+      // The backend has no real unit-location or dispatch-tracking system —
+      // proposed_unit.status is honestly "MANUAL_DISPATCH_REQUIRED", never a
+      // fabricated dispatched/active unit. Surface that real status rather
+      // than an "active" toast that would misrepresent it as automated.
+      const dispatchNote = res.data?.proposed_unit?.note
+        ?? "Operator must identify and contact the nearest real unit manually.";
+      toast.success(`Incident confirmed (Human Gate 1 passed). ${dispatchNote}`);
       fetchIncidents();
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Failed to confirm incident");

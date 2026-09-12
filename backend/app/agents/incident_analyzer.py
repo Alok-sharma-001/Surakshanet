@@ -120,4 +120,3 @@ async def analyze_junction_camera_snapshot(
     except Exception as err:
         logger.warning(f"Multimodal vision model unavailable or encountered error ({err}). Reporting unavailable.")
         return _analysis_unavailable_report(junction_id, f"{type(err).__name__}: {err}")
-

@@ -19,12 +19,10 @@ from shared.constants import compute_pcu
 router = APIRouter(prefix="/traffic", tags=["traffic"])
 
 
-
-
-# ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Junctions - Spatial Queries (MUST be placed before /junctions/{id})
 # ---------------------------------------------------------------------------
+
 
 @router.get("/junctions/spatial/nearest", response_model=JunctionResponse)
 async def get_nearest_junction(
@@ -264,4 +262,3 @@ async def calculate_pcu(
 ) -> Any:
     total_pcu = compute_pcu(data)
     return {"pcu": total_pcu, "total_pcu": total_pcu}
-

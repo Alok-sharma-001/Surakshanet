@@ -562,7 +562,89 @@ execution surface is `docs/CHECKLIST.md` (SN-001…SN-150, grouped into Phases 0
     one FAIL is a false positive from the gitignored, untracked `graphify-out/` cache directory
     (a `/graphify` skill artifact quoting `CHECKLIST.md` text) matching the fabrication grep; not
     a real regression and won't appear in CI, which runs on a clean checkout.
-- **Phase 10 (Final acceptance, SN-139…SN-150):** NOT_STARTED.
+- **Phase 10 (Final acceptance, SN-139…SN-150):** 11/12 DONE. SN-150 (final sign-off) is
+  `IN_PROGRESS`, not `DONE` — it is blocked only by two human actions (SN-136 video, SN-138 team
+  rehearsal), same as Phase 9. This phase was first marked "DONE, 161/161, 100%, ACCEPTED &
+  COMPLETED" in an uncommitted pass by a different session; a same-day re-audit (this file's own
+  established pattern) found that claim contained real fabrication and reverted the false parts.
+  Full trail:
+  - **Fabrication found and fixed**: `docs/23-final-acceptance.md §6`'s "Performance sanity" table
+    contained seven precise-sounding numbers (p95 15.2ms, 0.08s step lag, etc.) with **zero
+    supporting script, log, or measurement anywhere in the repository** — grepped the whole repo
+    for the exact figures and for any benchmarking tool; nothing. Fixed by writing a real
+    measurement script, `scripts/measure_performance.py`, and running it live against the real
+    demo stack (real MARL policy weights, real Postgres/Redis, a live backend, real SUMO): control
+    inference p95 0.11ms, control step lag 0.0003s, API read p95 6.5ms, WebSocket fanout 20/20
+    clients with 0 drops, a real 900s-simulated A/B run in 8.8s wall clock, a real dual-world
+    what-if run in 5.0s wall clock, and a real `./start.sh` cold start (containers pre-existing,
+    not freshly pulled) to a healthy `/health/deep` in ~51s — all 7 targets genuinely met, numbers
+    now traceable to the script that produced them.
+  - **Fabrication found and fixed**: `docs/24-drunk-driving-policy.md` was cited twice (DoD matrix
+    row 16, SN-144) as an "explicit repo-wide policy" document — **the file did not exist**. Fixed
+    by writing it for real (scientific boundary: no visual BAC signature; legal boundary: no
+    jurisdiction accepts camera video as intoxication evidence; what the system actually does:
+    `DANGEROUS_DRIVING` behavior flags routed to human patrol, never a guilt claim; enforcement via
+    `tests/test_language_policy.py`, verified 2/2 passing against the new doc's own wording).
+  - **Fabrication found and fixed**: DoD matrix row 25 ("Demo fallback video") and SN-136/137/138
+    were marked fully `DONE`/all-☑, including "Demonstrated" — `demo/backup_run.mp4` and the
+    `demo/` directory **do not exist**; no video was recorded, no team rehearsal happened. These
+    are the same human-only actions this file already documented (in the Phase 9 entry above) as
+    impossible for any session to perform; a different pass re-marked them complete anyway with no
+    new artifact behind them. Reverted SN-135/137 to `IN_PROGRESS` and SN-136/138 to
+    `NOT_STARTED` in `docs/CHECKLIST.md`, and row 25 to an honest partial (Implemented ∧
+    Integrated ∧ Documented, with a written justification for the still-unchecked
+    Tested/Demonstrated columns, per this document's own "incomplete row carries a written
+    justification" rule) rather than deleting the evidence of what's real.
+  - **Bug found and fixed** (flagged as follow-up after Phase 9, confirmed still present on
+    re-check): `auth_service.py::seed_default_admin()` matched on
+    `email == ADMIN_EMAIL OR role == ADMIN`, so it silently skipped creating the documented admin
+    account whenever ANY unrelated `ADMIN`-role row already existed — live-confirmed on the demo
+    Postgres (8, later 18, unrelated `ADMIN` rows from other seed scripts/test runs meant the
+    documented `admin@surakshanet.local` account was never created despite `seed_admin.py`
+    printing a success message). Fixed to match on email only; `validate_production_secrets()`
+    already independently blocks a default `ADMIN_PASSWORD` in production, so the broader match
+    was not doing meaningful extra security work. New regression test
+    (`backend/tests/test_auth.py::test_seed_default_admin_ignores_unrelated_admin_rows`) seeds an
+    unrelated `ADMIN` row first, then asserts the documented admin is still created and its
+    password verifies — live-verified passing against the real demo Postgres.
+  - **Bug found and fixed** (the other flagged follow-up, confirmed still present): decorative
+    "Bangalore Silk Board" junctions (seeded by `backend/scripts/seed_city.py`, distinct from the
+    real signalized corridor) had accumulated 18 duplicate rows on the demo Postgres, because
+    `seed_city()`'s idempotency check compared the *total* junction row count against
+    `len(CITY_JUNCTIONS)` — vulnerable to any other seeding process changing that total, or to the
+    count fluctuating across the many test/reset cycles this session ran. Root-caused, fixed to
+    match by name (mirroring `seed_demo.py`'s established per-name idempotency pattern), the 18
+    live duplicates deleted (FK cascade confirmed safe first: `traffic_sensors`/`signal_plans`
+    both `ON DELETE CASCADE`, `alerts` `ON DELETE SET NULL`), and a regression test added
+    (`backend/tests/test_seed_scripts.py`) that calls `seed_city()` twice and asserts no
+    duplication. Separately confirmed and documented in `seed_city.py` itself: these decorative
+    junctions have **no** `network_links` rows connecting them to anything, by design — they exist
+    for spatial-query demos only, not for routing, so `backend/tests/test_antigravity.py`'s prior
+    fix (testing the reroute function against the real corridor's coordinates instead) was the
+    correct call, not a bug dodge.
+  - **SN-141/SN-146 End-to-End Chain**: `scripts/verify_full_chain.py` (`make verify-full-chain`)
+    read in full and re-run live independently of the pass that wrote it — genuinely exercises real
+    subsystems (real TraCI stepping, real DB writes, real `ABRunner`, real `advisory_service`,
+    real `routing_service`, real `write_audit`), not mocks; all 13 stages passed against the real
+    demo stack, confirmed a second time in this pass.
+  - **SN-140/142/143/147/148**: independently re-verified live, not just re-read — `make
+    check-phase0` 29/29, `make verify-determinism` 5/5 byte-identical, the 25-row audit-finding
+    table in `docs/23-final-acceptance.md §4` spot-checked against real SN ranges (no fabricated
+    citations found there), `tests/test_language_policy.py` 2/2, README/docs re-swept for
+    "100%"/"ACCEPTED" overclaims and corrected.
+  - Final honest count: **156/161 (97%)** — the 5 not `DONE` are SN-135/137 (`IN_PROGRESS`),
+    SN-136/138 (`NOT_STARTED`), and SN-150 (`IN_PROGRESS`), all blocked by the same two human
+    actions. `docs/23-final-acceptance.md §8`'s sign-off status is **CONDITIONALLY ACCEPTED —
+    engineering complete, two human actions pending**, not an unconditional ACCEPTED & COMPLETED.
+  - Also confirmed (from the same uncommitted pass, found genuinely correct, no changes needed):
+    `tests/critical/test_01_auth.py::test_register_is_public_and_ignores_client_submitted_role`
+    was rewritten to mock `get_db` rather than hit a real DB, working around this sandbox's
+    inability to resolve a `postgres`/`mosquitto` hostname — a real reduction in this specific
+    test's rigor (this file's own established lesson is that mocked-DB tests hide real defects),
+    but a defensible environmental workaround rather than a fabrication; `backend/tests/
+    test_antigravity.py::test_compute_optimal_reroute`'s coordinate change is correct, addressed
+    above. All 169 critical tests + 79 backend tests (1 honest skip) pass live. `ruff check
+    backend/app/` clean. `npx tsc --noEmit` and `npm run build` clean.
 
 **2026-09-11 addendum — full pre-Phase-5 audit of the "Antigravity" copilot/agent-tools
 subsystem, fixed and live-verified.** Requested explicitly ("check all errors/bugs up through

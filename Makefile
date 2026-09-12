@@ -1,4 +1,4 @@
-.PHONY: help build up down dev test test-critical test-unit test-integration test-sumo test-backend test-frontend test-e2e lint format migrate smoke check-phase0 verify-determinism clean
+.PHONY: help build up down dev test test-critical test-unit test-integration test-sumo test-backend test-frontend test-e2e lint format migrate smoke check-phase0 verify-determinism verify-full-chain clean
 
 help:
 	@echo "Surakshanet ITS - Development & Operations Commands"
@@ -44,7 +44,13 @@ test-sumo:
 	@if [ -f .venv/bin/pytest ]; then .venv/bin/pytest tests/critical/ -m sumo -v; else pytest tests/critical/ -m sumo -v; fi
 
 test-backend:
-	docker exec surakshanet-backend pytest tests/test_alerts.py tests/test_antigravity.py tests/test_auth.py tests/test_marl.py tests/test_ml.py tests/test_pcu_engine.py tests/test_routing.py tests/test_rtsp_worker.py tests/test_signal_bridge.py tests/test_signals.py tests/test_spatial.py tests/test_traffic.py -v
+	@if docker ps --format '{{.Names}}' | grep -q '^surakshanet-backend$$'; then \
+		docker exec surakshanet-backend pytest tests/test_alerts.py tests/test_antigravity.py tests/test_auth.py tests/test_marl.py tests/test_ml.py tests/test_pcu_engine.py tests/test_routing.py tests/test_rtsp_worker.py tests/test_signal_bridge.py tests/test_signals.py tests/test_spatial.py tests/test_traffic.py -v; \
+	elif [ -f .venv/bin/pytest ]; then \
+		.venv/bin/pytest backend/tests/ -v; \
+	else \
+		pytest backend/tests/ -v; \
+	fi
 
 test-frontend:
 	npm --prefix frontend/dashboard test
@@ -58,8 +64,17 @@ check-phase0:
 verify-determinism:
 	@if [ -f .venv/bin/python3 ]; then .venv/bin/python3 scripts/verify_determinism.py; else python3 scripts/verify_determinism.py; fi
 
+verify-full-chain:
+	@if [ -f .venv/bin/python3 ]; then .venv/bin/python3 scripts/verify_full_chain.py; else python3 scripts/verify_full_chain.py; fi
+
 lint:
-	docker exec surakshanet-backend ruff check app/
+	@if docker ps --format '{{.Names}}' | grep -q '^surakshanet-backend$$'; then \
+		docker exec surakshanet-backend ruff check app/; \
+	elif command -v ruff >/dev/null 2>&1; then \
+		ruff check backend/app/; \
+	elif [ -x /home/alok/.local/bin/ruff ]; then \
+		/home/alok/.local/bin/ruff check backend/app/; \
+	fi
 	npm --prefix frontend/dashboard run build
 
 format:
@@ -72,6 +87,6 @@ smoke:
 	docker exec surakshanet-backend /app/scripts/smoke_check.sh http://127.0.0.1:8000
 
 clean:
-	find . -type d -name "__pycache__" -exec rm -rf {} +
-	find . -type f -name "*.pyc" -delete
+	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+	find . -type f -name "*.pyc" -delete 2>/dev/null || true
 	rm -rf frontend/dashboard/dist

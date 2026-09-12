@@ -373,14 +373,24 @@ async def authenticate_user(db: AsyncSession, email: str, password: str) -> Opti
 
 
 async def seed_default_admin(db: AsyncSession) -> None:
-    """Seed default administrator account if it does not exist."""
+    """Seed default administrator account if it does not exist.
+
+    Matches on settings.ADMIN_EMAIL only. A prior version also skipped
+    creation whenever ANY row with role=ADMIN already existed anywhere in
+    the table — on a DB accumulating unrelated ADMIN-role rows (e.g. from
+    other seed scripts or test runs), that silently left the documented
+    ADMIN_EMAIL account never created, while still logging as if seeding
+    succeeded. validate_production_secrets() (config.py) already blocks
+    production startup on a default ADMIN_PASSWORD, so matching broadly
+    here was not doing meaningful extra security work — only hiding a real
+    gap in local/demo environments.
+    """
     from app.models.user import UserRole
     settings = get_settings()
     admin_email = settings.ADMIN_EMAIL
     admin_password = settings.ADMIN_PASSWORD
 
-    # Check if any admin user already exists or if admin_email is already taken
-    result = await db.execute(select(User).where((User.email == admin_email) | (User.role == UserRole.ADMIN)))
+    result = await db.execute(select(User).where(User.email == admin_email))
     existing_admin = result.scalars().first()
     if not existing_admin:
         hashed_password = hash_password(admin_password)

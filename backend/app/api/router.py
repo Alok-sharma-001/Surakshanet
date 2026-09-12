@@ -35,4 +35,3 @@ api_router.include_router(events_router)
 api_router.include_router(vision_router)
 api_router.include_router(incidents_router)
 api_router.include_router(audit_router)
-

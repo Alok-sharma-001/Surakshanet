@@ -67,4 +67,3 @@ __all__ = [
     "IncidentStatus",
     "IncidentIndicatorType",
 ]
-

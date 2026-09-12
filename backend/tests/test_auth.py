@@ -1,6 +1,54 @@
 import uuid
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
+
+from app.models.user import User, UserRole
+from app.services.auth_service import seed_default_admin, verify_password
+from app.config import get_settings
+
+
+@pytest.mark.asyncio
+async def test_seed_default_admin_ignores_unrelated_admin_rows(db_session, monkeypatch):
+    """Regression test: seed_default_admin() previously matched on
+    `email == ADMIN_EMAIL OR role == ADMIN`, so it silently skipped
+    creating the documented admin account whenever ANY unrelated row with
+    role=ADMIN already existed — found live on the demo Postgres, which had
+    accumulated several unrelated ADMIN-role rows from other seed scripts.
+
+    Uses a unique ADMIN_EMAIL (monkeypatched onto the cached Settings
+    instance, restored via monkeypatch's own teardown) rather than deleting
+    any real pre-existing admin row, since this test's DB writes are
+    committed, not rolled back with the rest of the session's changes.
+    """
+    settings = get_settings()
+    unique_email = f"admin-regress-{uuid.uuid4().hex[:8]}@surakshanet.local"
+    monkeypatch.setattr(settings, "ADMIN_EMAIL", unique_email)
+
+    unrelated_admin = User(
+        email=f"unrelated-admin-{uuid.uuid4().hex[:8]}@example.com",
+        password_hash="not-a-real-hash",
+        name="Unrelated Admin",
+        role=UserRole.ADMIN,
+        is_active=True,
+    )
+    db_session.add(unrelated_admin)
+    await db_session.commit()
+
+    await seed_default_admin(db_session)
+
+    res = await db_session.execute(select(User).where(User.email == unique_email))
+    admin = res.scalars().first()
+    assert admin is not None, "seed_default_admin must create the documented admin even when unrelated ADMIN rows exist"
+    assert admin.role == UserRole.ADMIN
+    assert verify_password(settings.ADMIN_PASSWORD, admin.password_hash)
+
+    # Cleanup: this test's writes commit for real (db_session's rollback
+    # only covers uncommitted changes), so remove the rows it created.
+    await db_session.delete(admin)
+    await db_session.delete(unrelated_admin)
+    await db_session.commit()
+
 
 @pytest.mark.asyncio
 async def test_register_success(client: AsyncClient):

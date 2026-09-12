@@ -35,7 +35,6 @@ except ImportError:
     logger.warning("google.antigravity is not installed or importable in current python runtime.")
 
 
-
 # Subagent 1: Emergency Preemption Subagent
 emergency_subagent = None
 if ANTIGRAVITY_AVAILABLE:
@@ -239,7 +238,6 @@ class ResilientTrafficSupervisor:
                     "reason": "Proposed timings violated minimum green, yellow clearance, or cycle bounds."
                 }
 
-
         # --- TIER 1: Attempt Cloud Gemini Agent ---
         if ANTIGRAVITY_AVAILABLE and self.cloud_config:
             try:
@@ -259,10 +257,12 @@ class ResilientTrafficSupervisor:
                         "action": action_text,
                         "status": "AI_RECOMMENDATION_UNVALIDATED",
                         "validated": False,
-                        "note": "Free-text LLM recommendation, not a parsed signal plan. Must be "
-                                 "converted to explicit ns_green/ew_green/yellow values and pass "
-                                 "validate_signal_plan_safety() before it may be applied to any "
-                                 "signal controller."
+                        "note": (
+                            "Free-text LLM recommendation, not a parsed signal plan. Must be "
+                            "converted to explicit ns_green/ew_green/yellow values and pass "
+                            "validate_signal_plan_safety() before it may be applied to any "
+                            "signal controller."
+                        )
                     }
             except Exception as net_err:
                 logger.warning(
@@ -289,10 +289,12 @@ class ResilientTrafficSupervisor:
                         "action": action_text,
                         "status": "AI_RECOMMENDATION_UNVALIDATED",
                         "validated": False,
-                        "note": "Free-text LLM recommendation, not a parsed signal plan. Must be "
-                                 "converted to explicit ns_green/ew_green/yellow values and pass "
-                                 "validate_signal_plan_safety() before it may be applied to any "
-                                 "signal controller."
+                        "note": (
+                            "Free-text LLM recommendation, not a parsed signal plan. Must be "
+                            "converted to explicit ns_green/ew_green/yellow values and pass "
+                            "validate_signal_plan_safety() before it may be applied to any "
+                            "signal controller."
+                        )
                     }
             except Exception as edge_err:
                 logger.error(

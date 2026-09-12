@@ -61,7 +61,7 @@ async def write_audit(
     correlation_id: Optional[str] = None,
 ) -> Optional[AuditLog]:
     """Persist an audit log entry for governance and traceability (SN-103).
-    
+
     Invariants:
     - actor_type, action, result are mandatory.
     - confidence is non-null ONLY when actor_type == 'AI'.

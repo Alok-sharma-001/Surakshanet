@@ -283,4 +283,3 @@ async def launch_prediction_task(event_id: str, seed: int = 42, duration_s: int 
     task = asyncio.create_task(execute_event_prediction(event_id, seed, duration_s))
     _running_tasks[str(event_id)] = task
     return task
-

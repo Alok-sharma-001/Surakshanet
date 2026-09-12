@@ -14,17 +14,22 @@ except ImportError:
     class APIRouter:
         def __init__(self, *args, **kwargs):
             self.routes = []
+
         def post(self, *args, **kwargs):
             return lambda f: f
+
         def get(self, *args, **kwargs):
             return lambda f: f
+
     class HTTPException(Exception):
         def __init__(self, status_code: int, detail: str):
             self.status_code = status_code
             self.detail = detail
             super().__init__(detail)
+
     def Depends(f=None):
         return f
+
     from starlette.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -178,7 +183,6 @@ async def analyze_snapshot(payload: SnapshotAnalysisRequest):
     except Exception as e:
         logger.error(f"Snapshot analysis failure: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to analyze snapshot: {str(e)}")
-
 
 
 @router.post("/simulate-action")

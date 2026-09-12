@@ -59,14 +59,14 @@ def test_clear_emergency_corridor():
 
 def test_compute_optimal_reroute():
     result = compute_optimal_reroute(
-        origin_lat=12.9176,
-        origin_lon=77.6238,
-        destination_lat=12.9756,
-        destination_lon=77.6066,
-        avoid_junction_ids=["j-silkboard"]
+        origin_lat=22.7196,
+        origin_lon=75.8577,
+        destination_lat=22.71895,
+        destination_lon=75.86841,
+        avoid_junction_ids=["J1"]
     )
     assert result["status"] == "COMPUTED"
-    assert "j-silkboard" in result["avoided_junctions"]
+    assert "J1" in result["avoided_junctions"]
     assert result["total_distance_km"] > 0
     assert result["estimated_travel_time_min"] > 0
 

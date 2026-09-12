@@ -1,5 +1,25 @@
+import os
+import socket
 import pytest
 from httpx import AsyncClient, ASGITransport
+
+def _host_resolves(host: str) -> bool:
+    try:
+        socket.getaddrinfo(host, 80)
+        return True
+    except (socket.gaierror, OSError):
+        return False
+
+if not _host_resolves("postgres"):
+    os.environ.setdefault("POSTGRES_HOST", "127.0.0.1")
+    os.environ.setdefault("POSTGRES_PORT", "5433")
+    if "DATABASE_URL" not in os.environ or "@postgres" in os.environ.get("DATABASE_URL", ""):
+        os.environ["DATABASE_URL"] = "postgresql+asyncpg://surakshanet:surakshanet_dev@127.0.0.1:5433/surakshanet"
+
+if not _host_resolves("redis"):
+    if "REDIS_URL" not in os.environ or "@redis" in os.environ.get("REDIS_URL", "") or os.environ.get("REDIS_URL") == "redis://redis:6379/0":
+        os.environ["REDIS_URL"] = "redis://127.0.0.1:6379/0"
+
 try:
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
     from sqlalchemy import select

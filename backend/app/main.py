@@ -230,7 +230,6 @@ app.include_router(vision_router)
 app.include_router(incidents_router)
 
 
-
 @app.get("/", tags=["Health"])
 async def root_check() -> dict:
     """Root endpoint."""

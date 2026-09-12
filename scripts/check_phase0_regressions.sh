@@ -53,7 +53,8 @@ check "SN-001 no fabricated training metrics" \
   grep -n "420\|14\.2\|11\.8\|22\.4" backend/app/api/ml.py
 
 check "SN-002 no hardcoded AI narration" \
-  grep -rn --exclude-dir=.git --exclude-dir=docs --exclude-dir=scripts \
+  grep -rnI --exclude-dir=.git --exclude-dir=docs --exclude-dir=scripts \
+  --exclude-dir=graphify-out --exclude-dir=.claude --exclude-dir=__pycache__ --exclude-dir=.mypy_cache \
   "MARL Green Extension" .
 
 check "SN-005 no MicroSimRunner" \

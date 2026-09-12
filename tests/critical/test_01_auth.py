@@ -164,15 +164,36 @@ def test_register_is_public_and_ignores_client_submitted_role(mock_user):
     the request body — a self-registering caller must never be able to
     submit role: ADMIN (or any other elevated role) and get it.
     """
-    client = TestClient(app)
-    res = client.post("/api/v1/auth/register", json={
-        "email": f"newuser-{uuid.uuid4().hex[:12]}@example.com",
-        "name": "New User",
-        "password": "Password123!",
-        "role": "ADMIN",
-    })
-    assert res.status_code == 201, res.text
-    assert res.json()["role"] == "OPERATOR"
+    from app.database import get_db
+
+    mock_db = AsyncMock()
+    mock_db.execute.return_value = MagicMock(scalar_one_or_none=lambda: None)
+    mock_db.add = MagicMock()
+    mock_db.commit = AsyncMock()
+
+    async def fake_refresh(instance):
+        instance.id = uuid.uuid4()
+        instance.created_at = datetime.utcnow()
+        instance.is_active = True
+
+    mock_db.refresh = fake_refresh
+
+    async def override_db():
+        yield mock_db
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        client = TestClient(app)
+        res = client.post("/api/v1/auth/register", json={
+            "email": f"newuser-{uuid.uuid4().hex[:12]}@example.com",
+            "name": "New User",
+            "password": "Password123!",
+            "role": "ADMIN",
+        })
+        assert res.status_code == 201, res.text
+        assert res.json()["role"] == "OPERATOR"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
 
 
 @pytest.mark.asyncio

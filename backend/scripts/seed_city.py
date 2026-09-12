@@ -17,6 +17,16 @@ from shared.corridor_topology import CORRIDOR_JUNCTIONS, CORRIDOR_EDGES
 
 settings = get_settings()
 
+# These 12 junctions are decorative spatial-query demo data (nearest-junction
+# lookups, map display) — they are NOT part of the real, signalized 4-junction
+# SUMO corridor (W_entry/J0-J3/E_exit/N0-N3/S0-S3, seeded separately by
+# scripts/seed_demo.py from shared/corridor_topology.py). Deliberately, no
+# NetworkLink rows connect them to anything: A* routing between them will
+# correctly find no path, because none exists to fabricate. A test that
+# expects a real computed route between two of these should use the real
+# corridor's coordinates instead (see backend/tests/test_antigravity.py) —
+# that is the fix that was actually needed the one time this was mistaken
+# for a routing bug, not adding fake connectivity here.
 CITY_JUNCTIONS = [
     # Delhi Network
     {"name": "Connaught Place Outer Circle", "lat": 28.6315, "lon": 77.2167, "approaches": 4},
@@ -36,18 +46,30 @@ CITY_JUNCTIONS = [
 
 async def seed_city():
     async with async_session_maker() as db:
-        # Check if already seeded
-        res = await db.execute(select(Junction))
-        existing_junctions = res.scalars().all()
-        if len(existing_junctions) >= len(CITY_JUNCTIONS):
-            print(f"City already seeded with {len(existing_junctions)} junctions.")
+        # Check which of these specific decorative junctions already exist,
+        # matched by name — not a total row count. A count-based check is
+        # vulnerable to any other seeding process (e.g. seed_demo.py's real
+        # corridor junctions) changing the total, or to row counts
+        # fluctuating across repeated test/reset cycles for reasons
+        # unrelated to this function; either can make the count dip below
+        # len(CITY_JUNCTIONS) again and cause a second run to silently
+        # duplicate every decorative junction (found live: 9 duplicate rows
+        # of "Bangalore Silk Board" on the demo Postgres from exactly this).
+        city_names = [data["name"] for data in CITY_JUNCTIONS]
+        res = await db.execute(select(Junction).where(Junction.name.in_(city_names)))
+        existing_by_name = {j.name for j in res.scalars().all()}
+        remaining = [data for data in CITY_JUNCTIONS if data["name"] not in existing_by_name]
+        if not remaining:
+            print(f"City already seeded: all {len(CITY_JUNCTIONS)} decorative junctions present.")
             return
+        if existing_by_name:
+            print(f"{len(existing_by_name)}/{len(CITY_JUNCTIONS)} decorative junctions already seeded; adding the {len(remaining)} missing one(s).")
 
         print("Seeding smart city junctions and sensor topology...")
         created_junctions = []
         created_sensors = []
 
-        for data in CITY_JUNCTIONS:
+        for data in remaining:
             junction = Junction(
                 id=uuid.uuid4(),
                 name=data["name"],
