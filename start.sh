@@ -19,12 +19,18 @@ STEP_TIMEOUT=90
 export no_proxy="localhost,127.0.0.1,0.0.0.0,${no_proxy:-}"
 export NO_PROXY="localhost,127.0.0.1,0.0.0.0,${NO_PROXY:-}"
 
+GUI=false
+
 # Parse CLI flags
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --profile)
             PROFILE="$2"
             shift 2
+            ;;
+        --gui)
+            GUI=true
+            shift
             ;;
         --no-frontend)
             NO_FRONTEND=true
@@ -44,7 +50,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "Unknown option: $1" >&2
-            echo "Usage: ./start.sh [--profile demo|dev] [--no-frontend] [--seed 42] [--timeout 90]" >&2
+            echo "Usage: ./start.sh [--profile demo|dev] [--gui] [--no-frontend] [--seed 42] [--timeout 90]" >&2
             exit 1
             ;;
     esac
@@ -210,7 +216,12 @@ export POSTGRES_USER=surakshanet
 export POSTGRES_PASSWORD=surakshanet_dev
 export POSTGRES_DB=surakshanet
 
-nohup $PYTHON_BIN simulation/sumo_live_bridge.py --seed "$DEMO_SEED" --no-gui >> logs/sumo_bridge.log 2>&1 &
+GUI_FLAG="--no-gui"
+if [[ "$GUI" == "true" ]]; then
+    GUI_FLAG="--gui"
+fi
+
+nohup setsid $PYTHON_BIN simulation/sumo_live_bridge.py --seed "$DEMO_SEED" $GUI_FLAG >> logs/sumo_bridge.log 2>&1 &
 echo $! > logs/sumo_bridge.pid
 disown $! 2>/dev/null || true
 sleep 2
@@ -231,7 +242,7 @@ if [[ -f "logs/control_service.pid" ]]; then
     rm -f logs/control_service.pid
 fi
 
-nohup $PYTHON_BIN services/control_service/main.py >> logs/control_service.log 2>&1 &
+nohup setsid $PYTHON_BIN services/control_service/main.py >> logs/control_service.log 2>&1 &
 echo $! > logs/control_service.pid
 disown $! 2>/dev/null || true
 sleep 2

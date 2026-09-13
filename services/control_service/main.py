@@ -33,6 +33,12 @@ for _p in [_repo_root, os.path.join(_repo_root, "backend")]:
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+# Auto-switch to repo virtualenv if available and not already inside it
+_venv_python = os.path.join(_repo_root, ".venv", "bin", "python3")
+if os.path.exists(_venv_python) and sys.executable != _venv_python and not os.environ.get("_SURAKSHANET_VENV_SWITCHED"):
+    os.environ["_SURAKSHANET_VENV_SWITCHED"] = "1"
+    os.execv(_venv_python, [_venv_python] + sys.argv)
+
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker

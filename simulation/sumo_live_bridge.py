@@ -32,6 +32,12 @@ _repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 
+# Auto-switch to repo virtualenv if available and not already inside it
+_venv_python = os.path.join(_repo_root, ".venv", "bin", "python3")
+if os.path.exists(_venv_python) and sys.executable != _venv_python and not os.environ.get("_SURAKSHANET_VENV_SWITCHED"):
+    os.environ["_SURAKSHANET_VENV_SWITCHED"] = "1"
+    os.execv(_venv_python, [_venv_python] + sys.argv)
+
 from shared.sumo_bootstrap import require_traci
 
 traci = require_traci(extra_paths=[_repo_root])
@@ -188,15 +194,22 @@ class SumoLiveBridge:
 
     def _build_db_dsn(self) -> Optional[str]:
         """Builds a plain psycopg2 DSN mirroring backend/app/config.py's DATABASE_URL assembly."""
-        host = os.environ.get("POSTGRES_HOST", "postgres")
-        if host == "localhost":
+        in_docker = os.path.exists("/.dockerenv")
+        default_host = "postgres" if in_docker else "127.0.0.1"
+        default_port = "5432" if in_docker else "5433"
+
+        host = os.environ.get("POSTGRES_HOST", default_host)
+        if (not in_docker and host in ("localhost", "postgres")):
             host = "127.0.0.1"
+
+        port = os.environ.get("POSTGRES_PORT", default_port)
         return (
-            f"host={host} port={os.environ.get('POSTGRES_PORT', '5432')} "
+            f"host={host} port={port} "
             f"dbname={os.environ.get('POSTGRES_DB', 'surakshanet')} "
             f"user={os.environ.get('POSTGRES_USER', 'surakshanet')} "
             f"password={os.environ.get('POSTGRES_PASSWORD', 'surakshanet_dev')}"
         )
+
 
     def _get_db_conn(self):
         """Returns a live psycopg2 connection, reconnecting on failure.
@@ -827,15 +840,20 @@ if __name__ == "__main__":
         default="simulation/networks/corridor.sumocfg",
         help="Path to corridor.sumocfg"
     )
+    parser.add_argument("--gui", action="store_true", help="Run SUMO with graphical interface (sumo-gui)")
     parser.add_argument("--no-gui", action="store_true", help="Run SUMO in headless mode without GUI")
     parser.add_argument("--delay", type=int, default=50, help="Step delay in milliseconds (default: 50)")
     parser.add_argument("--redis-port", type=int, default=6379, help="Redis port (default: 6379)")
     parser.add_argument("--seed", type=int, default=DEMO_SEED, help=f"Simulation seed (default: {DEMO_SEED})")
     args = parser.parse_args()
 
+    gui_mode = True
+    if args.no_gui and not args.gui:
+        gui_mode = False
+
     bridge = SumoLiveBridge(
         config_path=args.config,
-        gui=not args.no_gui,
+        gui=gui_mode,
         step_delay_ms=args.delay,
         redis_port=args.redis_port,
         seed=args.seed

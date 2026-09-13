@@ -344,6 +344,39 @@ async def reset_simulation(current_user: User = Depends(require_role("ADMIN", "O
         return {"status": "reset"}
 
 
+async def auto_step_loop():
+    """Advances whatever simulation this worker is holding, once per real
+    second, at step_length=1.0 (SumoEnvironment's default) so 1 real second
+    of wall clock ~= 1 simulated second.
+
+    Before this loop existed, starting a scenario only ever set
+    `running: true` — nothing ever called `sim_instance.step()` except a
+    manual click on the Simulation page's single-step button, so the
+    dashboard's Current Step/Elapsed Sim Time/vehicle counts sat frozen at
+    their start-of-run values indefinitely, and switching scenarios looked
+    like it did nothing: the new scenario was genuinely running, just never
+    advancing. This loop is the real fix — the Step button and
+    POST /simulation/step remain available for exact manual control, this
+    just means Play now actually plays. Runs only in whichever worker
+    process's `sim_instance` global is live (see the --workers 1 demo-profile
+    fix in infra/docker-compose.demo.yml); a worker with no running instance
+    just no-ops every tick, same as a manual /step request would.
+    """
+    while True:
+        await asyncio.sleep(1.0)
+        try:
+            async with sim_lock:
+                if not sim_instance or not getattr(sim_instance, "is_running", False):
+                    continue
+                state = {**sim_instance.step(1), "running": True, **sim_scenario_info}
+            await set_redis_sim_state(state)
+            await broadcast_state(state)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning(f"Auto-step tick skipped: {e}")
+
+
 @router.websocket("/ws")
 async def simulation_ws(websocket: WebSocket):
     await manager.connect(websocket, "simulation")
