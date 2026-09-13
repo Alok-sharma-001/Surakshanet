@@ -72,6 +72,12 @@ async def redis_pubsub_bridge():
                         ws_target = "emergency"
                     elif channel_name == REDIS_CHANNELS["simulation"]:
                         ws_target = "simulation"
+                        if isinstance(payload, dict):
+                            try:
+                                from app.services.bridge_observer import record_bridge_tick
+                                record_bridge_tick(payload)
+                            except Exception:
+                                pass
                     elif channel_name == REDIS_CHANNELS["control_decisions"]:
                         ws_target = "control"
                     elif channel_name == REDIS_CHANNELS["traffic"]:
@@ -151,11 +157,19 @@ async def lifespan(app: FastAPI):
     from app.services.routing_telemetry import periodic_routing_refresh
     routing_refresh_task = asyncio.create_task(periodic_routing_refresh())
 
+    # 5. Start the SUMO auto-step loop: advances whatever simulation this
+    # worker is holding once per real second, so a scenario started from the
+    # Simulation page actually plays instead of sitting at step 0 until
+    # someone clicks Step. See app/api/simulation.py::auto_step_loop.
+    from app.api.simulation import auto_step_loop
+    sim_auto_step_task = asyncio.create_task(auto_step_loop())
+
     yield
 
     # Shutdown
     bridge_task.cancel()
     routing_refresh_task.cancel()
+    sim_auto_step_task.cancel()
     try:
         from app.services.mqtt_consumer import mqtt_consumer
         mqtt_consumer.stop()

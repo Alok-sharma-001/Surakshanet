@@ -15,6 +15,22 @@ class DataSource(str, enum.Enum):
 # SN-014: Deterministic seed for reproducible simulation and A/B evaluation
 DEMO_SEED: int = 42
 
+# The live SUMO bridge (simulation/sumo_live_bridge.py) is the only process
+# with a real TraCI connection to the corridor simulation. It writes a Redis
+# heartbeat key with this TTL on every successful publish, and self-expires
+# under SIGKILL/SIGTERM/crash — the bridge's stop() and shutdown path write
+# nothing to Redis, so a TTL is the only liveness signal that actually works.
+# Single source of truth for the bridge's own setex call, health.py's
+# staleness check, and backend/app/services/bridge_observer.py.
+BRIDGE_HEARTBEAT_TTL_S: int = 10
+
+# How old the bridge's last received SIMULATION_TICK may be before a consumer
+# must treat it as stale rather than live. The bridge publishes at least once
+# per TraCI step with a 50ms floor, so even an order of magnitude slower than
+# nominal it emits several ticks per second — a multi-second gap is
+# unambiguous. Used by backend/app/services/bridge_observer.py.
+BRIDGE_TICK_STALE_AFTER_S: float = 3.0
+
 # SN-026: Single-source Redis channel names across all producers and subscribers
 REDIS_CHANNELS: Dict[str, str] = {
     "traffic": "traffic_updates",

@@ -2,8 +2,9 @@ import os
 import shutil
 import asyncio
 import logging
+import time
 from typing import Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, Depends
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from pydantic import BaseModel, Field
 
 from app.models.user import User
@@ -56,6 +57,7 @@ import json
 import redis.asyncio as aioredis
 from app.config import get_settings
 from app.websocket.manager import manager
+from shared.constants import REDIS_CHANNELS
 
 settings = get_settings()
 
@@ -68,6 +70,14 @@ sim_lock = asyncio.Lock()
 # wrapper — so the scenario switcher's display (SN-133: "displays scenario,
 # seed and elapsed sim time") reads this alongside the live TraCI state.
 sim_scenario_info: Dict[str, Any] = {}
+# Real measurements of the sandbox's own health, not an assumption that
+# running=True means it is actually advancing. Set on every successful step
+# (manual or auto); read by /state so a hijacked or crashed TraCI connection
+# (e.g. services/control_service/ab_runner.py's labeled traci.start() rebinds
+# the module-level connection SumoEnvironment's bare traci calls depend on)
+# presents as "has not advanced for Ns", not a silently frozen step count.
+_sim_last_advanced_monotonic: Optional[float] = None
+_sim_fault: Optional[str] = None
 
 
 async def get_redis_client():
@@ -117,8 +127,15 @@ class StepRequest(BaseModel):
 
 
 async def broadcast_state(state: dict):
-    await manager.broadcast("simulation", state)
-    await manager.broadcast("traffic", state)
+    # This is this API process's own private sandbox SUMO (PATH 2), a
+    # completely separate simulation from simulation/sumo_live_bridge.py
+    # (PATH 1), which is the process that actually feeds the Live Traffic
+    # Map, the control service, and emergency corridors. Broadcasting the
+    # sandbox into the bridge-owned "simulation"/"traffic" rooms let
+    # TrafficMapPage's isTwinConnected go true from a sandbox scenario while
+    # the real bridge was dead — a live fabrication. The sandbox gets its
+    # own room, reachable via the existing authenticated /ws/{channel} route.
+    await manager.broadcast("simulation_sandbox", state)
 
 
 @router.get("/scenarios")
@@ -138,7 +155,7 @@ async def start_simulation(
     req: StartSimulationRequest,
     current_user: User = Depends(require_role("ADMIN", "OPERATOR"))
 ):
-    global sim_instance, sim_mode, sim_scenario_info
+    global sim_instance, sim_mode, sim_scenario_info, _sim_last_advanced_monotonic, _sim_fault
     async with sim_lock:
         redis_state = await get_redis_sim_state()
         is_running = (sim_instance and getattr(sim_instance, "is_running", False)) or (redis_state and redis_state.get("running"))
@@ -194,6 +211,8 @@ async def start_simulation(
             )
             sim_instance.start()
             sim_mode = "sumo"
+            _sim_last_advanced_monotonic = time.monotonic()
+            _sim_fault = None
             sim_scenario_info = {
                 "scenario": scenario_label,
                 "scenario_id": scenario_config["id"] if scenario_config else None,
@@ -243,7 +262,10 @@ async def step_simulation(
                 "reach the worker that started the simulation."
             )
 
+        global _sim_last_advanced_monotonic, _sim_fault
         state = {**sim_instance.step(req.steps), "running": True, **sim_scenario_info}
+        _sim_last_advanced_monotonic = time.monotonic()
+        _sim_fault = None
         await set_redis_sim_state(state)
         background_tasks.add_task(broadcast_state, state)
         return {"status": "stepped", "state": state}
@@ -254,7 +276,17 @@ async def step_simulation(
 async def get_state(current_user: User = Depends(require_role("ADMIN", "OPERATOR", "VIEWER"))):
     global sim_instance
     if sim_instance and getattr(sim_instance, "is_running", False):
-        return {**sim_instance.get_state(), "running": True, **sim_scenario_info}
+        step_age_s = (
+            time.monotonic() - _sim_last_advanced_monotonic
+            if _sim_last_advanced_monotonic is not None else None
+        )
+        return {
+            **sim_instance.get_state(),
+            "running": True,
+            **sim_scenario_info,
+            "step_age_s": round(step_age_s, 2) if step_age_s is not None else None,
+            "sandbox_fault": _sim_fault,
+        }
 
     redis_state = await get_redis_sim_state()
     if redis_state and redis_state.get("running"):
@@ -266,16 +298,23 @@ async def get_state(current_user: User = Depends(require_role("ADMIN", "OPERATOR
     if not _sumo_available():
         raise _unavailable("SUMO binary or TraCI bindings not available on this host.")
 
-    return {"running": False, "step": 0, "sim_time": "00:00:00", "vehicles": 0, "source": "sumo"}
+    # "source" is deliberately absent here, not "sumo": nothing has been
+    # measured on this idle row. TelemetrySourceBadge renders UNAVAILABLE for
+    # a missing source per its documented no-default behavior; stamping a
+    # measured-family value on a row with no measurement is exactly the
+    # provenance violation Invariant 13.3 exists to prevent.
+    return {"running": False, "step": 0, "sim_time": "00:00:00", "vehicles": 0}
 
 
 @router.post("/stop")
 async def stop_simulation(current_user: User = Depends(require_role("ADMIN", "OPERATOR"))):
-    global sim_instance, sim_scenario_info
+    global sim_instance, sim_scenario_info, _sim_last_advanced_monotonic, _sim_fault
     async with sim_lock:
         if sim_instance:
             sim_instance.stop()
         sim_scenario_info = {}
+        _sim_last_advanced_monotonic = None
+        _sim_fault = None
 
         stopped_state = {"running": False, "status": "stopped"}
         await set_redis_sim_state(stopped_state)
@@ -344,11 +383,122 @@ async def reset_simulation(current_user: User = Depends(require_role("ADMIN", "O
         return {"status": "reset"}
 
 
-@router.websocket("/ws")
-async def simulation_ws(websocket: WebSocket):
-    await manager.connect(websocket, "simulation")
-    try:
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        manager.disconnect(websocket, "simulation")
+async def auto_step_loop():
+    """Advances whatever simulation this worker is holding, once per real
+    second, at step_length=1.0 (SumoEnvironment's default) so 1 real second
+    of wall clock ~= 1 simulated second.
+
+    Before this loop existed, starting a scenario only ever set
+    `running: true` — nothing ever called `sim_instance.step()` except a
+    manual click on the Simulation page's single-step button, so the
+    dashboard's Current Step/Elapsed Sim Time/vehicle counts sat frozen at
+    their start-of-run values indefinitely, and switching scenarios looked
+    like it did nothing: the new scenario was genuinely running, just never
+    advancing. This loop is the real fix — the Step button and
+    POST /simulation/step remain available for exact manual control, this
+    just means Play now actually plays. Runs only in whichever worker
+    process's `sim_instance` global is live (see the --workers 1 demo-profile
+    fix in infra/docker-compose.demo.yml); a worker with no running instance
+    just no-ops every tick, same as a manual /step request would.
+    """
+    global _sim_last_advanced_monotonic, _sim_fault
+    while True:
+        await asyncio.sleep(1.0)
+        try:
+            async with sim_lock:
+                if not sim_instance or not getattr(sim_instance, "is_running", False):
+                    continue
+                state = {**sim_instance.step(1), "running": True, **sim_scenario_info}
+            _sim_last_advanced_monotonic = time.monotonic()
+            _sim_fault = None
+            await set_redis_sim_state(state)
+            await broadcast_state(state)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            # A TraCI-level failure (e.g. another process hijacking the
+            # module-level connection SumoEnvironment's bare traci calls
+            # depend on) must not leave the sandbox silently reporting a
+            # frozen-but-confident step count. Record the real fault; do not
+            # touch sim_instance.is_running here — /state's step_age_s (based
+            # on _sim_last_advanced_monotonic, which this branch does NOT
+            # update) is what tells the caller the sandbox has stopped
+            # advancing, and sandbox_fault says why.
+            _sim_fault = str(e)
+            logger.warning(f"Auto-step tick skipped: {e}")
+
+
+@router.get("/live")
+async def get_bridge_live(current_user: User = Depends(require_role("ADMIN", "OPERATOR", "VIEWER"))):
+    """Observes simulation/sumo_live_bridge.py (PATH 1) — the process with
+    the actual live TraCI connection to the corridor, which also feeds the
+    Live Traffic Map, the control service, and emergency corridors. Every
+    value is the bridge's last real measurement or None — see
+    app/services/bridge_observer.py for the exact staleness rule. The API
+    cannot start, stop, or reset this process (it is a host process launched
+    by start.sh/stop.sh; this backend runs in a container) or change its
+    loaded scenario, but it CAN pause/resume/step its stepping loop — see
+    POST /live/pause, /live/resume, /live/step below."""
+    from app.services.bridge_observer import observe_bridge
+    return await observe_bridge()
+
+
+async def _publish_bridge_command(cmd: Dict[str, Any]) -> None:
+    """Publishes a command to the same Redis channel
+    (REDIS_CHANNELS["control_commands"]) simulation/sumo_live_bridge.py
+    already subscribes to and safely drains on its own main TraCI thread
+    (listen_dashboard_commands queues it; the main loop dispatches it) —
+    the identical, already-proven pattern the control service and emergency
+    activation use to reach the bridge. No new channel, no new thread."""
+    r = await get_redis_client()
+    await r.publish(REDIS_CHANNELS["control_commands"], json.dumps(cmd))
+    await r.aclose()
+
+
+async def _require_bridge_reachable() -> None:
+    """The bridge's command protocol has no acknowledgement — a command
+    published to a bridge that isn't there is silently lost. Refuse before
+    sending rather than claim a fire-and-forget success that may never
+    happen; GET /simulation/live is the single source of truth this checks."""
+    from app.services.bridge_observer import observe_bridge
+    live = await observe_bridge()
+    if live["status"] not in ("live", "stale"):
+        raise _unavailable(
+            "No live SUMO bridge to command. See GET /simulation/live."
+        )
+
+
+@router.post("/live/pause")
+async def pause_bridge(current_user: User = Depends(require_role("ADMIN", "OPERATOR"))):
+    """Requests the live bridge stop advancing TraCI. This is fire-and-forget
+    — the bridge has no ack protocol, so the response reports only that the
+    command was published, never that it took effect. The bridge keeps
+    publishing ticks at its normal cadence while paused (so it never looks
+    dead), with run_state: "PAUSED" in GET /simulation/live's response —
+    poll that to see the real, applied state."""
+    await _require_bridge_reachable()
+    await _publish_bridge_command({"type": "SUMO_PAUSE"})
+    return {"status": "command_sent", "command": "SUMO_PAUSE"}
+
+
+@router.post("/live/resume")
+async def resume_bridge(current_user: User = Depends(require_role("ADMIN", "OPERATOR"))):
+    """Requests the live bridge resume advancing TraCI. Fire-and-forget —
+    see pause_bridge's docstring; poll GET /simulation/live's run_state."""
+    await _require_bridge_reachable()
+    await _publish_bridge_command({"type": "SUMO_RESUME"})
+    return {"status": "command_sent", "command": "SUMO_RESUME"}
+
+
+@router.post("/live/step")
+async def step_bridge(
+    req: StepRequest,
+    current_user: User = Depends(require_role("ADMIN", "OPERATOR"))
+):
+    """Requests the live bridge advance exactly `steps` TraCI steps even
+    while paused (a running bridge steps continuously already, so this is
+    mainly useful while paused for frame-by-frame control). Fire-and-forget
+    — see pause_bridge's docstring; poll GET /simulation/live's step."""
+    await _require_bridge_reachable()
+    await _publish_bridge_command({"type": "SUMO_STEP", "steps": req.steps})
+    return {"status": "command_sent", "command": "SUMO_STEP", "steps": req.steps}

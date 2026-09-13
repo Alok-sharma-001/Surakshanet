@@ -22,6 +22,7 @@ import logging
 import argparse
 import threading
 import queue
+from collections import deque
 from typing import Dict, Optional
 
 logger = logging.getLogger("surakshanet.sumo_bridge")
@@ -44,6 +45,7 @@ from shared.constants import (
     compute_pcu,
     REDIS_CHANNELS,
     MQTT_JUNCTION_TELEMETRY_TOPIC,
+    BRIDGE_HEARTBEAT_TTL_S,
 )
 from shared.telemetry import ApproachTelemetry, JunctionTelemetry, validate_telemetry
 from shared.corridor_topology import route_to_edge_ids, route_edge_lengths_m
@@ -59,6 +61,14 @@ except ImportError:
 # moment a corridor is requested, rather than only once one is already active.
 DELAY_SAMPLE_INTERVAL_S = 5
 DB_WRITE_THROTTLE_S = 2.0
+
+# Real-throughput rolling window (SIMULATION_TICK's "throughput" field). A
+# vehicle that has arrived is gone from TraCI, so this counts completed trips
+# per hour, not PCU — PCU-weighting an arrived vehicle is not possible since
+# its class can no longer be queried. Replaces a fabricated closed-form
+# formula (see the fix below at telemetry construction).
+THROUGHPUT_WINDOW_S = 300
+THROUGHPUT_MIN_SPAN_S = 60
 
 def publish_redis_raw(channel: str, message: str, host: str = "127.0.0.1", port: int = 6379) -> bool:
     """Publishes a message to Redis using raw TCP socket (zero external pip dependencies)."""
@@ -98,6 +108,16 @@ class SumoLiveBridge:
         self.is_running = False
         self.step_count = 0
         self.departed_total = 0
+        self.arrived_total = 0
+        self._throughput_window = deque()  # (sim_time_s, arrived_this_step) pairs
+        # Real pause/step control (SUMO_PAUSE/SUMO_RESUME/SUMO_STEP commands,
+        # dispatched on the main TraCI thread alongside every other command
+        # here — never called from listen_dashboard_commands' own thread).
+        # "PAUSED" stops calling traci.simulationStep() but keeps publishing
+        # ticks at the same cadence, so tick_age_s/heartbeat stay fresh — a
+        # paused bridge must never look dead to an observer.
+        self.run_state = "RUNNING"  # "RUNNING" | "PAUSED"
+        self.pending_steps = 0      # single-step budget consumed while paused
         self.command_queue = queue.Queue()
         self.last_cmd_seq: Dict[str, int] = {}
         self.junction_phase: Dict[str, int] = {}
@@ -139,7 +159,7 @@ class SumoLiveBridge:
         if self.redis_client:
             try:
                 self.redis_client.publish(channel, message)
-                self.redis_client.setex("simulation:bridge:heartbeat", 10, str(time.time()))
+                self.redis_client.setex("simulation:bridge:heartbeat", BRIDGE_HEARTBEAT_TTL_S, str(time.time()))
                 return True
             except Exception as e:
                 logger.debug(f"redis-py publish retry: {e}")
@@ -328,14 +348,34 @@ class SumoLiveBridge:
                             mode_val = str(cmd.get("mode", "MARL")).lower()
                             if tl_id:
                                 self.current_controller[tl_id] = mode_val
+                        elif p_type == "SUMO_PAUSE":
+                            self.run_state = "PAUSED"
+                            logger.info("⏸ [REDIS] Dashboard paused the live simulation.")
+                        elif p_type == "SUMO_RESUME":
+                            self.run_state = "RUNNING"
+                            self.pending_steps = 0
+                            logger.info("▶ [REDIS] Dashboard resumed the live simulation.")
+                        elif p_type == "SUMO_STEP":
+                            self.pending_steps += max(1, int(cmd.get("steps", 1)))
+                            logger.info(f"⏭ [REDIS] Dashboard requested {cmd.get('steps', 1)} step(s) (pending={self.pending_steps}).")
                     except Exception as e:
                         logger.warning(f"Error executing queued command: {e}")
 
-                traci.simulationStep()
-                self.step_count += 1
+                # Only advance TraCI while running, or to consume a pending
+                # manual step while paused. A paused iteration still falls
+                # through to telemetry collection and publish below, at the
+                # same cadence, so tick_age_s/heartbeat stay fresh — pausing
+                # must never make the bridge look dead to an observer.
+                stepped = self.run_state == "RUNNING" or self.pending_steps > 0
+                if stepped:
+                    traci.simulationStep()
+                    self.step_count += 1
+                    if self.run_state == "PAUSED" and self.pending_steps > 0:
+                        self.pending_steps -= 1
                 sim_time_s = float(traci.simulation.getTime())
                 should_sample_delay = (
-                    int(sim_time_s) % DELAY_SAMPLE_INTERVAL_S == 0
+                    stepped
+                    and int(sim_time_s) % DELAY_SAMPLE_INTERVAL_S == 0
                     and int(sim_time_s) != self._last_delay_sample_sec
                 )
                 if should_sample_delay:
@@ -359,6 +399,7 @@ class SumoLiveBridge:
                 total_vehicles = len(veh_ids)
                 
                 speeds = []
+                accum_waits = []
                 waiting_count = 0
                 for v in veh_ids:
                     try:
@@ -366,16 +407,48 @@ class SumoLiveBridge:
                         speeds.append(spd_kmh)
                         if spd_kmh < 5.0:
                             waiting_count += 1
+                        accum_waits.append(float(traci.vehicle.getAccumulatedWaitingTime(v)))
                     except Exception:
                         pass
 
-                avg_speed = round(sum(speeds) / max(1, len(speeds)), 1) if speeds else 38.5
-                departed = traci.simulation.getDepartedNumber()
-                self.departed_total += departed
-                throughput = round(800 + (total_vehicles * 4.5) + (departed * 12), 1)
+                # None (not a plausible-looking default) when nothing is
+                # actually measurable — an empty network has no speed to
+                # report, not a free-flow 38.5 km/h. Same for the mean
+                # accumulated wait: a genuine measurement, or absent.
+                avg_speed = round(sum(speeds) / len(speeds), 1) if speeds else None
+                mean_accumulated_wait_s = round(sum(accum_waits) / len(accum_waits), 1) if accum_waits else None
+                # getDepartedNumber()/getArrivedNumber() report the last real
+                # TraCI step's counts — querying them again on a paused
+                # (non-stepping) iteration would re-add the same arrivals to
+                # the throughput window every ~50-100ms, corrupting the rate.
+                # Only account for them on an iteration that genuinely stepped.
+                if stepped:
+                    departed = traci.simulation.getDepartedNumber()
+                    self.departed_total += departed
+                    arrived = traci.simulation.getArrivedNumber()
+                    self.arrived_total += arrived
+                    self._throughput_window.append((sim_time_s, arrived))
 
-                # Determine Network Level of Service (LOS)
-                if avg_speed > 35:
+                # Real measured throughput: completed trips per hour over a
+                # rolling window, not a closed-form formula over invented
+                # constants. None until enough span has genuinely accumulated.
+                while self._throughput_window and sim_time_s - self._throughput_window[0][0] > THROUGHPUT_WINDOW_S:
+                    self._throughput_window.popleft()
+                window_span = (
+                    self._throughput_window[-1][0] - self._throughput_window[0][0]
+                    if len(self._throughput_window) >= 2 else 0.0
+                )
+                if window_span >= THROUGHPUT_MIN_SPAN_S:
+                    window_arrived = sum(a for _, a in self._throughput_window)
+                    throughput = round(window_arrived * 3600.0 / window_span, 1)
+                else:
+                    throughput = None
+
+                # Determine Network Level of Service (LOS) — undefined without
+                # a real speed to classify, never derived from a fabricated one.
+                if avg_speed is None:
+                    los = None
+                elif avg_speed > 35:
                     los = "A (Free Flow)"
                 elif avg_speed > 26:
                     los = "B (Stable Flow)"
@@ -413,7 +486,11 @@ class SumoLiveBridge:
                                 v_count = float(len(v_ids))
                                 queue_m = float(traci.lanearea.getJamLengthMeters(det_id))
                                 spd = float(traci.lanearea.getLastStepMeanSpeed(det_id)) * 3.6
-                                speed_kmh = max(0.0, spd) if spd >= 0.0 else 35.0
+                                # TraCI returns a negative value specifically
+                                # to mean "no vehicle on this detector during
+                                # the last step" — a real "not measured"
+                                # signal, not a plausible free-flow reading.
+                                speed_kmh = spd if spd >= 0.0 else None
                                 occ = float(traci.lanearea.getLastStepOccupancy(det_id)) / 100.0
                                 occ = max(0.0, min(1.0, occ))
                                 lane_id = traci.lanearea.getLaneID(det_id)
@@ -442,13 +519,21 @@ class SumoLiveBridge:
                                     vehicle_breakdown=breakdown
                                 ))
                             else:
+                                # No detector at this junction+direction: no
+                                # measurement exists, so mean_speed_kmh is
+                                # None (shared/telemetry.py already types this
+                                # Optional[float] for exactly this case) —
+                                # never a plausible-looking 35.0. Consumers
+                                # (services/control_service/state.py,
+                                # ml/routing/routing_engine.py) already filter
+                                # None speeds honestly (Phase 5).
                                 approaches.append(ApproachTelemetry(
                                     direction=dir_code,
                                     lane_ids=[],
                                     vehicle_count=0.0,
                                     pcu=0.0,
                                     queue_length_m=0.0,
-                                    mean_speed_kmh=35.0,
+                                    mean_speed_kmh=None,
                                     occupancy=0.0,
                                     accumulated_wait_s=0.0,
                                     vehicle_breakdown={}
@@ -483,8 +568,11 @@ class SumoLiveBridge:
                         self.publish_redis(REDIS_CHANNELS["traffic"], validated.to_json())
 
                         junc_queue = sum(int(a.queue_length_m / 7.5) for a in approaches)
-                        moving_speeds = [a.mean_speed_kmh for a in approaches if a.vehicle_count > 0]
-                        junc_avg_speed = round(sum(moving_speeds) / len(moving_speeds), 1) if moving_speeds else 35.0
+                        moving_speeds = [
+                            a.mean_speed_kmh for a in approaches
+                            if a.vehicle_count > 0 and a.mean_speed_kmh is not None
+                        ]
+                        junc_avg_speed = round(sum(moving_speeds) / len(moving_speeds), 1) if moving_speeds else None
 
                         junctions_stats.append({
                             "id": tl,
@@ -494,7 +582,12 @@ class SumoLiveBridge:
                             "pcu": jt.total_pcu,
                             "phase": phase,
                             "signal_state": state_str,
-                            "is_congested": junc_queue > 6 or junc_avg_speed < 18.0
+                            # junc_avg_speed is None when no approach at this
+                            # junction has a moving, measured vehicle — a
+                            # junction genuinely without data is not
+                            # "congested", so the speed half of this check is
+                            # skipped rather than raising on None.
+                            "is_congested": junc_queue > 6 or (junc_avg_speed is not None and junc_avg_speed < 18.0)
                         })
                     except Exception as e:
                         logger.warning(f"Error extracting canonical telemetry for junction {tl}: {e}")
@@ -505,14 +598,21 @@ class SumoLiveBridge:
                     "source": DataSource.SUMO.value,
                     "step": self.step_count,
                     "sim_time": f"{int((self.step_count % 3600) // 60):02d}:{int(self.step_count % 60):02d}",
+                    "sim_time_s": sim_time_s,
                     "total_vehicles": total_vehicles,
                     "avg_speed": avg_speed,
+                    "mean_accumulated_wait_s": mean_accumulated_wait_s,
                     "throughput": throughput,
+                    "arrived_total": self.arrived_total,
                     "network_los": los,
+                    # A count of vehicles below 5 km/h, not a length or a time.
                     "queue_length": waiting_count,
                     "active_alerts": 1 if waiting_count > 8 else 0,
                     "traffic_lights": tl_states,
                     "junctions": junctions_stats,
+                    "config": os.path.basename(self.config_path),
+                    "seed": self.seed,
+                    "run_state": self.run_state,
                     "timestamp": time.time()
                 }
 

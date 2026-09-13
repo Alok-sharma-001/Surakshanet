@@ -9,6 +9,7 @@ import redis.asyncio as aioredis
 from app.config import get_settings
 from app.database import async_session_maker
 from shared.paths import find_existing
+from shared.constants import BRIDGE_HEARTBEAT_TTL_S
 
 settings = get_settings()
 router = APIRouter()
@@ -82,7 +83,13 @@ async def health_deep():
             heartbeat = await r.get("simulation:bridge:heartbeat")
             if heartbeat:
                 age = time.time() - float(heartbeat)
-                if age < 15.0:
+                # heartbeat is a Redis SETEX with a BRIDGE_HEARTBEAT_TTL_S
+                # TTL, so it self-expires (becomes unreadable, not old) at
+                # exactly that age — a value read back here can never be
+                # older than the TTL, whatever this threshold is set to.
+                # Kept as the single source of truth rather than a magic
+                # number so the two never silently drift apart.
+                if age < BRIDGE_HEARTBEAT_TTL_S:
                     dependencies["sumo"] = {
                         "status": "ok",
                         "step": int(step_val) if step_val else 0,

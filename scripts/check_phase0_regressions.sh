@@ -199,6 +199,15 @@ check "no unconditional exit 0 in mosquitto healthcheck" \
 check "start.sh does not splice JSON into a python literal" \
   bash -c 'grep -n "json.loads(.\x27\x27\x27\\\$DEEP_HEALTH" start.sh'
 
+check "no fabricated 38.5 km/h fallback in the SUMO live bridge" \
+  grep -n "else 38\.5" simulation/sumo_live_bridge.py
+
+check "no invented closed-form throughput formula in the SUMO live bridge" \
+  grep -n "800 + (total_vehicles" simulation/sumo_live_bridge.py
+
+check "no fabricated 35.0 km/h junction/approach speed default in the SUMO live bridge" \
+  grep -n "else 35\.0" simulation/sumo_live_bridge.py
+
 echo
 if [ "$failed" -ne 0 ]; then
   echo "Phase 0/1 regression detected. See docs/23-final-acceptance.md §3."
