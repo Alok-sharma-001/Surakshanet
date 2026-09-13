@@ -58,6 +58,14 @@ export const api = {
     getState: () => axiosInstance.get('/simulation/state'),
     getMetrics: () => axiosInstance.get('/simulation/metrics'),
     reset: () => axiosInstance.post('/simulation/reset'),
+    // Observes simulation/sumo_live_bridge.py — the separate, host-managed
+    // process with the actual live TraCI connection to the corridor. See
+    // GET /simulation/live's docstring for exactly what this API can and
+    // cannot do to that process.
+    getLive: () => axiosInstance.get('/simulation/live'),
+    pauseLive: () => axiosInstance.post('/simulation/live/pause'),
+    resumeLive: () => axiosInstance.post('/simulation/live/resume'),
+    stepLive: (steps: number = 1) => axiosInstance.post('/simulation/live/step', { steps }),
   },
   ml: {
     detect: (formData: FormData) => axiosInstance.post('/ml/detect', formData, {

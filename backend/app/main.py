@@ -72,6 +72,12 @@ async def redis_pubsub_bridge():
                         ws_target = "emergency"
                     elif channel_name == REDIS_CHANNELS["simulation"]:
                         ws_target = "simulation"
+                        if isinstance(payload, dict):
+                            try:
+                                from app.services.bridge_observer import record_bridge_tick
+                                record_bridge_tick(payload)
+                            except Exception:
+                                pass
                     elif channel_name == REDIS_CHANNELS["control_decisions"]:
                         ws_target = "control"
                     elif channel_name == REDIS_CHANNELS["traffic"]:

@@ -137,7 +137,7 @@ export default function TrafficMapPage() {
             id: stepId,
             title: `TraCI Step ${data.step} Synced`,
             time: 'Just now',
-            desc: `${data.total_vehicles} vehicles active | Avg ${data.avg_speed} km/h | LOS ${data.network_los}`,
+            desc: `${data.total_vehicles} vehicles active | Avg ${data.avg_speed !== null && data.avg_speed !== undefined ? `${data.avg_speed} km/h` : 'unavailable'} | LOS ${data.network_los ?? 'unavailable'}`,
             icon: Activity,
             color: 'text-sky-600',
             bg: 'bg-sky-50',
@@ -312,7 +312,7 @@ export default function TrafficMapPage() {
           { label: 'Active Vehicles', value: totalVehicles !== null ? totalVehicles.toLocaleString() : '—', icon: Car },
           { label: 'Corridor Speed', value: avgSpeed !== null ? `${avgSpeed} km/h` : '—', icon: Gauge },
           { label: 'Network LOS', value: networkLos ?? '—', icon: Activity },
-          { label: 'Throughput', value: throughput !== null ? `${throughput.toLocaleString()} PCU/h` : '—', icon: ArrowRightLeft },
+          { label: 'Throughput', value: throughput !== null ? `${throughput.toLocaleString()} veh/h` : '—', icon: ArrowRightLeft },
         ].map((metric, i) => (
           <div key={i} className="bg-white/95 backdrop-blur-md rounded-xl border border-white/80 shadow-xl px-4 py-3 flex items-center space-x-3 transition-all">
             <metric.icon className="w-5 h-5 text-slate-400" />
